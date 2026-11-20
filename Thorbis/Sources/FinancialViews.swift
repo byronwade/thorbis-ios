@@ -208,6 +208,7 @@ struct EstimateDetailView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         estimateTimeline(record)
                         if let signature = record.approvalSignature { SignatureBadge(label: "Approved by", signature: signature) }
+                        if isLive, let jobID { EstimateAddToInvoiceCard(estimate: record, jobID: jobID) }
                         // The estimate's own lines. With options they are listed apart and honestly labelled;
                         // the customer approves an option's lines, not these.
                         let options = record.options ?? []
@@ -950,6 +951,16 @@ struct InvoiceDetailView: View {
     @State private var showPDF = false
     @State private var showDiscount = false
     @State private var openCustomer: Customer?
+    /// The invoice's versions, once its Changes section has read them (nil: unread or refused).
+    @State private var revisionHistory: InvoiceRevisionHistory?
+
+    /// An issued invoice whose latest version the customer has not signed, though they signed an
+    /// earlier one. Only with invoice revisions on.
+    private func showsUnsignedNote(_ record: InvoiceRecord) -> Bool {
+        session.isFeatureOn(InvoiceRevisionWords.flag)
+            && outbox.waitingSignature(invoiceID: record.id)?.expectedLinesRevision != record.linesRevision
+            && InvoiceRevisionWords.showsUnsignedNote(status: record.status, linesRevision: record.linesRevision, history: revisionHistory)
+    }
 
     /// "INV-2188 · Hollis Property Group" above the menu's rows (Paper 35D's heading, on invoices too).
     private var menuTitle: String {
@@ -969,7 +980,10 @@ struct InvoiceDetailView: View {
             || outbox.waitingSignature(invoiceID: record.id)?.expectedLinesRevision == record.linesRevision
         if !signed, invoiceAmounts(record) != nil, record.jobId != nil, record.status != "void",
            session.can("invoice.edit", feature: "invoicing") {
-            items.append(ThorbisMenuItem("Get customer signature", icon: "signature") { if canSignInvoice(record) { showSignature = true } })
+            items.append(ThorbisMenuItem("Get customer signature", icon: "signature",
+                                         subtitle: showsUnsignedNote(record) ? InvoiceRevisionWords.unsignedNote : nil) {
+                if canSignInvoice(record) { showSignature = true }
+            })
         }
         // Paper 40C: Edit is the pill under the payments.
         if canDiscountInvoice(record) {
@@ -1026,6 +1040,15 @@ struct InvoiceDetailView: View {
                             WaitingToSyncLabel()
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    } else if isLive, showsUnsignedNote(record) {
+                        // The lines changed after the customer signed: say so, quietly, beside
+                        // the signature action (the menu's "Get customer signature").
+                        Text(InvoiceRevisionWords.unsignedNote)
+                            .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .accessibilityIdentifier("invoice-unsigned-version")
                     }
                     if isLive, let paymentModel {
                         InvoicePaymentsSection(
@@ -1036,7 +1059,8 @@ struct InvoiceDetailView: View {
                             invoiceReference: displayReference(record)
                         )
                     }
-                    if isLive, record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
+                    if isLive, InvoiceRevisionWords.linesEditable(status: record.status, flagOn: session.isFeatureOn(InvoiceRevisionWords.flag)),
+                       session.can("invoice.edit", feature: "invoicing") {
                         Button { showEditDraft = true } label: {
                             Text("Edit").paperButton(.secondary, tone: .quiet, fills: true)
                         }
@@ -1050,6 +1074,9 @@ struct InvoiceDetailView: View {
                                                      record.amountPaid > 0 && record.status != "draft"
                                                         ? [("Paid", money(record.amountPaid, currency: record.currency)), ("Balance due", money(due, currency: record.currency))] : []
                                                  } ?? [])
+                    if isLive {
+                        InvoiceChangesSection(invoice: record, reference: displayReference(record)) { revisionHistory = $0 }
+                    }
                     RecordActivitySection(recordType: "invoice", recordID: record.id)
                     }
                     .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
@@ -1140,7 +1167,7 @@ struct InvoiceDetailView: View {
         .sheet(isPresented: $showEditDraft) { SheetSurface {
             if let record {
                 NavigationStack {
-                    InvoiceLineEditorView(invoice: record) { updated in
+                    InvoiceLineEditorView(invoice: record, revisable: session.isFeatureOn(InvoiceRevisionWords.flag)) { updated in
                         guard accept(updated) else { return }
                         error = nil
                         Task { await paymentModel?.load() }

@@ -97,6 +97,14 @@ struct JobDetailView: View {
     @State private var showWrapUp = false
     /// The on-site commit at "0 left": one confirm, then the job completes in place.
     @State private var confirmComplete = false
+    /// "Reopen job" on a completed job (flag `job_reopen`): one confirm with an optional reason.
+    @State private var confirmReopen = false
+    /// The server answered that reopening is off, so the row hides until the screen is opened again.
+    @State private var reopenServerOff = false
+    /// Adding an approved estimate to the job's invoice (flag `invoice_revisions`).
+    @StateObject private var estimateAdder = EstimateInvoiceAdder()
+    @State private var invoiceOffer: EstimateInvoiceOffer?
+    @State private var approvalWatcher = EstimateApprovalWatcher()
     /// The customer’s locations are account records, not verified job-site associations.
     @State private var locations: [ServiceLocationRecord] = []
     @State private var locationsContext: String?
@@ -383,6 +391,7 @@ struct JobDetailView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: wrapUpTaps)
         .thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await completeHere() } }])
+        .background { revisionFlowHosts }
         .sheet(isPresented: $showDeposit) { SheetSurface {
             // Paper 89: the approved estimate's total feeds the 25% and 50% chips, when it is loaded.
             JobDepositSheet(jobID: jobId, estimateTotalCents: depositEstimateTotal, subtitle: depositSubtitle) { invoice in
@@ -443,7 +452,7 @@ struct JobDetailView: View {
         // Add part: the price book on the job's draft invoice, as the invoice screen edits it.
         .sheet(item: $partsInvoice, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { invoice in SheetSurface {
             NavigationStack {
-                InvoiceLineEditorView(invoice: invoice) { updated in
+                InvoiceLineEditorView(invoice: invoice, revisable: session.isFeatureOn(InvoiceRevisionWords.flag)) { updated in
                     updateInvoice(updated)
                 }
             }
@@ -458,6 +467,12 @@ struct JobDetailView: View {
             guard PaperPreview.enabled else { return }
             let opensAssign = PaperPreview.screen == "job-assign"
             let opensPause = ProcessInfo.processInfo.arguments.contains("--paper-preview-pause")
+            // `--paper-preview-reopen-confirm`: the "Reopen this job?" confirm opens over a completed job.
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-reopen-confirm") {
+                try? await Task.sleep(for: .seconds(3))
+                confirmReopen = job.map(canReopen) == true
+                return
+            }
             // `--paper-preview-at-address`: Paper 21O opens over the job.
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-at-address") {
                 try? await Task.sleep(for: .seconds(2))
@@ -1189,6 +1204,7 @@ struct JobDetailView: View {
             cancel.glyph = .moreCancel
             stops.append(cancel)
         }
+        if let reopen = reopenMenuItem(job) { stops.append(reopen) }
         if !stops.isEmpty {
             stops[0].startsGroup = true
             items.append(contentsOf: stops)
@@ -1220,6 +1236,10 @@ struct JobDetailView: View {
         if var last = cancelMenuItem(job, icon: "xmark.circle") {
             last.startsGroup = true
             items.append(last)
+        }
+        if var reopen = reopenMenuItem(job) {
+            reopen.startsGroup = true
+            items.append(reopen)
         }
         return items
     }
@@ -2406,6 +2426,95 @@ struct JobDetailView: View {
             await load()
         } catch is CancellationError {
         } catch { self.error = error.localizedDescription }
+    }
+
+    /// The reopen confirm, the "add to invoice" confirm and the watchers behind them, each on its
+    /// own clear host: kept off the body's modifier chain, which is at the type checker's limit.
+    @ViewBuilder private var revisionFlowHosts: some View {
+        Color.clear
+            .thorbisConfirm("Reopen this job?", message: "It goes back to working, so you can add to it and finish it again.",
+                            isPresented: $confirmReopen,
+                            reason: ThorbisConfirmReason(label: "Why (optional)", placeholder: "Customer called back",
+                                                         identifier: "job-reopen-reason"),
+                            actionTitle: "Reopen job") { typed in Task { await reopenHere(reason: typed) } }
+        Color.clear
+            .modifier(EstimateInvoiceOfferConfirm(offer: $invoiceOffer, adder: estimateAdder) { updated in
+                updateInvoice(updated)
+                Task { await loadInvoices(); await loadCloseout() }
+            })
+            .onChange(of: jobEstimates.map { "\($0.id)|\($0.status)" }) { _, _ in offerNewlyApprovedEstimate() }
+            .task(id: "\(jobInvoiceForEstimates?.id ?? "")|\(jobInvoiceForEstimates?.linesRevision ?? -1)|\(canAddEstimatesToInvoice)") {
+                guard canAddEstimatesToInvoice, let invoice = jobInvoiceForEstimates else { return }
+                await estimateAdder.loadBilled(invoiceID: invoice.id, api: api)
+            }
+    }
+
+    /// Whether "Reopen job" shows: a completed job, the flag on, and someone who may complete jobs.
+    private func canReopen(_ job: JobRecord) -> Bool {
+        JobReopen.canOffer(status: job.status, completedAt: job.completedAt, flagOn: session.isFeatureOn(JobReopen.flag),
+                           canComplete: session.can("job.complete", feature: "jobs"),
+                           hasPendingChange: outbox.pendingStatus(for: job.id) != nil, serverSaysOff: reopenServerOff)
+    }
+
+    private func reopenMenuItem(_ job: JobRecord) -> ThorbisMenuItem? {
+        guard canReopen(job) else { return nil }
+        return ThorbisMenuItem("Reopen job", icon: "arrow.uturn.backward.circle", subtitle: "Back to working, to add or fix something",
+                               isDisabled: busy) { confirmReopen = true }
+    }
+
+    /// Online only, never queued: the server puts the job back to working and answers it.
+    private func reopenHere(reason: String) async {
+        guard let current = job, canReopen(current) else { return }
+        guard let request = JobReopen.request(completedAt: current.completedAt, reason: reason) else {
+            error = JobReopen.reasonTooLong
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await api.reopenFieldJob(jobId, request: request)
+            guard updated.id == jobId else { await load(); return }
+            job = updated
+            error = nil
+            committed += 1
+            closeout = nil
+            await store.refresh(api)
+            await load()
+        } catch is CancellationError {
+        } catch {
+            let failure = JobReopenFailure.of(error)
+            if failure == .unavailable { reopenServerOff = true }
+            self.error = failure.message
+            if failure.reloadsJob { await load() }
+        }
+    }
+
+    /// The flag is on and this person may change invoices: the gate for every "Add to invoice".
+    private var canAddEstimatesToInvoice: Bool {
+        session.isFeatureOn(InvoiceRevisionWords.flag) && session.can("invoice.view", feature: "invoicing")
+            && session.can("invoice.edit", feature: "invoicing") && session.can("estimate.view", feature: "estimates")
+    }
+
+    /// The job's one invoice, once its invoices are read in full.
+    private var jobInvoiceForEstimates: InvoiceRecord? {
+        guard invoicesLoaded, !invoicesFailed else { return nil }
+        return InvoiceEstimateBilling.jobInvoice(invoices, jobID: jobId)
+    }
+
+    private func canAddToInvoice(_ estimate: EstimateRecord) -> Bool {
+        let invoice = jobInvoiceForEstimates
+        return InvoiceEstimateBilling.canOffer(estimate: estimate, invoice: invoice, billed: estimateAdder.billed(on: invoice),
+                                               flagOn: canAddEstimatesToInvoice, canEditInvoice: true,
+                                               serverSaysOff: estimateAdder.serverSaysOff)
+            && estimateRead?.freshIDs.contains(estimate.id) == true
+    }
+
+    /// An estimate approved while this job is open is offered to the invoice once; never added silently.
+    private func offerNewlyApprovedEstimate() {
+        let fresh = approvalWatcher.observe(jobEstimates.map { (id: $0.id, status: $0.status) })
+        guard invoiceOffer == nil, let invoice = jobInvoiceForEstimates,
+              let estimate = jobEstimates.first(where: { fresh.contains($0.id) && canAddToInvoice($0) }) else { return }
+        invoiceOffer = EstimateInvoiceOffer(estimate: estimate, invoice: invoice, afterApproval: true)
     }
 
     /// Calls the office when the workspace has a business phone this role can read. The customer's
@@ -3852,7 +3961,8 @@ struct JobDetailView: View {
     @ViewBuilder private var partsPanel: some View {
         if session.can("invoice.view", feature: "invoicing"),
            let bill = invoices.first(where: { $0.status == "draft" }) ?? WrapUpList.billingInvoice(invoices), !bill.lines.isEmpty {
-            let editable = bill.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+            let editable = InvoiceRevisionWords.linesEditable(status: bill.status, flagOn: session.isFeatureOn(InvoiceRevisionWords.flag))
+                && session.can("invoice.edit", feature: "invoicing")
             let count = bill.lines.count
             // Paper 21 "Line items": the count at the label's trailing edge, "Add from price book or
             // custom" as its own 48pt row, the lines in one card (the line at 16 Medium over its
@@ -3872,7 +3982,7 @@ struct JobDetailView: View {
                     Button { partsInvoice = bill } label: {
                         HStack(spacing: 8) {
                             PaperIcon(.plusLight, size: 18, color: Theme.brandText)
-                            Text("Add from price book or custom")
+                            Text(bill.status == "draft" ? "Add from price book or custom" : "Add or change a line")
                                 .font(Theme.font(16)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
@@ -4088,6 +4198,9 @@ struct JobDetailView: View {
                                     message: "Build one from the price book.")
                 }
                 if count > 0 { estimateRowsCard(unavailable) }
+                if let failure = estimateAdder.failure {
+                    ErrorBanner(message: failure, outer: 0).accessibilityIdentifier("job-estimate-add-to-invoice-error")
+                }
                 if let error = documents.estimatePageError {
                     // The shared banner, in place of a loose line and a bare text button.
                     ErrorBanner(message: error,
@@ -4136,6 +4249,11 @@ struct JobDetailView: View {
                 .buttonStyle(RowPressStyle())
                 .accessibilityIdentifier("job-estimate-\(estimate.id)")
                 .disabled(estimateRead?.freshIDs.contains(estimate.id) != true)
+                if canAddToInvoice(estimate), let invoice = jobInvoiceForEstimates {
+                    EstimateAddToInvoiceRow(estimate: estimate, adder: estimateAdder) {
+                        invoiceOffer = EstimateInvoiceOffer(estimate: estimate, invoice: invoice)
+                    }
+                }
             }
             ForEach(unavailable, id: \.self) { id in
                 JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",

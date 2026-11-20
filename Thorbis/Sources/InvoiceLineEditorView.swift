@@ -33,18 +33,25 @@ struct InvoiceLineEditorView: View {
         .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
     }
 
-    init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
+    /// `revisable`: the workspace has `invoice_revisions` on, so an issued or paid invoice opens
+    /// for editing too. Off (the default) keeps the editor draft-only.
+    init(invoice: InvoiceRecord, revisable: Bool = false, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
         self.onSaved = onSaved
-        _editor = State(initialValue: InvoiceLineEditorState(invoice: invoice))
+        _editor = State(initialValue: InvoiceLineEditorState(invoice: invoice, revisable: revisable))
     }
 
     private var canEdit: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+        editor.isEditable && session.can("invoice.edit", feature: "invoicing")
     }
 
+    /// Editing an invoice the customer already has: saving makes a new version of it.
+    private var revising: Bool { editor.isEditable && editor.invoice.status != "draft" }
+    private var saveTitle: String { revising ? "Save changes" : "Save draft" }
+
+    /// An issued invoice takes typed lines only (the server refuses a new price book item on it).
     private var canUsePriceBook: Bool {
-        session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD"
+        session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD" && !revising
     }
 
     private var canIssue: Bool {
@@ -170,7 +177,7 @@ struct InvoiceLineEditorView: View {
                 }
                 .accessibilityHint("Reloads the current server version and discards these unsaved edits")
             }
-            if editor.invoice.status != "draft" {
+            if !revising, editor.invoice.status != "draft" {
                 ErrorBanner(message: "This invoice is now \(editor.invoice.status.statusLabel.lowercased()); its line items are final.")
             }
             if editor.hasUnsupportedLineSources {
@@ -179,6 +186,14 @@ struct InvoiceLineEditorView: View {
 
             invoiceEditorHeading
                 .padding(.bottom, 4)
+
+            if revising {
+                Text("The customer already has this invoice. Saving makes a new version.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+                    .accessibilityIdentifier("invoice-editor-revising-note")
+            }
 
             detailsCard
 
@@ -420,7 +435,7 @@ struct InvoiceLineEditorView: View {
             if canIssue {
                 Button { Task { await save() } } label: {
                     // Paper 40: Save draft is the quiet pill beside the commit.
-                    Text("Save draft")
+                    Text(saveTitle)
                     .font(Theme.font(15, weight: .semibold))
                     .foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
@@ -436,7 +451,7 @@ struct InvoiceLineEditorView: View {
                 PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                     .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
             } else {
-                PrimaryButton(title: "Save draft", busy: busy) { Task { await save() } }
+                PrimaryButton(title: saveTitle, busy: busy) { Task { await save() } }
                     .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
             }
         }
@@ -461,7 +476,7 @@ struct InvoiceLineEditorView: View {
         Binding(
             get: { line.wrappedValue },
             set: { proposed in
-                guard editor.invoice.status == "draft" else { return }
+                guard editor.isEditable else { return }
                 var next = proposed
                 let quantityText = proposed.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let quantity = Int(quantityText), (1...100_000).contains(quantity), String(quantity) == quantityText {
@@ -633,8 +648,10 @@ struct InvoiceLineEditorView: View {
             dismiss()
         } catch is CancellationError {
         } catch {
-            self.error = error.localizedDescription
-            staleRevision = (error as? Problem)?.status == 409
+            // A named refusal reads in plain words; one the latest invoice would not fix keeps
+            // the edits without offering a reload. Every other conflict is handled as before.
+            self.error = InvoiceRevisionWords.lineEditMessage(error)
+            staleRevision = (error as? Problem)?.status == 409 && !InvoiceRevisionWords.lineEditKeepsEdits(error)
         }
     }
 
@@ -657,7 +674,7 @@ struct InvoiceLineEditorView: View {
         do {
             let current = try await api.liveFieldInvoice(invoice.id)
             addedLineSelection = nil
-            editor = InvoiceLineEditorState(invoice: current)
+            editor = InvoiceLineEditorState(invoice: current, revisable: editor.revisable)
             staleRevision = false
             error = nil
         } catch is CancellationError {
@@ -679,7 +696,7 @@ struct InvoiceLineEditorView: View {
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())
                 addedLineSelection = nil
-                editor = InvoiceLineEditorState(invoice: current)
+                editor = InvoiceLineEditorState(invoice: current, revisable: editor.revisable)
                 onSaved(current)
             }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)

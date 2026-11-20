@@ -71,6 +71,8 @@ struct Problem: Codable, Error, LocalizedError {
     let detail: String?
     /// The server's machine-readable reason, when it sends one (RFC 9457 extension member).
     var code: String? = nil
+    /// The server's stable kind of refusal ("authorization", "feature_unavailable", "validation").
+    var category: String? = nil
     var errorDescription: String? { detail ?? title ?? "Request failed (\(status ?? 0))" }
 }
 
@@ -588,7 +590,7 @@ final class APIClient: ObservableObject {
         guard (200..<300).contains(code) else {
             if let decoded = try? JSONDecoder().decode(Problem.self, from: data),
                decoded.title != nil || decoded.detail != nil {
-                throw Problem(title: decoded.title, status: code, detail: decoded.detail, code: decoded.code)
+                throw Problem(title: decoded.title, status: code, detail: decoded.detail, code: decoded.code, category: decoded.category)
             }
             if let decoded = try? JSONDecoder().decode(AuthError.self, from: data),
                decoded.code != nil || decoded.message != nil {

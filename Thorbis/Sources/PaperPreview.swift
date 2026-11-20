@@ -97,6 +97,10 @@ enum PaperPreview {
         guard let index = args.firstIndex(of: "--paper-preview-hold-path"), args.indices.contains(index + 1) else { return nil }
         return args[index + 1]
     }
+    /// `--paper-preview-invoice-revisions`: turns on the `job_reopen` and `invoice_revisions` flags,
+    /// lets the sample person complete jobs, and answers the three routes behind them (reopen a
+    /// job, add an approved estimate to the invoice, the invoice's versions) from sample data.
+    static var isInvoiceRevisionsPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-revisions") }
     static var isJobEstimateHandoff: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-handoff") }
     /// A data seed (the job's estimates and invoices), not a screen: it still opens the plain job.
     /// To capture the documents themselves use `--paper-preview-screen customer-view`.
@@ -430,7 +434,7 @@ enum PaperPreview {
         if args.contains("--paper-preview-legacy-handoff-test") && !args.contains("--paper-preview-job-linked-invoice") {
             fixture = fixture.replacingOccurrences(of: "\"jobId\":\"00000000-0000-4000-8000-000000002214\"", with: "\"jobId\":null")
         }
-        return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8))
+        return PaperPreviewProtocol.withAddedEstimate(try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8)))
     }
     /// The issued invoice with a condenser replacement on it, inside the lender's range.
     static var financingInvoice: InvoiceRecord {
@@ -817,11 +821,64 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
         var answeredListPaths: Set<String> = []
+        var jobReopened = false
+        var estimateOnInvoice: String?
     }
     private static let scenario = Scenario()
+    /// The sample estimate line the invoice-revisions preview adds to the sample invoice.
+    private static var addedEstimateLine: [String: Any] { [
+        "id": "00000000-0000-4000-8000-000000009120", "description": "Water heater add-ons", "quantity": 1,
+        "unitPrice": ["amount": 44_000, "currency": "USD"],
+        "source": ["kind": "manual"],
+    ] }
+    /// The sample invoice once "Add to invoice" has run in the invoice-revisions preview.
+    static func withAddedEstimate(_ invoice: InvoiceRecord) -> InvoiceRecord {
+        guard PaperPreview.isInvoiceRevisionsPreview, scenario.lock.withLock({ scenario.estimateOnInvoice }) != nil,
+              var object = jsonObject(invoice) as? [String: Any], var lines = object["lines"] as? [[String: Any]] else { return invoice }
+        lines.append(addedEstimateLine)
+        object["lines"] = lines
+        object["linesRevision"] = invoice.linesRevision + 1
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let changed = try? JSONDecoder().decode(InvoiceRecord.self, from: data) else { return invoice }
+        return changed
+    }
+    /// `GET /v1/invoices/{id}/revisions` for the sample invoice: created, an estimate added (signed),
+    /// lines changed (not signed), then the estimate the preview adds.
+    private static func invoiceRevisions() -> [String: Any] {
+        let invoice = PaperPreview.issuedInvoice
+        let lines = (jsonObject(invoice.lines) as? [[String: Any]]) ?? []
+        func usd(_ amount: Int) -> [String: Any] { ["amount": amount, "currency": "USD"] }
+        func item(_ revision: Int, _ kind: String, lines: [[String: Any]], before: Int?, total: Int, at: String,
+                  billed: [[String: Any]] = [], signed: Bool = false) -> [String: Any] {
+            var row: [String: Any] = [
+                "id": "00000000-0000-4000-8000-0000000097\(String(format: "%02d", revision))", "linesRevision": revision, "kind": kind,
+                "billedEstimates": billed, "lines": lines, "total": usd(total), "amountPaid": invoice.amountPaid,
+                "invoiceStatus": invoice.status, "revisedByUserId": PaperPreview.actorID, "revisedAt": at,
+            ]
+            if let before { row["previousTotal"] = usd(before) }
+            if signed {
+                row["authorization"] = ["id": "00000000-0000-4000-8000-000000009750", "signerName": "Danielle Marlowe", "signedAt": at]
+            }
+            return row
+        }
+        let added = scenario.lock.withLock { scenario.estimateOnInvoice }
+        let base = added == nil ? lines : Array(lines.dropLast())
+        var items = [
+            item(1, "created", lines: Array(base.prefix(1)), before: nil, total: 12_000, at: "2026-11-18T17:02:00Z"),
+            item(2, "estimate_added", lines: Array(base.prefix(2)), before: 12_000, total: 30_000, at: "2026-11-19T19:40:00Z",
+                 billed: [["estimateId": "00000000-0000-4000-8000-000000002299", "estimateRevisionNumber": 1]], signed: true),
+            item(3, "lines_edited", lines: base, before: 30_000, total: 34_000, at: "2026-11-20T15:14:00Z"),
+        ]
+        if let added {
+            items.append(item(4, "estimate_added", lines: lines, before: 34_000, total: 78_000, at: "2026-11-20T22:14:00Z",
+                              billed: [["estimateId": added, "estimateRevisionNumber": 1]]))
+        }
+        return ["invoiceId": invoice.id, "currentLinesRevision": invoice.linesRevision, "currentRevisionSigned": false,
+                "items": items, "nextCursor": NSNull()]
+    }
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0; scenario.jobReopened = false; scenario.estimateOnInvoice = nil }
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -946,6 +1003,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 status = 200
                 payload = draft
             }
+        } else if PaperPreview.isInvoiceRevisionsPreview, request.httpMethod == "POST",
+                  url.path == "/v1/jobs/\(PaperPreview.jobID)/reopen" {
+            // Sample answer only: the job goes back to working, as the server's reopen would leave it.
+            Self.scenario.lock.withLock { Self.scenario.jobReopened = true }
+            status = 200
+            payload = Self.jobs().first { $0["id"] as? String == PaperPreview.jobID } ?? [:]
+        } else if PaperPreview.isInvoiceRevisionsPreview, request.httpMethod == "POST",
+                  url.path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/approved-estimates" {
+            Self.scenario.lock.withLock { Self.scenario.estimateOnInvoice = "00000000-0000-4000-8000-000000002238" }
+            status = 200
+            payload = Self.jsonObject(PaperPreview.issuedInvoice) ?? [:]
         } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
@@ -1035,6 +1103,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let now = ISO8601DateFormatter().string(from: Date())
         // `--paper-preview-empty` answers the list reads before any screen-specific fixture.
         if PaperPreview.isEmptyWorkspace, path == "/v1/invoices" { return ["items": [Any]()] }
+        if PaperPreview.isInvoiceRevisionsPreview, path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/revisions" {
+            return invoiceRevisions()
+        }
         if PaperPreview.isEmptyWorkspace, path == "/v1/staff/notices" {
             return ["items": [Any](), "unreadState": "present", "nextCursor": NSNull()] as [String: Any]
         }
@@ -1632,6 +1703,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "owner-home", PaperPreview.role == nil { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
             if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
+            if PaperPreview.isInvoiceRevisionsPreview { capabilities.append("job.complete") }
             switch PaperPreview.role {
             case "tech": capabilities.removeAll { $0 == "job.assign" }
             case "owner": capabilities += ["organization.settings.edit", "organization.members.manage", "organization.permissions.manage"]
@@ -1653,6 +1725,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "inbox", !ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-no-calls") { enabledFeatures.append("call_recording") }
             if PaperPreview.role != nil { enabledFeatures.append("job_booking_notices") }
             if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
+            if PaperPreview.isInvoiceRevisionsPreview { enabledFeatures += ["job_reopen", "invoice_revisions"] }
             let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
@@ -2206,6 +2279,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                ["scheduled", "completed"].contains(arguments[flag + 1]) {
                 listed[index]["status"] = arguments[flag + 1]
                 listed[index]["allowedTransitions"] = arguments[flag + 1] == "scheduled" ? ["dispatched"] : []
+                if arguments[flag + 1] == "completed" { listed[index]["completedAt"] = "2026-11-20T15:40:00Z" }
+                // The invoice-revisions preview's "Reopen job" was confirmed: working again.
+                if arguments[flag + 1] == "completed", PaperPreview.isInvoiceRevisionsPreview, scenario.lock.withLock({ scenario.jobReopened }) {
+                    listed[index]["status"] = "in_progress"
+                    listed[index]["allowedTransitions"] = ["paused", "completed"]
+                    listed[index]["completedAt"] = nil
+                }
             }
             // `--paper-preview-old-visit`: the visit's taps happened 20 days ago (a job left on site
             // and never wrapped up), so timers and step times show how they read past a day.
