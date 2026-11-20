@@ -2200,6 +2200,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 listed[index]["status"] = step == "driving" ? "en_route" : step == "arrived" ? "arrived" : "in_progress"
                 listed[index]["allowedTransitions"] = step == "driving" ? ["arrived", "paused"] : step == "arrived" ? ["in_progress", "paused"] : ["paused"]
             }
+            // `--paper-preview-job-status scheduled|completed`: the job before it is dispatched and
+            // after it is done, for checking that nothing on the job is locked by its stage.
+            if let flag = arguments.firstIndex(of: "--paper-preview-job-status"), arguments.indices.contains(flag + 1),
+               ["scheduled", "completed"].contains(arguments[flag + 1]) {
+                listed[index]["status"] = arguments[flag + 1]
+                listed[index]["allowedTransitions"] = arguments[flag + 1] == "scheduled" ? ["dispatched"] : []
+            }
             // `--paper-preview-old-visit`: the visit's taps happened 20 days ago (a job left on site
             // and never wrapped up), so timers and step times show how they read past a day.
             if arguments.contains("--paper-preview-old-visit") {

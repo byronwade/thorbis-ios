@@ -200,6 +200,8 @@ struct JobDetailView: View {
     @State private var voiceNoteDiscarded = false
     /// Paper 22 "Add to job": the sheet, and the row picked in it (run once the sheet has gone).
     @State private var showAdd = false
+    /// The visit's description card, unfolded.
+    @State private var descriptionOpen = false
     @State private var pendingAdd: (() -> Void)?
     /// Paper 21J "Time and profit", from the job's More menu.
     @State private var showTime = false
@@ -905,7 +907,7 @@ struct JobDetailView: View {
                 }
                 // The bar does not bound a custom title: a long job name ran under the back and
                 // More circles and off both edges. Keep it between them and let it truncate.
-                .frame(maxWidth: max(140, UIScreen.main.bounds.width - 184))
+                .frame(maxWidth: max(120, UIScreen.main.bounds.width - 236))
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             }
         }
@@ -921,6 +923,20 @@ struct JobDetailView: View {
                         PaperIcon(.share, size: 20).frame(width: 44, height: 44).background(Theme.card, in: Circle())
                     }
                     .accessibilityIdentifier("job-share")
+                }
+            }
+            // Add to job stays in reach at every stage: a note, a photo, an estimate, the invoice,
+            // a payment or a contact are two taps from the job, driving or done.
+            if hasAddRows(job) {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    Button { showAdd = true } label: {
+                        Image(systemName: "plus").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .frame(width: 44, height: 44).background(Theme.card, in: Circle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Add to job")
+                    .accessibilityHint("Add a note, photo, estimate, invoice, payment or contact")
+                    .accessibilityIdentifier("job-add")
                 }
             }
             ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -949,7 +965,8 @@ struct JobDetailView: View {
             canSchedule: session.can("job.assign", feature: "jobs"),
             canAssign: session.can("job.assign", feature: "jobs"),
             canBillWithoutEstimate: invoicesLoaded && !invoicesFailed && invoices.isEmpty && (onSiteWrapsUp || nextStep != .createInvoice)
-                && job.status == "in_progress" && session.can("invoice.create", feature: "invoicing"),
+                // The server makes the job's invoice at any stage (only a canceled job is refused).
+                && shownStatus(job) != "canceled" && session.can("invoice.create", feature: "invoicing"),
             canRequestDeposit: invoicesLoaded && !invoicesFailed && invoices.isEmpty && job.estimateId != nil
                 && session.can("invoice.create", feature: "progress_billing"),
             // The job's bar shows on Overview and Activity; on Money (and over the photos) Wrap up
@@ -960,9 +977,10 @@ struct JobDetailView: View {
             canEditCustomer: session.can("customer.edit", feature: "core_crm"),
             canAddToCalendar: JobFiltering.date(job.scheduledFor) != nil,
             canEmail: customerEmail(job) != nil,
-            canSendRunningLate: ["scheduled", "dispatched", "en_route"].contains(shownStatus(job))
-                && JobFiltering.date(job.scheduledFor) != nil,
-            canReportCantStart: shownStatus(job) == "arrived" && session.can("job.edit", feature: "jobs")))
+            canSendRunningLate: JobVisitGates.canSendRunningLate(status: shownStatus(job),
+                                                                 hasSchedule: JobFiltering.date(job.scheduledFor) != nil),
+            canReportCantStart: JobVisitGates.canReportCantStart(status: shownStatus(job),
+                                                                 canEditJob: session.can("job.edit", feature: "jobs"))))
     }
 
     /// The primary contact's email, else the account's, only while this customer's contacts are current.
@@ -1242,32 +1260,63 @@ struct JobDetailView: View {
     /// Paper 22's rows, each one only when this person can do it here. "Purchase order" is left
     /// out: an order isn't tied to a job in the app yet.
     private func addRows(_ job: JobRecord) -> (billing: [JobAddRow], onTheJob: [JobAddRow]) {
-        var billing: [JobAddRow] = []
-        var onTheJob: [JobAddRow] = []
-        if session.can("estimate.create", feature: "estimates"), scope(for: job) != nil {
-            billing.append(JobAddRow(id: "estimate", glyph: .addEstimate, title: "Estimate",
-                                     subtitle: "Propose new work for approval") { buildEstimate() })
+        let collect = sideSteps.first { if case .collect = $0 { true } else { false } }
+        let offer = JobAddOffer.rows(JobAddOffer.Inputs(
+            status: shownStatus(job),
+            canCreateEstimate: session.can("estimate.create", feature: "estimates") && scope(for: job) != nil,
+            canShowEstimates: showEstimatesItem(job) != nil && canOpenCustomerView,
+            canCreateInvoice: menuGroups(job).contains(where: { $0.contains(.billWithoutEstimate) }),
+            canOpenInvoice: session.can("invoice.view", feature: "invoicing") && invoices.contains { $0.status != "void" },
+            canCollect: collect != nil || nextStepCollects,
+            canAddMedia: session.can("job.edit", feature: "jobs"),
+            canAddNote: session.can("job.note", feature: "jobs"),
+            canAddContact: session.can("customer.view", feature: "core_crm") && session.can("customer.edit", feature: "core_crm")
+                && customerContext(job) != nil && customerContext(job) == contactsContext))
+        func row(_ kind: JobAddKind) -> JobAddRow {
+            switch kind {
+            case .estimate:
+                return JobAddRow(id: "estimate", glyph: .addEstimate, title: "Estimate",
+                                 subtitle: "Propose new work for approval") { buildEstimate() }
+            case .showEstimate:
+                return JobAddRow(id: "show-estimate", glyph: .addEstimate, title: "Show estimate to customer",
+                                 subtitle: "Hand over the phone to approve and sign") { openCustomerView(.estimates) }
+            case .invoice:
+                return JobAddRow(id: "invoice", glyph: .addInvoice, title: "Invoice",
+                                 subtitle: "Bill for completed work") { run(.createInvoice) }
+            case .openInvoice:
+                return JobAddRow(id: "open-invoice", glyph: .addInvoice, title: "Invoice",
+                                 subtitle: "Open this job\u{2019}s invoice") { withMotion(.snappy) { selectedTab = "Money" } }
+            case .payment:
+                let step = collect ?? (nextStepCollects ? nextStep : nil)
+                let amount: String? = if case .collect(_, let due, let currency)? = step { money(due, currency: currency) } else { nil }
+                return JobAddRow(id: "payment", glyph: .addInvoice, title: "Payment",
+                                 subtitle: amount.map { "Collect \($0) now" } ?? "Collect what is owed") {
+                    if let step { run(step) }
+                }
+            case .photo:
+                return JobAddRow(id: "photo", glyph: .jobCamera, title: "Photo or video",
+                                 subtitle: "Capture job-site media") {
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) { openCapture(.camera(stage: nil)) } else { openPhotos() }
+                }
+            case .note:
+                return JobAddRow(id: "note", glyph: .addNote, title: "Note",
+                                 subtitle: "Log an update for the office") { openNoteTool() }
+            case .contact:
+                return JobAddRow(id: "contact", glyph: .addContact, title: "Contact",
+                                 subtitle: "Add another person on this job") { showAddContact = true }
+            }
         }
-        if menuGroups(job).contains(where: { $0.contains(.billWithoutEstimate) }) {
-            billing.append(JobAddRow(id: "invoice", glyph: .addInvoice, title: "Invoice",
-                                     subtitle: "Bill for completed work") { run(.createInvoice) })
-        }
-        if session.can("job.edit", feature: "jobs") {
-            onTheJob.append(JobAddRow(id: "photo", glyph: .jobCamera, title: "Photo or video",
-                                      subtitle: "Capture job-site media") {
-                if UIImagePickerController.isSourceTypeAvailable(.camera) { openCapture(.camera(stage: nil)) } else { openPhotos() }
-            })
-        }
-        if session.can("job.note", feature: "jobs") {
-            onTheJob.append(JobAddRow(id: "note", glyph: .addNote, title: "Note",
-                                      subtitle: "Log an update for the office") { openNoteTool() })
-        }
-        if session.can("customer.view", feature: "core_crm"), session.can("customer.edit", feature: "core_crm"),
-           customerContext(job) != nil, customerContext(job) == contactsContext {
-            onTheJob.append(JobAddRow(id: "contact", glyph: .addContact, title: "Contact",
-                                      subtitle: "Add another person on this job") { showAddContact = true })
-        }
-        return (billing, onTheJob)
+        return (offer.billing.map(row), offer.onTheJob.map(row))
+    }
+
+    private var nextStepCollects: Bool {
+        if case .collect? = nextStep { return true }
+        return false
+    }
+
+    private func hasAddRows(_ job: JobRecord) -> Bool {
+        let rows = addRows(job)
+        return !(rows.billing.isEmpty && rows.onTheJob.isEmpty)
     }
 
     private func sharedJobText(_ job: JobRecord) -> SharedText {
@@ -2004,6 +2053,8 @@ struct JobDetailView: View {
             let workingBar = inField(job) && shownStatus(job) == "in_progress" && !typeSize.isAccessibilitySize
             let paidBar = inField(job) && fieldStep(job) == 4
             VStack(spacing: 10) {
+                // Collect and the estimate ride over the bar's step at every stage.
+                if !paidBar { sideStepRow }
                 // Paper F2 to F4: the moment's second action sits over the commit.
                 if inField(job), !paidBar { fieldSecondary(job) }
                 if paidBar {
@@ -2032,10 +2083,56 @@ struct JobDetailView: View {
                     }
                 }
             }
+            // Full width even with nothing in it, so the fade never shows as a narrow strip.
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
             // Paper: the bar floats on the canvas, which fades in behind it.
             .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0), .init(color: Theme.background, location: 0.34)],
                                        startPoint: .top, endPoint: .bottom).padding(.top, -18).ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
+        }
+    }
+
+    /// The money moves beside the bar's step: quiet pills, side by side (stacked at accessibility
+    /// sizes). Nothing shows when there is nothing to collect, show or build.
+    @ViewBuilder private var sideStepRow: some View {
+        // Working, the Estimate tile is on the screen, so the bar doesn't repeat it.
+        let tilesShow = inFieldNow && job.map { shownStatus($0) == "in_progress" } == true && !fieldWrapsUp
+        let steps = sideSteps.filter { !(tilesShow && $0 == .buildEstimate) }
+        if !steps.isEmpty {
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                    Button { run(step) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: step.symbol).font(.system(size: 14, weight: .semibold)).accessibilityHidden(true)
+                            Text(step.sideTitle).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .paperButton(.secondary, tone: .quiet, fills: true)
+                        // The bar fades in over the page; the pill keeps a solid back so rows never show through.
+                        .background(Theme.background, in: Capsule())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy || creatingInvoice || preparingEstimate)
+                    .accessibilityLabel(sideStepLabel(step))
+                    .accessibilityIdentifier(sideStepIdentifier(step))
+                }
+            }
+        }
+    }
+
+    private func sideStepLabel(_ step: TechJobStep) -> String {
+        switch step {
+        case .buildEstimate: "New estimate"
+        case .showEstimate, .presentEstimates: "Show estimate to customer"
+        default: step.title()
+        }
+    }
+
+    private func sideStepIdentifier(_ step: TechJobStep) -> String {
+        switch step {
+        case .collect: "job-side-collect"
+        case .buildEstimate: "job-side-estimate"
+        default: "job-side-show-estimate"
         }
     }
 
@@ -2372,6 +2469,58 @@ struct JobDetailView: View {
             } else {
                 fieldLead(job)
             }
+            // Why the office sent the visit, the call that booked it and who to reach stay on the
+            // visit's own screen at every step, under what the step needs first.
+            if fieldStep(job) != 4 { fieldReference(job) }
+        }
+    }
+
+    /// The description (folded when long), the booking call and each contact with Call and Text.
+    @ViewBuilder private func fieldReference(_ job: JobRecord) -> some View {
+        // Arrived, "Know before you knock" already carries the description.
+        fieldDescriptionCard(job)
+        if let bookingCall { JobBookingCallSection(call: bookingCall).id("job-booking-call") }
+        if session.can("customer.view", feature: "core_crm") {
+            let current = customerContext(job) != nil && customerContext(job) == contactsContext
+            let people = JobContacts.people(contacts: current ? contacts : [], customer: current ? customerRecord : nil)
+            // On the visit the list is here to reach people; an empty or failed read stays on Job details.
+            if !people.isEmpty {
+                JobContactsSection(people: people, preference: JobContacts.preference(current ? customerRecord : nil),
+                                   loaded: true, failed: false, customerID: job.customerId, jobID: job.id,
+                                   customerName: linkedCustomer(job)?.name) { await loadContacts(job) }
+            }
+        }
+    }
+
+    @ViewBuilder private func fieldDescriptionCard(_ job: JobRecord) -> some View {
+        let officeNote = job.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !officeNote.isEmpty, shownStatus(job) != "arrived" {
+            let long = JobDescriptionFold.isLong(officeNote)
+            VStack(alignment: .leading, spacing: 8) {
+                JobPanelLabel(title: "Description")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(officeNote)
+                        .font(Theme.font(15)).foregroundStyle(Theme.foreground).lineSpacing(2)
+                        .lineLimit(long && !descriptionOpen ? JobDescriptionFold.foldedLines : nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if long {
+                        Button { withMotion(.snappy) { descriptionOpen.toggle() } } label: {
+                            Text(descriptionOpen ? "Show less" : "Show more")
+                                .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("job-description-more")
+                    }
+                }
+                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, long ? 2 : 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground(cornerRadius: Theme.cardRadius)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("job-field-description")
         }
     }
 
@@ -2386,6 +2535,9 @@ struct JobDetailView: View {
                 fieldModeCard(job)
                 accessCard(job)
                 descriptionCard(job)
+                // The call that booked the visit (who called, the recording, what was said) sits
+                // with why the office sent it. The server only returns it with call recording on.
+                if let bookingCall { JobBookingCallSection(call: bookingCall).id("job-booking-call") }
                 checklistCard(job)
             }
             customerPanel(job).id("job-details")
@@ -2698,7 +2850,6 @@ struct JobDetailView: View {
     /// record's own dates) follow them here.
     private func atAddressScreen(_ job: JobRecord) -> some View {
         JobAtAddressView(job: job, street: street(job), visits: visits, visitsLoaded: visitsLoaded, locations: customerLocations) {
-            if let bookingCall { JobBookingCallSection(call: bookingCall) }
             if session.can("customer.view", feature: "core_crm") {
                 let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
@@ -3540,7 +3691,27 @@ struct JobDetailView: View {
                                identifier: "job-tool-checklist") { showChecklist = true }
             }
             .fixedSize(horizontal: false, vertical: true)
+            // Beyond Paper F4's four: another estimate and the job's files are one tap while working.
+            row {
+                JobCaptureTile(title: "Estimate", symbol: "doc.badge.plus", detail: estimateTileDetail,
+                               enabled: session.can("estimate.create", feature: "estimates") || session.can("estimate.view", feature: "estimates"),
+                               hint: session.can("estimate.create", feature: "estimates") ? "Starts a new estimate for this job" : "Opens the job's estimates",
+                               identifier: "job-tool-estimate") {
+                    if session.can("estimate.create", feature: "estimates") { buildEstimate() } else { withMotion(.snappy) { selectedTab = "Money" } }
+                }
+                JobCaptureTile(title: "Photos and files", symbol: "photo.on.rectangle", detail: "Videos, library, PDFs",
+                               enabled: canCapture,
+                               hint: "Opens the job's photos, videos and documents",
+                               identifier: "job-tool-files") { openPhotos() }
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// "Add another" once the job has one; how many it has is on Money.
+    private var estimateTileDetail: String {
+        guard estimatesLoaded, !estimatesFailed, !jobEstimates.isEmpty else { return "Build one for this job" }
+        return "\(jobEstimates.count) on this job \u{00B7} add another"
     }
 
     /// "4 added": the visit's photos on the first page read, plus any still on this phone.
@@ -4741,7 +4912,12 @@ struct JobDetailView: View {
     /// TF-01: the one next step for this job, from its status, its estimates and its invoices.
     private var nextStep: TechJobStep? {
         guard let job else { return nil }
-        let can = TechJobAbilities(
+        return TechJobFlow.nextStep(status: outbox.pendingStatus(for: job.id) ?? job.status, transitions: availableTransitions(job),
+                                    estimates: stepEstimates, invoices: invoicesLoaded && !invoicesFailed ? invoices : nil, can: techAbilities)
+    }
+
+    private var techAbilities: TechJobAbilities {
+        TechJobAbilities(
             createEstimate: session.can("estimate.create", feature: "estimates"),
             sendEstimate: session.can("estimate.send", feature: "estimates"),
             approveEstimate: session.can("estimate.approve", feature: "estimates"),
@@ -4749,9 +4925,26 @@ struct JobDetailView: View {
             viewInvoice: session.can("invoice.view", feature: "invoicing"),
             collectPayment: session.can("invoice.payment.create", feature: "payments"),
             completeJob: session.can("job.complete", feature: "jobs"))
-        return TechJobFlow.nextStep(status: outbox.pendingStatus(for: job.id) ?? job.status, transitions: availableTransitions(job),
-                                    estimates: (estimatesLoaded && !estimatesFailed) || !session.can("estimate.view", feature: "estimates") ? jobEstimates : nil,
-                                    invoices: invoicesLoaded && !invoicesFailed ? invoices : nil, can: can)
+    }
+
+    /// The job's estimates once read (or none, for a role that can't read them); nil while loading.
+    private var stepEstimates: [EstimateRecord]? {
+        (estimatesLoaded && !estimatesFailed) || !session.can("estimate.view", feature: "estimates") ? jobEstimates : nil
+    }
+
+    /// The money moves kept one tap away beside the bar's step, whatever the stage (collect what
+    /// is owed, show the estimate, start a new one). Each runs exactly as the bar's own step does.
+    private var sideSteps: [TechJobStep] {
+        guard let job, scope(for: job) != nil else { return [] }
+        return TechJobFlow.sideSteps(status: shownStatus(job), primary: nextStep, estimates: stepEstimates,
+                                     invoices: invoicesLoaded && !invoicesFailed ? invoices : nil, can: techAbilities)
+            .filter { step in
+                // The same doors the bar's commit has: an estimate needs the customer view or the builder.
+                switch step {
+                case .presentEstimates: canOpenCustomerView
+                default: true
+                }
+            }
     }
 
     private var canBuildEstimate: Bool {
