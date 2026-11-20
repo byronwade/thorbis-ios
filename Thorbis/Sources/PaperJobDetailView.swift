@@ -2054,7 +2054,8 @@ struct JobDetailView: View {
             let paidBar = inField(job) && fieldStep(job) == 4
             VStack(spacing: 10) {
                 // Collect and the estimate ride over the bar's step at every stage.
-                if !paidBar { sideStepRow }
+                // Overview only: Money and Activity have these on the page itself.
+                if !paidBar, selectedTab == "Overview" { sideStepRow }
                 // Paper F2 to F4: the moment's second action sits over the commit.
                 if inField(job), !paidBar { fieldSecondary(job) }
                 if paidBar {
