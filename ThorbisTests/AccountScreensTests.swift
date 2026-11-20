@@ -65,7 +65,7 @@ final class AccountScreensTests: XCTestCase {
         XCTAssertEqual(PasswordChange.message(code: "INVALID_PASSWORD", status: 400, detail: "Invalid password"),
                        "That isn't your current password. Check it and try again.")
         XCTAssertEqual(PasswordChange.message(code: "PASSWORD_TOO_SHORT", status: 400, detail: nil), "Use at least 8 characters.")
-        XCTAssertEqual(PasswordChange.message(code: nil, status: 429, detail: nil), "Too many tries. Wait a minute, then try again.")
+        XCTAssertEqual(PasswordChange.message(code: nil, status: 429, detail: nil), "Too many tries. Wait a few minutes, then try again.")
         XCTAssertEqual(PasswordChange.message(code: "Network error", status: nil, detail: "No connection."), "No connection.")
     }
 

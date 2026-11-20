@@ -699,7 +699,7 @@ struct JoinTeamFlow: View {
             step = .confirmEmail
             verificationSent = true
         } catch let failure as Problem where failure.status == 429 {
-            problem = "Too many confirmation emails were requested. Wait a minute, then try again."
+            problem = "Too many confirmation emails were requested. Wait a few minutes, then try again."
         } catch is CancellationError {
         } catch {
             problem = InvitationRefusal.unreachable.message
@@ -975,7 +975,7 @@ struct JoinWorkspaceView: View {
             try await api.sendInvitationVerificationEmail(email: address, invitationID: pastedID)
             verificationSent = true
         } catch let failure as Problem where failure.status == 429 {
-            joinProblem = "Too many confirmation emails were requested. Wait a minute, then try again."
+            joinProblem = "Too many confirmation emails were requested. Wait a few minutes, then try again."
         } catch is CancellationError {
         } catch {
             joinProblem = InvitationRefusal.unreachable.message

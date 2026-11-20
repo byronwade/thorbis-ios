@@ -40,7 +40,7 @@ enum ProfileEdit {
     static func saveMessage(status: Int?, detail: String?) -> String {
         switch status {
         case 401: return "Your session ended. Sign in again to change your name."
-        case 429: return "Too many changes in a row. Wait a minute, then try again."
+        case 429: return "Too many changes in a row. Wait a few minutes, then try again."
         default: return detail ?? "Your name wasn't saved. Try again."
         }
     }

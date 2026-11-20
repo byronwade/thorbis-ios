@@ -54,7 +54,7 @@ enum PasswordChange {
         }
         switch status {
         case 401: return "Your session ended. Sign in again, then change your password."
-        case 429: return "Too many tries. Wait a minute, then try again."
+        case 429: return "Too many tries. Wait a few minutes, then try again."
         default: return detail ?? "Your password wasn't changed. Try again."
         }
     }

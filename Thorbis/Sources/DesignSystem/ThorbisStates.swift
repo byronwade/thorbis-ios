@@ -64,7 +64,7 @@ extension Error {
         case .forbidden:
             return subject.map { "Ask your office for access to \($0)." } ?? "Your role can’t open this. Ask your office for access."
         case .server:
-            if problem?.status == 429 { return "Too many tries. Wait a minute, then try again." }
+            if problem?.status == 429 { return "Too many tries. Wait a few minutes, then try again." }
             return "Thorbis couldn’t answer just now. Try again in a minute."
         case .other:
             if let problem {
