@@ -99,7 +99,7 @@ struct EstimateRevisionOptionDraft: Identifiable, Equatable {
 }
 
 struct EstimateRevisionEditorState: Equatable {
-    let estimate: EstimateRecord
+    private(set) var estimate: EstimateRecord
     var title: String
     var lines: [EstimateRevisionLineDraft]
     var options: [EstimateRevisionOptionDraft]
@@ -287,6 +287,17 @@ struct EstimateRevisionEditorState: Equatable {
         for index in options.indices { options[index].lines.classifyGroups(kinds: kinds) }
     }
 
+    /// Keeps the person's edits and takes the server's latest read of the same estimate as what
+    /// they are saved against (its revision number and `updatedAt`). False when it isn't the same
+    /// estimate, or it is no longer one that can be edited.
+    mutating func rebase(onto latest: EstimateRecord) -> Bool {
+        guard latest.id == estimate.id, latest.organizationId == estimate.organizationId else { return false }
+        let before = estimate
+        estimate = latest
+        guard canRevise else { estimate = before; return false }
+        return true
+    }
+
     func makeRequest(optionsFeatureEnabled: Bool, canDiscount: Bool) throws -> FieldEstimateReviseRequest {
         guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
         let revision: Int
@@ -328,6 +339,7 @@ struct EstimateRevisionEditorState: Equatable {
         }
         return FieldEstimateReviseRequest(
             expectedRevisionNumber: revision,
+            expectedUpdatedAt: estimate.updatedAt,
             title: cleanedTitle,
             lines: requestLines,
             options: requestOptions.isEmpty ? nil : requestOptions

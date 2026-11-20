@@ -77,8 +77,9 @@ struct EstimateRevisionEditorView: View {
 
     private var editingDraft: Bool { editor.estimate.status == "draft" }
 
+    /// A draft saves against its own `updatedAt`; anything else needs a sent revision to replace.
     private var revisionReady: Bool {
-        !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) > 0
+        editingDraft || (editor.estimate.currentRevisionNumber ?? 0) > 0
     }
 
     private var canSave: Bool {
@@ -132,7 +133,6 @@ struct EstimateRevisionEditorView: View {
                 PriceBookCartPicker(
                     destination: optionName(target.optionID),
                     canUsePriceBook: canUsePriceBook,
-                    notice: editingDraft && canRevise ? "Draft changes can't be saved yet." : nil,
                     quantityInDraft: { id in lines(for: target.optionID).quantity(ofPriceBookItem: id) },
                     secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
                     addItem: { add($0, to: target) },
@@ -209,9 +209,6 @@ struct EstimateRevisionEditorView: View {
             } else if !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
                 ErrorBanner(message: EstimateRevisionEditorError.missingRevision.localizedDescription)
             }
-            if editingDraft && canRevise {
-                ErrorBanner(message: "Draft changes can't be saved yet.")
-            }
             if editor.hasUnsupportedLineSources {
                 ErrorBanner(message: EstimateRevisionEditorError.unsupportedLineSource.localizedDescription)
             }
@@ -236,7 +233,7 @@ struct EstimateRevisionEditorView: View {
             mainSection
             optionSections
             Text(editingDraft
-                 ? "Changes aren't saved when you close this screen."
+                 ? "Saving changes this draft. It is not sent to the customer until you send it."
                  : "Saving creates a replacement draft for the current estimate revision. It will not be sent automatically.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -530,10 +527,6 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func save() async {
-        guard !editingDraft else {
-            error = "Draft changes can't be saved yet."
-            return
-        }
         guard canRevise else {
             error = "You no longer have permission to revise this estimate."
             return
@@ -549,18 +542,32 @@ struct EstimateRevisionEditorView: View {
         descriptionProblem = nil
         busy = true
         defer { busy = false }
-        do {
-            commitPrices()
-            let revised = try await api.reviseFieldEstimate(
-                editor.estimate.id,
-                request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)
-            )
-            onSaved(revised)
-            dismiss()
-        } catch is CancellationError {
-        } catch {
-            self.error = error.localizedDescription
-            staleRevision = (error as? Problem)?.status == 409
+        commitPrices()
+        var retried = false
+        while true {
+            let wasDraft = editingDraft
+            var sentRevision = editor.estimate.currentRevisionNumber ?? 0
+            do {
+                let request = try editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)
+                sentRevision = request.expectedRevisionNumber
+                let revised = try await api.reviseFieldEstimate(editor.estimate.id, request: request)
+                onSaved(revised)
+                dismiss()
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                // Whatever the answer, the person's edits stay on screen.
+                let failure = EstimateSaveFailure.of(error, wasDraft: wasDraft, sentRevision: sentRevision)
+                if failure == .reloadAndRetry, !retried {
+                    retried = true
+                    // The server wants the draft's token: read the estimate again, keep the edits, try once.
+                    if let latest = try? await api.liveFieldEstimate(estimate.id), editor.rebase(onto: latest) { continue }
+                }
+                self.error = failure.message
+                staleRevision = failure.offersLatest
+                return
+            }
         }
     }
 

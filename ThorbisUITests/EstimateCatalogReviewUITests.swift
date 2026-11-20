@@ -271,22 +271,25 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         XCTAssertTrue(added.waitForExistence(timeout: 10), "The added line must remain in the selected option")
     }
 
-    func testDraftEstimateKeepsSaveUnavailableDuringCatalogReview() {
+    /// A draft is edited like any estimate now: catalog review shows no "can't be saved" limit,
+    /// and Save draft stays off only because nothing was changed.
+    func testDraftEstimateShowsNoSaveLimitDuringCatalogReview() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-draft", "--paper-preview-catalog-pages"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Draft changes can't be saved yet."].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.staticTexts["Draft changes can't be saved yet."].exists)
         app.openPriceBook(from: app.buttons.matching(identifier: "estimate-add-item").firstMatch)
         let search = app.waitForPriceBookSearch()
         XCTAssertTrue(search.exists)
         search.tap()
-        XCTAssertTrue(app.staticTexts["Draft changes can't be saved yet."].exists, "The draft limit stays in view while adding")
+        XCTAssertFalse(app.staticTexts["Draft changes can't be saved yet."].exists)
         app.buttons["price-book-done"].tap()
         XCTAssertTrue(search.waitForNonExistence(timeout: 5))
         let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save draft")).firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 5))
-        XCTAssertFalse(save.isEnabled)
+        XCTAssertFalse(save.isEnabled, "Nothing was changed")
     }
 
     private func openPicker(_ add: XCUIElement, in app: XCUIApplication) {

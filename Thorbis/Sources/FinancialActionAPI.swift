@@ -2,17 +2,80 @@ import Foundation
 
 /// These preconditions bind a financial transition to the version the operator reviewed.
 struct FieldEstimateReviseRequest: Encodable {
+    /// The estimate's `currentRevisionNumber`, or 0 for a draft that was never sent.
     let expectedRevisionNumber: Int
+    /// The estimate's `updatedAt` exactly as last read. The server needs it to change a draft (so
+    /// two people never write over each other) and ignores it otherwise. Left out when nil.
+    let expectedUpdatedAt: String?
     let title: String
     let lines: [FieldEstimateLineInput]
     let options: [FieldEstimateOptionRequest]?
 
-    init(expectedRevisionNumber: Int, title: String, lines: [FieldEstimateLineInput],
+    init(expectedRevisionNumber: Int, expectedUpdatedAt: String? = nil, title: String, lines: [FieldEstimateLineInput],
          options: [FieldEstimateOptionRequest]? = nil) {
         self.expectedRevisionNumber = expectedRevisionNumber
+        self.expectedUpdatedAt = expectedUpdatedAt
         self.title = title
         self.lines = lines
         self.options = options
+    }
+}
+
+/// What a failed save of an estimate's edits means for the person editing, from the server's answer.
+enum EstimateSaveFailure: Equatable {
+    /// Someone else changed the draft: say so and offer the latest (the edits stay until they take it).
+    case stale
+    /// The server wants the draft's token: read the estimate again and try once more.
+    case reloadAndRetry
+    case noPermission
+    /// A server that can't change a draft yet. The edits stay on screen.
+    case draftsNotEditableYet
+    /// Anything else, in the server's own words; `conflict` offers the latest estimate.
+    case other(message: String, conflict: Bool)
+
+    static let staleMessage = "Someone else changed this estimate. Reload it and try again."
+    static let noPermissionMessage = "You no longer have permission to revise this estimate."
+    static let draftsNotEditableMessage = "This draft can\u{2019}t be changed yet. Send it, then edit it."
+
+    /// - Parameters:
+    ///   - wasDraft: the estimate being saved was a draft.
+    ///   - sentRevision: the `expectedRevisionNumber` that was sent.
+    static func of(_ error: Error, wasDraft: Bool, sentRevision: Int) -> EstimateSaveFailure {
+        guard let problem = error as? Problem else { return .other(message: error.localizedDescription, conflict: false) }
+        switch (problem.status, problem.code) {
+        case (409, "stale_draft"): return .stale
+        case (409, "draft_token_required"): return .reloadAndRetry
+        case (403, _): return .noPermission
+        default: break
+        }
+        if wasDraft {
+            // Before draft edits: revision 0 is refused as invalid, and any other draft save is
+            // answered "a replacement draft already exists". An approved estimate's 409 is not this.
+            if problem.status == 400, sentRevision == 0 { return .draftsNotEditableYet }
+            if problem.status == 409, problem.code == nil,
+               (problem.detail ?? problem.title ?? "").localizedCaseInsensitiveContains("replacement draft") {
+                return .draftsNotEditableYet
+            }
+        }
+        return .other(message: problem.localizedDescription, conflict: problem.status == 409)
+    }
+
+    var message: String {
+        switch self {
+        case .stale, .reloadAndRetry: Self.staleMessage
+        case .noPermission: Self.noPermissionMessage
+        case .draftsNotEditableYet: Self.draftsNotEditableMessage
+        case .other(let message, _): message
+        }
+    }
+
+    /// Whether to offer "Review latest estimate" (which replaces the edits when taken).
+    var offersLatest: Bool {
+        switch self {
+        case .stale, .reloadAndRetry: true
+        case .other(_, let conflict): conflict
+        default: false
+        }
     }
 }
 
