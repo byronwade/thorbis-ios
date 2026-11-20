@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 import UIKit
 
 struct JobDetailView: View {
@@ -97,6 +98,9 @@ struct JobDetailView: View {
     @State private var showWrapUp = false
     /// The on-site commit at "0 left": one confirm, then the job completes in place.
     @State private var confirmComplete = false
+    /// "You're here. Mark arrived?": the phone's place against the job's while on the way.
+    @StateObject private var arrivalWatcher = ArrivalWatcher()
+    @State private var arrivalNudgeDismissed = false
     /// "Reopen job" on a completed job (flag `job_reopen`): one confirm with an optional reason.
     @State private var confirmReopen = false
     /// The server answered that reopening is off, so the row hides until the screen is opened again.
@@ -2045,7 +2049,63 @@ struct JobDetailView: View {
     /// Paper 21, 21B: Overview and Activity share the job's bar (the next step, then the circles);
     /// Money's bar is the money's own next step.
     @ViewBuilder private var primaryAction: some View {
-        overviewBar
+        VStack(spacing: 8) {
+            if let job, arrivalWatcher.isNear, watchesArrival(job) {
+                ArrivalNudgeBanner(busy: busy, arrive: { Task { await arriveFromNudge() } }, dismiss: { dismissArrivalNudge(job) })
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            overviewBar
+        }
+        .background { arrivalWatchHost }
+    }
+
+    /// On the way, in the foreground, with a place to measure to and Location already allowed.
+    private func watchesArrival(_ job: JobRecord) -> Bool {
+        ArrivalNudge.watches(status: shownStatus(job), appActive: scenePhase == .active,
+                             canArrive: availableTransitions(job).contains("arrived"),
+                             hasPendingStatus: outbox.pendingStatus(for: job.id) != nil,
+                             place: jobCoordinates(job), locationAllowed: arrivalLocationAllowed,
+                             dismissed: arrivalNudgeDismissed || arrivalDismissedBefore(job))
+    }
+
+    private func arrivalDismissedBefore(_ job: JobRecord) -> Bool {
+        #if DEBUG
+        if PaperPreview.enabled { return false }
+        #endif
+        return ArrivalNudgeDismissals().contains(job.id)
+    }
+
+    private var arrivalLocationAllowed: Bool {
+        #if DEBUG
+        if PaperPreview.enabled { return true }
+        #endif
+        return ArrivalNudge.locationAllowed(CLLocationManager().authorizationStatus)
+    }
+
+    /// The phone's place is read only while `watchesArrival` holds; leaving it cancels the read.
+    @ViewBuilder private var arrivalWatchHost: some View {
+        let place = job.flatMap { watchesArrival($0) ? ArrivalNudge.validCoordinates(jobCoordinates($0)) : nil }
+        Color.clear
+            .task(id: place.map { "\(jobId)|\($0.latitude)|\($0.longitude)" } ?? "") {
+                guard let place else { arrivalWatcher.reset(); return }
+                await arrivalWatcher.watch(place: place)
+            }
+    }
+
+    /// The nudge's one tap: the same arrived step the bar commits, marked as found by location.
+    private func arriveFromNudge() async {
+        guard let job, watchesArrival(job), !busy else { return }
+        await progress(.arrived(method: .geofence))
+    }
+
+    private func dismissArrivalNudge(_ job: JobRecord) {
+        var keeps = true
+        #if DEBUG
+        // The design preview never writes to the phone's settings.
+        if PaperPreview.enabled { keeps = false }
+        #endif
+        if keeps { ArrivalNudgeDismissals().dismiss(job.id) }
+        withMotion(.snappy) { arrivalNudgeDismissed = true }
     }
 
     /// On site with the work started, the bar is the wrap-up: a status step (Start work, Resume)
