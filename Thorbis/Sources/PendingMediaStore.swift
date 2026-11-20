@@ -327,7 +327,7 @@ final class PendingMediaStore: ObservableObject {
             } catch { storageWarning = "Saved media could not be opened. Unlock the phone and retry." }
         }
         #if DEBUG
-        if previewFrozen { kept = previewProgress }
+        if previewFrozen { kept = previewProgress; errors = previewErrors; waitingForStorage = previewStorageDown }
         #endif
         progress = kept
         recount()
@@ -436,6 +436,8 @@ final class PendingMediaStore: ObservableObject {
     /// Design preview only: the queue holds still in the state a screenshot needs.
     private var previewFrozen = false
     private var previewProgress: [String: MediaUploadProgress] = [:]
+    private var previewErrors: [String: String] = [:]
+    private var previewStorageDown: Set<String> = []
     func previewFreeze(sending: String? = nil, progress far: [String: MediaUploadProgress] = [:],
                        failed: [String: String] = [:], storageDown: Set<String> = []) {
         previewFrozen = true
@@ -444,6 +446,7 @@ final class PendingMediaStore: ObservableObject {
         progress = far
         errors = failed.merging(Dictionary(uniqueKeysWithValues: storageDown.map { ($0, MediaUploadWords.storageDown) })) { first, _ in first }
         waitingForStorage = storageDown
+        previewErrors = errors; previewStorageDown = storageDown
     }
     #endif
 
