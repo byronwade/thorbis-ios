@@ -309,7 +309,7 @@ final class JobMediaQueueUITests: XCTestCase {
         capture.lifetime = .keepAlways
         add(capture)
         library.tap()
-        let choosePhoto = app.buttons["Choose a photo"]
+        let choosePhoto = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose from library")).firstMatch
         XCTAssertTrue(choosePhoto.waitForExistence(timeout: 5))
         choosePhoto.tap()
         let cancel = app.buttons["Cancel"]

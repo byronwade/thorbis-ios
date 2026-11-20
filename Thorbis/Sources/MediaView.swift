@@ -62,6 +62,12 @@ struct JobMediaView: View {
     @State private var previewScope: JobMediaReadScope?
     @State private var previewRecord: MediaAssetRecord?
     @State private var selection: PhotosPickerItem?
+    /// What the library picker returned: as many photos and videos as were chosen, in order.
+    @State private var librarySelection: [PhotosPickerItem] = []
+    /// "Adding 3 of 12…" while a pick is being read and saved to the phone.
+    @State private var importLine: String?
+    /// What happened to the last pick, when something was left out or cut short.
+    @State private var importNotice: String?
     @State private var selectedData: Data?
     @State private var selectedMime = "image/jpeg"
     @State private var selectedFilename = "photo.jpg"
@@ -186,6 +192,7 @@ struct JobMediaView: View {
                 }
                 if loading || (previewIsCurrent && preview.loading) { SkeletonRows(count: 2, inset: 0) }
                 selectedFileRow
+                importRow
                 waitingSummary
                 justCapturedRow
                 emptyStates
@@ -294,17 +301,16 @@ struct JobMediaView: View {
                 } catch { self.error = error.localizedDescription }
             }
         }
-        .photosPicker(isPresented: $showLibrary, selection: $selection, matching: .images)
-        .fileImporter(isPresented: $importDocument, allowedContentTypes: [.pdf]) { result in
-            do {
-                let url = try result.get()
-                let access = url.startAccessingSecurityScopedResource()
-                defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                guard size <= 8 * 1024 * 1024 else { throw MediaSelectionError.tooLarge }
-                try select(Data(contentsOf: url), mime: "application/pdf", filename: url.lastPathComponent)
-                enqueueSelection()
-            } catch { self.error = error.localizedDescription }
+        .onChange(of: librarySelection) { _, items in
+            guard !items.isEmpty else { return }
+            librarySelection = []
+            Task { await importLibrary(items) }
+        }
+        // As many photos and videos as the tech wants, kept in the order they tapped them.
+        .photosPicker(isPresented: $showLibrary, selection: $librarySelection, selectionBehavior: .ordered,
+                      matching: .any(of: [.images, .videos]))
+        .fileImporter(isPresented: $importDocument, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { result in
+            do { importDocuments(try result.get()) } catch { self.error = error.localizedDescription }
         }
         // Documents and clips keep the system preview.
         .sheet(isPresented: Binding(get: { previewIsCurrent && preview.url != nil }, set: { if !$0 { preview.clear(); previewScope = nil; previewRecord = nil } })) {
@@ -340,7 +346,7 @@ struct JobMediaView: View {
             viewer = nil; showCompare = false; endSelecting()
         }
         .onChange(of: records) { _, _ in if !previewIsCurrent { preview.clear(); previewScope = nil; previewRecord = nil } }
-        .onDisappear { selectedData = nil; justCaptured = nil; preview.clear() }
+        .onDisappear { selectedData = nil; justCaptured = nil; importNotice = nil; preview.clear() }
     }
 
     // MARK: Sections
@@ -508,7 +514,8 @@ struct JobMediaView: View {
         if video {
             items.append(ThorbisMenuItem("Record video", icon: "video", subtitle: "Up to 60 seconds") { showVideo = true })
         }
-        items.append(ThorbisMenuItem("Choose a photo", icon: "photo.on.rectangle", startsGroup: !items.isEmpty) { showLibrary = true })
+        items.append(ThorbisMenuItem("Choose from library", icon: "photo.on.rectangle",
+                                     subtitle: "As many photos and videos as you like", startsGroup: !items.isEmpty) { showLibrary = true })
         items.append(ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true })
         if measure {
             items.append(ThorbisMenuItem("Measure", icon: "ruler",
@@ -541,11 +548,8 @@ struct JobMediaView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(waiting.count) saved on this phone").font(Theme.font(16, weight: .medium)).monospacedDigit()
-                        Text(pendingMedia.uploadingID != nil ? "Sending now…"
-                             : failed > 0 ? "\(failed) couldn’t send. Tap one to see why."
-                             : offline ? "They send by themselves when you’re back online."
-                             : "Waiting to send.")
-                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        Text(MediaQueue.line(waiting: waiting.map(\.id), sendingID: pendingMedia.uploadingID, failed: failed, offline: offline))
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted).monospacedDigit()
                     }
                     Spacer(minLength: 8)
                     if pendingMedia.uploadingID == nil && !session.isOffline {
@@ -561,6 +565,37 @@ struct JobMediaView: View {
                 .padding(.horizontal, 16).padding(.vertical, 10)
             }
             .accessibilityElement(children: .contain)
+        }
+    }
+
+    /// A library pick being saved ("Adding 3 of 12…"), then what was left out or cut short.
+    @ViewBuilder private var importRow: some View {
+        if let importLine {
+            JobPanel {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text(importLine).font(Theme.font(16, weight: .medium)).monospacedDigit()
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12).frame(minHeight: 44)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("job-media-importing")
+        } else if let importNotice {
+            JobPanel {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(importNotice).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("OK") { self.importNotice = nil }
+                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 16).frame(minHeight: 44)
+                        .background(Theme.quietFill, in: Capsule())
+                        .buttonStyle(PressStyle())
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+            }
+            .accessibilityIdentifier("job-media-import-notice")
         }
     }
 
@@ -1108,6 +1143,97 @@ struct JobMediaView: View {
         } catch { self.error = error.localizedDescription }
     }
 
+    /// Saves one picked or imported file to the on-phone queue. The bytes are on disk before
+    /// anything is sent; the caller starts the send.
+    private func queueFile(_ data: Data, mime: String, filename: String, tags: [String] = [], caption: String? = nil,
+                           capturedAt: Date = Date()) throws {
+        guard canAdd, captureGeneration == api.requestGeneration, captureOrigin == api.normalizedOrigin,
+              let captureContext else { throw MediaSelectionError.workspaceChanged }
+        if let refusal = MediaLimits.check(mime: mime, bytes: data.count) {
+            throw MediaImportError(message: MediaLimits.message(refusal, name: filename))
+        }
+        let kind = MediaLimits.kind(mime: mime) ?? "photo"
+        let media = PendingMedia(id: UUID().uuidString, jobID: jobID, filename: filename, tags: kind == "photo" ? tags : [],
+                                 capturedAt: capturedAt, kind: kind, mime: mime, caption: caption)
+        try pendingMedia.save(media, data: data, context: captureContext)
+    }
+
+    /// The library pick. One photo keeps the quick tag step; several photos and any videos are
+    /// saved one by one in the order picked (untagged, to tag from the grid) and sent as they land.
+    private func importLibrary(_ items: [PhotosPickerItem]) async {
+        guard canAdd, !items.isEmpty else { return }
+        let kinds = items.map { MediaImportPlan.picked($0.supportedContentTypes) }
+        if MediaImportPlan.route(kinds) == .tagOne, let item = items.first {
+            selection = item
+            return
+        }
+        busy = true
+        importNotice = nil
+        defer { busy = false; importLine = nil }
+        let base = Date()
+        let stamp = base.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+        var added = 0, failed = 0, trimmed = 0
+        var firstProblem: String?
+        for (position, item) in items.enumerated() {
+            guard !Task.isCancelled else { break }
+            importLine = MediaImportPlan.progress(done: position, total: items.count)
+            let when = MediaImportPlan.capturedAt(base: base, position: position)
+            do {
+                switch kinds[position] {
+                case .video:
+                    guard let movie = try await item.loadTransferable(type: PickedMovie.self) else { throw CocoaError(.fileReadCorruptFile) }
+                    defer { try? FileManager.default.removeItem(at: movie.url) }
+                    let clip = try await VideoCapture.exportMP4(movie.url)
+                    defer { try? FileManager.default.removeItem(at: clip.url) }
+                    try queueFile(Data(contentsOf: clip.url), mime: "video/mp4",
+                                  filename: MediaImportPlan.filename(.video, stamp: stamp, position: position),
+                                  caption: "Video clip", capturedAt: when)
+                    if clip.trimmedTo != nil { trimmed += 1 }
+                case .photo:
+                    guard let data = try await item.loadTransferable(type: Data.self), let image = UIImage(data: data),
+                          let jpeg = Self.jpeg(image) else { throw CocoaError(.fileReadCorruptFile) }
+                    try queueFile(jpeg, mime: "image/jpeg", filename: MediaImportPlan.filename(.photo, stamp: stamp, position: position),
+                                  capturedAt: when)
+                case .other:
+                    throw MediaSelectionError.unsupported
+                }
+                added += 1
+                // Sending starts with the first one saved; the rest join the same queue.
+                Task { await retryWaiting() }
+            } catch {
+                failed += 1
+                if firstProblem == nil { firstProblem = error.localizedDescription }
+            }
+        }
+        error = nil
+        if failed == 1, items.count == 1, let firstProblem { importNotice = firstProblem }
+        else { importNotice = MediaImportPlan.summary(added: added, failed: failed, trimmed: trimmed) }
+        if added > 0 { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+    }
+
+    /// PDFs chosen in Files: each is read and queued; one that can't be added is named.
+    private func importDocuments(_ urls: [URL]) {
+        var added = 0
+        var problems: [String] = []
+        let base = Date()
+        for (position, url) in urls.enumerated() {
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                if let refusal = MediaLimits.check(mime: "application/pdf", bytes: size) {
+                    throw MediaImportError(message: MediaLimits.message(refusal, name: url.lastPathComponent))
+                }
+                try queueFile(Data(contentsOf: url), mime: "application/pdf", filename: url.lastPathComponent,
+                              capturedAt: MediaImportPlan.capturedAt(base: base, position: position))
+                added += 1
+            } catch { problems.append(error.localizedDescription) }
+        }
+        error = nil
+        importNotice = problems.count == 1 ? problems[0] : MediaImportPlan.summary(added: added, failed: problems.count, trimmed: 0)
+        if added > 0 { Task { await retryWaiting() } }
+    }
+
     /// Saves one photo from the capture flow to the on-phone queue under its chosen stage and
     /// caption, then starts sending in the background. Original bytes are on disk first.
     private func filePhoto(_ data: Data, tags: [String], caption: String?) throws {
@@ -1286,13 +1412,18 @@ struct PhotoMarkupTarget: Identifiable {
     let tags: [String]
 }
 
+private struct MediaImportError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 private enum MediaSelectionError: LocalizedError {
     case tooLarge, unsupported, workspaceChanged
     var errorDescription: String? {
         switch self {
         case .workspaceChanged: return "Your workspace changed. Return to the original job before adding media."
-        case .tooLarge: return "Choose a nonempty file no larger than 8 MB."
-        case .unsupported: return "Choose a JPEG, PNG, HEIC, WebP photo, a PDF or a video clip."
+        case .tooLarge: return "That file is too big. Files can be up to 8 MB."
+        case .unsupported: return "That isn\u{2019}t a photo, a video or a PDF."
         }
     }
 }

@@ -207,7 +207,7 @@ final class PendingMediaStore: ObservableObject {
                         } catch { storageWarning = "Some saved media cannot be read. It remains on this phone and needs recovery." }
                     }
                 }
-                items.sort { $0.capturedAt == $1.capturedAt ? $0.id < $1.id : $0.capturedAt < $1.capturedAt }
+                items.sort(by: MediaQueue.sendsBefore)
             } catch { storageWarning = "Saved media could not be opened. Unlock the phone and retry." }
         }
         recount()
@@ -279,7 +279,7 @@ final class PendingMediaStore: ObservableObject {
                 guard current() else { return }
                 if !(error is CancellationError) { errors[item.id] = error.localizedDescription }
                 if error.isConnectivityFailure { waitingForConnection.insert(item.id) } else { waitingForConnection.remove(item.id) }
-                if error is CancellationError || error.isConnectivityFailure { return }
+                if MediaQueue.afterFailure(cancelled: error is CancellationError, connectivity: error.isConnectivityFailure) == .stop { return }
             }
         }
     }
