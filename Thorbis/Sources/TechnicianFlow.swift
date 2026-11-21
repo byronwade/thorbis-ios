@@ -76,6 +76,8 @@ enum TechJobFlow {
     /// Status steps that move the call forward, in the order they happen. Pause, reschedule and
     /// dispatch-back are never the next step (TF-04); they stay on the job as rows.
     static let forwardSteps = ["en_route", "arrived", "in_progress"]
+    /// How far along the visit each status is. Paused sits with arrived so the bar offers Resume.
+    private static let forwardRank = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "paused": 2, "in_progress": 3]
 
     /// TF-01: the one next step on the job, or nil when nothing is left for the tech.
     /// - Parameters:
@@ -89,7 +91,12 @@ enum TechJobFlow {
         case "in_progress", "completed": break
         default:
             // Before the work starts, the bar walks the visit: on my way, arrived, start (or resume).
-            if let step = forwardSteps.first(where: transitions.contains) { return .transition(step) }
+            // The server also allows stepping back (arrived lists en_route), so only a step
+            // after the current one is the next one: never "On my way" once the tech is there.
+            let reached = forwardRank[status] ?? 0
+            if let step = forwardSteps.first(where: { transitions.contains($0) && (forwardRank[$0] ?? 0) > reached }) {
+                return .transition(step)
+            }
             if transitions.contains("dispatched") { return .transition("dispatched") }
             return nil
         }

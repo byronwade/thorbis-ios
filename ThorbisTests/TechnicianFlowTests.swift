@@ -63,6 +63,18 @@ final class TechnicianFlowTests: XCTestCase {
         XCTAssertNil(next("arrived", ["paused"]))
     }
 
+    /// The real API lists every allowed move, including the step back: an arrived job answers
+    /// `["en_route", "in_progress", "completed", "canceled"]` (seen against a local server).
+    func testTheNextStepNeverGoesBackWhenTheServerAlsoAllowsIt() {
+        XCTAssertEqual(next("scheduled", ["dispatched", "en_route", "arrived", "in_progress", "completed", "canceled"]),
+                       .transition("en_route"))
+        XCTAssertEqual(next("en_route", ["dispatched", "arrived", "in_progress", "completed", "canceled"]), .transition("arrived"))
+        XCTAssertEqual(next("arrived", ["en_route", "in_progress", "completed", "canceled"]), .transition("in_progress"))
+        XCTAssertEqual(next("arrived", ["en_route", "in_progress", "completed", "canceled"])?.title(), "Start work")
+        XCTAssertEqual(next("paused", ["en_route", "arrived", "in_progress"]), .transition("in_progress"))
+        XCTAssertNil(next("arrived", ["en_route", "completed", "canceled"]))
+    }
+
     func testWorkingOnAJobWithNoPaperStartsTheEstimate() {
         XCTAssertEqual(next("in_progress", ["paused", "completed"]), .buildEstimate)
         XCTAssertEqual(next("in_progress")?.title(), "Build estimate")
