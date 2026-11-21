@@ -739,7 +739,7 @@ struct JobInvoiceLineRows: View {
 /// known says so instead of showing a number.
 struct JobEstimateSummaryCard: View {
     let summary: JobEstimateSummary
-    var onBuild: (() -> Void)? = nil
+    // Owner 2026-11-21: the card's "Build an estimate" button is gone; Money adds from its one +.
     @Environment(\.dynamicTypeSize) private var typeSize
 
     /// Paper's order: awaiting approval first, then approved.
@@ -784,20 +784,6 @@ struct JobEstimateSummaryCard: View {
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
-            }
-            if let onBuild {
-                Button(action: onBuild) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.shield").font(.system(size: 16, weight: .medium))
-                            .accessibilityHidden(true)
-                        Text("Build an estimate")
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .paperButton(.card, tone: .quiet, fills: true)
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("job-estimates-build")
             }
         }
         .padding(18)

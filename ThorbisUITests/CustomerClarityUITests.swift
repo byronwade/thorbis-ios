@@ -158,7 +158,7 @@ final class CustomerClarityUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
         capture("Customer overview")
-        // "Everything for Danielle": Jobs opens its own page with the history.
+        // The hub's first row: Jobs opens its own page with the history.
         let jobs = jobsTab(app)
         XCTAssertTrue(jobs.waitForExistence(timeout: 10))
         jobs.tap()

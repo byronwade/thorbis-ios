@@ -196,7 +196,8 @@ struct JobContactsSection: View {
     var body: some View {
         // Paper 21: 8 between the label and its card.
         VStack(alignment: .leading, spacing: 8) {
-            JobPanelLabel(title: "Contacts", count: people.isEmpty ? nil : "\(people.count)",
+            // Owner 2026-11-21: the count shows only when there is more than one person to count.
+            JobPanelLabel(title: "Contacts", count: people.count > 1 ? "\(people.count)" : nil,
                           actionTitle: onAdd == nil ? nil : "Add contact", actionSymbol: "plus",
                           actionIdentifier: "job-contacts-add", action: onAdd)
             if failed && people.isEmpty {

@@ -150,13 +150,15 @@ struct RecordBarTitle: ToolbarContent {
 
     var body: some ToolbarContent {
         ThorbisToolbarItem(placement: .principal) {
-            Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                .lineLimit(1).truncationMode(.tail)
-                .frame(maxWidth: max(120, UIScreen.main.bounds.width - 236))
-                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                .opacity(shown ? 1 : 0)
-                .animation(.easeOut(duration: 0.15), value: shown)
-                .accessibilityHidden(true)
+            // Drawn only once the header is gone, so the page never holds its title twice.
+            if shown {
+                Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: max(120, UIScreen.main.bounds.width - 236))
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
         }
     }
 }
@@ -170,8 +172,8 @@ extension View {
 
 /// One filter row per page: a single line of choice chips that scrolls sideways when it has to.
 /// Jobs, Estimates, Invoices, Customers and a job's Activity all filter with this, so a list never
-/// stacks a second chip row or mixes chips with a segmented control. A chip may carry a menu of
-/// finer choices (Activity's Photos: All, Before, After, Documents) instead of a second row.
+/// stacks a second chip row or mixes chips with a segmented control. Finer choices (the
+/// stage of a job's photos) are one control inside their section, never a second chip row.
 struct RecordFilterChips: View {
     struct Chip: Identifiable {
         let id: String

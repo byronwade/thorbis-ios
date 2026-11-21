@@ -402,7 +402,8 @@ struct EstimateDetailView: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
-                if let label { SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) }
+                // Owner 2026-11-21: no line count beside the label; the lines are right there to see.
+                if let label { SectionHeader(title: label) }
                 VStack(alignment: .leading, spacing: 0) {
                     if !note.isEmpty {
                         Text(note).font(Theme.font(14)).foregroundStyle(Theme.muted)

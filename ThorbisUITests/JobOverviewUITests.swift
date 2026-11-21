@@ -205,8 +205,12 @@ final class JobOverviewUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(back.frame.height, 43.5)
             let actions = app.buttons["Job actions"]
             XCTAssertTrue(actions.exists)
-            // Paper 21: the bar is Back, Share and More.
-            XCTAssertTrue(app.navigationBars.firstMatch.buttons["Share job"].exists)
+            // Owner 2026-11-21: the bar is Back, then at most two circles: Add to job and More.
+            // Share moved into More (checked in testEverySecondaryActionKeepsADoorAndSchedulingOpens).
+            let bar = app.navigationBars.firstMatch
+            XCTAssertFalse(bar.buttons["Share job"].exists, "Share is a row of More, not a third circle")
+            XCTAssertTrue(bar.buttons["Add to job"].exists)
+            XCTAssertLessThanOrEqual(bar.buttons.count, 3, "Back, Add to job and More")
             if useSwipe {
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
                 start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))

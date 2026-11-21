@@ -110,7 +110,8 @@ struct CustomersView: View {
                 // Recent keeps its newest-first order in one group.
                 ForEach(Array(sections.enumerated()), id: \.element.0) { index, section in
                     // 22 under the search field, then 16 between a card and the next letter.
-                    PaperCardLabel(title: section.0, count: section.1.count)
+                    // Owner 2026-11-21: a letter needs no count beside it (Recent keeps none either).
+                    PaperCardLabel(title: section.0)
                         .padding(.top, index == 0 ? 14 : 16)
                     // Clipped to the card, so a swiped row's Archive cell keeps the card's corners.
                     // Row by row in the lazy stack: one card of every customer built at once stalls
