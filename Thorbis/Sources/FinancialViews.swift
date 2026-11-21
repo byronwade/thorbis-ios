@@ -1,4 +1,10 @@
 import SwiftUI
+
+// Owner 2026-11-21: decluttered estimate and invoice pages. Both use the shared `RecordHeader`
+// (number and status badge, what the work is, one muted line) and the `RelatedRow` under it
+// (customer, job, estimate) in place of Paper 35C's and 40C's separate headers, where the estimate
+// led with its name and the invoice with the customer. Both lists filter with one chip row
+// (`RecordFilterChips`) in place of the segmented control, and draw `RecordListRow`.
 import UIKit
 
 struct EstimatesView: View {
@@ -69,21 +75,27 @@ struct EstimatesView: View {
                 if let active = activeFilter { RecordFilterBar(filter: active, missing: missing) { showAll = true } }
                 DocumentSearchField(text: $search, label: "Search estimates")
                 if activeFilter == nil && !records.isEmpty {
-                    PaperTabs(options: ["Open", "Approved", "Declined"].map { tabLabel($0) }, selection: tabBinding)
+                    RecordFilterChips(chips: ["Open", "Approved", "Declined"].map { .init(id: tabLabel($0), title: tabLabel($0)) },
+                                      selection: tabBinding, hint: "Filters the estimates", inset: PaperCardMetrics.margin)
                         .padding(.top, 12)
                 }
-                if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: true) }
+                if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
                 let rows = shown
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, record in
                     PaperSplitDestinationLink(id: record.id, value: PaperRoute.estimate(record.id)) {
                         EstimateDetailView(id: record.id).thorbisBackButton()
                     } label: {
-                        DocumentCardRow(title: store.customerName(record.customerId),
-                                        amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
-                                        subtitle: "EST-\(record.id.suffix(4).uppercased()) \u{00B7} \(record.title)",
-                                        chip: DocumentStatus(estimateStatus: record.status),
-                                        note: estimateNote(record),
-                                        divider: index > 0)
+                        // The shared list row: who, one muted line (the number, the work, where it
+                        // stands), the amount. The status chip and third line were Paper 20E's.
+                        RecordListRow(title: store.customerName(record.customerId),
+                                      detail: estimateLine(record),
+                                      trailing: paperLinesTotal(record.lines).map { .amount(money($0, currency: record.lines.first?.unitPrice.currency ?? "USD")) } ?? .none,
+                                      quiet: record.status == "declined")
+                            .overlay(alignment: .top) { if index > 0 { WellDivider(leading: 16) } }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel([store.customerName(record.customerId), estimateLine(record),
+                                                 paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") }]
+                                .compactMap { $0 }.joined(separator: ", "))
                     }
                     .buttonStyle(RowPressStyle())
                     .documentCardSlot(first: index == 0, last: index == rows.count - 1)
@@ -124,7 +136,15 @@ struct EstimatesView: View {
     }
     private var activeFilter: RecordFilter? { showAll ? nil : filter }
 
-    /// Beside the chip, when the estimate last moved: "Not sent · edited yesterday", "3 days ago".
+    /// "EST-2218 · Sent last week · AC repair": the row's one muted line.
+    private func estimateLine(_ record: EstimateRecord) -> String {
+        // Where it stands comes before the work, so a long title is what gets cut.
+        ["EST-\(record.id.suffix(4).uppercased())", estimateNote(record) ?? DocumentStatus(estimateStatus: record.status).word,
+         record.title.trimmingCharacters(in: .whitespacesAndNewlines)]
+            .filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+    }
+
+    /// When the estimate last moved: "Not sent · edited yesterday", "Sent 3 days ago".
     private func estimateNote(_ record: EstimateRecord) -> String? {
         func when(_ raw: String?) -> String? {
             JobFiltering.date(raw).map { $0.formatted(.relative(presentation: .named)) }
@@ -187,6 +207,8 @@ struct EstimateDetailView: View {
     @State private var memberPricing: MemberPricing?
     @State private var showPDF = false
     @State private var openCustomer: Customer?
+    /// Whether the header has scrolled under the bar (the title joins the bar).
+    @State private var headerCollapsed = false
     @State private var showRevisions = false
     /// Paper 35C: the reference and status pill, the customer at 28 Bold, what it's for and its total;
     /// then (16 from the edges) the progress card, the lines on one card, Edit, and the activity.
@@ -204,7 +226,6 @@ struct EstimateDetailView: View {
                     let isLive = self.record != nil
                     let currency = record.lines.first?.unitPrice.currency ?? record.options?.first?.currency ?? "USD"
                     estimateHeader(record, currency: currency)
-                        .padding(.horizontal, Theme.gutter).padding(.top, 14)
                     VStack(alignment: .leading, spacing: 12) {
                         estimateTimeline(record)
                         if let signature = record.approvalSignature { SignatureBadge(label: "Approved by", signature: signature) }
@@ -251,51 +272,40 @@ struct EstimateDetailView: View {
         return record.status == "draft" || record.status == "sent" || record.status == "declined"
     }
 
-    /// "EST-4F2A" with the status pill, the customer (opens them), then what it's for and its total.
+    /// The shared record header: "EST-4F2A  [Sent]", what the estimate is for, then its price.
+    /// Who it is for and the job it belongs to are the related row's pills.
     @ViewBuilder private func estimateHeader(_ record: EstimateRecord, currency: String) -> some View {
         let status = DocumentStatus(estimateStatus: record.status)
-        let customerName = store.customerName(record.customerId)
-        let customer = session.can("customer.view", feature: "core_crm") ? store.customers.first(where: { $0.id == record.customerId }) : nil
-        let figure = estimateFigure(record, currency: currency)
-        // The estimate's own name is the headline (owner, 2026-11-19: after the price, the name is
-        // what people look at); the customer sits under it. Paper 35C drew the customer at 28 Bold.
-        let name: String? = record.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : record.title
-        let subtitle = figure ?? ""
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
-                Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.font(14, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
-                Text(status.word).font(Theme.font(12, weight: .semibold)).foregroundStyle(status.tone.text)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(status.tone.surface, in: Capsule())
-                    .accessibilityLabel("Status, \(status.word)")
-                    .accessibilityIdentifier("estimate-chip-status")
-            }
-            if let name {
-                estimateTitle(name)
-                let who = Text(customerName).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let customer {
-                    Button { openCustomer = customer } label: { who.frame(minHeight: 28, alignment: .leading).contentShape(Rectangle()) }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityHint("Opens the customer")
-                        .accessibilityIdentifier("estimate-customer")
-                } else {
-                    who
-                }
-            } else if let customer {
-                Button { openCustomer = customer } label: { estimateTitle(customerName) }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityHint("Opens the customer")
-            } else {
-                estimateTitle(customerName)
-            }
-            if !subtitle.isEmpty {
-                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        let name = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        RecordHeader(reference: "EST-\(record.id.suffix(4).uppercased())",
+                     title: name.isEmpty ? "Estimate" : name, titleIdentifier: "document-title",
+                     subtitle: estimateFigure(record, currency: currency)) {
+            RecordStatusBadge(word: status.word, tone: status.tone)
+                .accessibilityLabel("Status, \(status.word)")
+                .accessibilityIdentifier("estimate-chip-status")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .reportsRecordHeaderCollapse($headerCollapsed)
+        RelatedRow(links: estimateRelated(record)).padding(.top, 8)
+    }
+
+    /// Customer, then the job: the same pills, in the same order, as the job and the invoice.
+    private func estimateRelated(_ record: EstimateRecord) -> [RelatedLink] {
+        var links: [RelatedLink] = []
+        let customerName = store.customerName(record.customerId)
+        if session.can("customer.view", feature: "core_crm"), let customer = store.customers.first(where: { $0.id == record.customerId }) {
+            links.append(RelatedLink(id: "estimate-customer", title: customer.name, hint: "Opens the customer") { openCustomer = customer })
+        } else if customerName != "Customer" {
+            links.append(RelatedLink(id: "estimate-customer-name", title: customerName, hint: "") {})
+        }
+        // Handed over straight from the job's next step, Back is the job: no pill for it.
+        if session.can("job.view", feature: "jobs"), !presentsOnOpen,
+           let jobID, let job = store.jobs.first(where: { $0.id == jobID }) {
+            links.append(RelatedLink(id: "estimate-job", title: "JOB-\(job.id.suffix(4).uppercased())", detail: job.title, hint: "Opens the job") {
+                // An estimate knows its job only when it was opened from it: the job is one step back.
+                dismiss()
+            })
+        }
+        return links
     }
 
     /// "$340.00", or with options "3 options from $1,200.00"; nil when the lines can't be totalled.
@@ -306,17 +316,6 @@ struct EstimateDetailView: View {
         // One option is the price itself: "1 option · $2,250.00", never "1 options from".
         if options.count == 1 { return "1 option \u{00B7} \(money(lowest, currency: currency))" }
         return "\(options.count) options from \(money(lowest, currency: currency))"
-    }
-
-    /// Paper 35C: the customer at 28 Bold, -0.02em.
-    private func estimateTitle(_ name: String) -> some View {
-        Text(name).font(Theme.heading()).tracking(-0.56)
-            .foregroundStyle(Theme.foreground)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityIdentifier("document-title")
     }
 
     /// One step of Paper 35C's progress card: Created, Sent, then Approved (or Declined).
@@ -556,6 +555,9 @@ struct EstimateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
+            if let record = record ?? savedCopy {
+                RecordBarTitle(title: record.title.isEmpty ? "EST-\(record.id.suffix(4).uppercased())" : record.title, shown: headerCollapsed)
+            }
             if record != nil {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     // Paper 35D: the page's own menu is a bottom sheet under "EST-1039 · Nikolai Petrov".
@@ -827,7 +829,8 @@ struct InvoicesView: View {
                 if let active = activeFilter { RecordFilterBar(filter: active, missing: missing) { showAll = true } }
                 DocumentSearchField(text: $search, label: "Search invoices")
                 if activeFilter == nil && !records.isEmpty {
-                    PaperTabs(options: tabKeys.map { tabLabel($0) }, selection: tabBinding)
+                    RecordFilterChips(chips: tabKeys.map { .init(id: tabLabel($0), title: tabLabel($0)) },
+                                      selection: tabBinding, hint: "Filters the invoices", inset: PaperCardMetrics.margin)
                         .padding(.top, 12)
                 }
                 if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
@@ -844,10 +847,13 @@ struct InvoicesView: View {
                             InvoiceDetailView(id: record.id).thorbisBackButton()
                         } label: {
                             // MF-04: an unpaid invoice's row shows what's owed now, and says so.
-                            DocumentCardRow(title: store.customerName(record.customerId),
-                                            amount: invoiceAmount(record),
-                                            subtitle: invoiceLine(record),
-                                            divider: index > 0)
+                            RecordListRow(title: store.customerName(record.customerId), detail: invoiceLine(record),
+                                          trailing: invoiceAmount(record).map { .amount($0) } ?? .none,
+                                          quiet: ["void", "voided"].contains(record.status), urgent: record.status == "overdue")
+                                .overlay(alignment: .top) { if index > 0 { WellDivider(leading: 16) } }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel([store.customerName(record.customerId), invoiceLine(record), invoiceAmount(record)]
+                                    .compactMap { $0 }.joined(separator: ", "))
                         }
                         .buttonStyle(RowPressStyle())
                         .documentCardSlot(first: index == 0, last: index == group.rows.count - 1,
@@ -951,6 +957,10 @@ struct InvoiceDetailView: View {
     @State private var showPDF = false
     @State private var showDiscount = false
     @State private var openCustomer: Customer?
+    /// The related row's job and estimate pills, and whether the header has scrolled under the bar.
+    @State private var openJob: Job?
+    @State private var openEstimateID: String?
+    @State private var headerCollapsed = false
     /// The invoice's versions, once its Changes section has read them (nil: unread or refused).
     @State private var revisionHistory: InvoiceRevisionHistory?
 
@@ -1020,7 +1030,6 @@ struct InvoiceDetailView: View {
                     let total = amounts?.total
                     let due = amounts?.due
                     invoiceHeader(record)
-                        .padding(.horizontal, Theme.gutter).padding(.top, 14)
                     VStack(alignment: .leading, spacing: 12) {
                     balanceCard(record, total: total, due: due)
                         .thorbisConfirm("Cancel this application?", message: "The customer's link stops working.",
@@ -1098,6 +1107,9 @@ struct InvoiceDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
+            if let record = record ?? savedCopy {
+                RecordBarTitle(title: displayReference(record), shown: headerCollapsed)
+            }
             if record != nil {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     // Paper 35D ("Same menu on invoices"): a bottom sheet under "INV-2188 · Hollis Property Group".
@@ -1112,6 +1124,8 @@ struct InvoiceDetailView: View {
             CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar)
         }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+        .thorbisDestination(item: $openJob) { JobDetailView(jobId: $0.id) }
+        .thorbisDestination(item: $openEstimateID) { EstimateDetailView(id: $0) }
         .sheet(isPresented: $showDiscount) { SheetSurface {
             if let record, canDiscountInvoice(record) {
                 InvoiceDiscountSheet(invoice: record, canApply: { canDiscountInvoice(record) }) { updated in _ = accept(updated) }
@@ -1209,42 +1223,41 @@ struct InvoiceDetailView: View {
     @ViewBuilder private func invoiceHeader(_ record: InvoiceRecord) -> some View {
         let status = DocumentStatus(invoice: record)
         let job = record.jobId.flatMap { id in store.jobs.first(where: { $0.id == id }) }
-        let customer = session.can("customer.view", feature: "core_crm") ? store.customers.first(where: { $0.id == record.customerId }) : nil
-        let name = store.customerName(record.customerId)
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
-                // The reference carries the title's identifier; tests read "Invoice 2209" from it.
-                Text(displayReference(record)).font(Theme.font(14, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
-                    .accessibilityIdentifier("invoice-detail-title")
-                Text(status.word).font(Theme.font(12, weight: .semibold)).foregroundStyle(status.tone.text)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(status.tone.surface, in: Capsule())
-                    .accessibilityLabel("Status, \(status.word)")
-                    .accessibilityIdentifier("invoice-chip-status")
-            }
-            if let customer {
-                Button { openCustomer = customer } label: { invoiceTitle(name) }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityHint("Opens the customer")
-            } else {
-                invoiceTitle(name)
-            }
-            if let job {
-                Text(job.title).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        // The shared record header: "INV-2209  [Unpaid]", then what it bills. Who it bills and the
+        // job are the related row's pills. The reference carries the title's identifier; tests
+        // read "Invoice 2209" from it.
+        RecordHeader(reference: displayReference(record), referenceIdentifier: "invoice-detail-title",
+                     title: job?.title ?? "Invoice", titleIdentifier: "document-title") {
+            RecordStatusBadge(word: status.word, tone: status.tone)
+                .accessibilityLabel("Status, \(status.word)")
+                .accessibilityIdentifier("invoice-chip-status")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .reportsRecordHeaderCollapse($headerCollapsed)
+        RelatedRow(links: invoiceRelated(record, job: job)).padding(.top, 8)
     }
 
-    private func invoiceTitle(_ name: String) -> some View {
-        Text(name).font(Theme.heading()).tracking(-0.56)
-            .foregroundStyle(Theme.foreground)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
+    /// Customer, the job, then the estimate it was billed from: the same pills, in the same order,
+    /// as the job and the estimate.
+    private func invoiceRelated(_ record: InvoiceRecord, job: Job?) -> [RelatedLink] {
+        var links: [RelatedLink] = []
+        let name = store.customerName(record.customerId)
+        if session.can("customer.view", feature: "core_crm"), let customer = store.customers.first(where: { $0.id == record.customerId }) {
+            links.append(RelatedLink(id: "invoice-customer", title: customer.name, hint: "Opens the customer") { openCustomer = customer })
+        } else if name != "Customer" {
+            links.append(RelatedLink(id: "invoice-customer-name", title: name, hint: "") {})
+        }
+        if session.can("job.view", feature: "jobs"), let job {
+            links.append(RelatedLink(id: "invoice-job", title: "JOB-\(job.id.suffix(4).uppercased())", hint: "Opens the job") {
+                // Opened from that job, the job is one step back; anywhere else it is pushed.
+                if expectedJobScope?.jobID == job.id { dismiss() } else { openJob = job }
+            })
+        }
+        if session.can("estimate.view", feature: "estimates"), let estimateID = record.sourceEstimateId {
+            links.append(RelatedLink(id: "invoice-estimate", title: "EST-\(estimateID.suffix(4).uppercased())", hint: "Opens the estimate") {
+                openEstimateID = estimateID
+            })
+        }
+        return links
     }
 
     /// Paper 40C's balance card: what's owed now (or the total, or what was paid) in the 28 Bold

@@ -1080,8 +1080,11 @@ struct JobsView: View {
                                       onBuiltIn: { choice in withMotion { tab = choice } })
                         .padding(.top, 16)
                 } else {
-                    PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
-                        .padding(.top, 16)
+                    // Owner 2026-11-21: the one filter row every list uses (chips), not a segmented control.
+                    RecordFilterChips(chips: [.init(id: "Assigned", title: "My jobs"), .init(id: "All jobs", title: "All jobs"),
+                                              .init(id: "Recent", title: "Recent")],
+                                      selection: $tab, hint: "Filters the jobs", inset: PaperCardMetrics.margin)
+                        .padding(.top, 12)
                 }
                 OfflineBanner()
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
@@ -1447,7 +1450,8 @@ struct JobsView: View {
                 PaperSplitLink(id: job.id, value: job) {
                     JobCardRow(job: job, customer: customer, detail: detail,
                                pendingStatus: outbox.pendingStatus(for: job.id), late: isLate(job),
-                               assignee: needsTime ? nil : assignee)
+                               assignee: needsTime || job.assignedToUserId == session.user?.id ? nil : assignee,
+                               showsStatus: tab == "Recent")
                 }
                 .buttonStyle(RowPressStyle())
                 .jobContextMenu(job, customer: customer)
@@ -1523,8 +1527,11 @@ private struct JobCardRow: View {
     var assignee: String? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    /// Where the hairline between two rows starts: past the circle, under the words.
-    static let dividerInset: CGFloat = 16 + 20 + 12
+    /// The status as a trailing word, for a list that is not already grouped by status (Recent).
+    var showsStatus = false
+
+    /// Where the hairline between two rows starts: under the words.
+    static let dividerInset: CGFloat = 16
 
     private var status: String { pendingStatus ?? job.status }
     private var finished: Bool { ["completed", "canceled"].contains(job.status) }
@@ -1534,36 +1541,21 @@ private struct JobCardRow: View {
         if pendingStatus != nil { parts.append("\(status.statusLabel) · waiting to sync") }
         if late { parts.append("Late") }
         parts.append(detail)
+        // Owner 2026-11-21: the tech's name joins the one muted line (it was an initials circle).
+        if let assignee { parts.append(assignee) }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     var body: some View {
-        let stacked = typeSize.isAccessibilitySize
-        HStack(alignment: .center, spacing: 12) {
-            StatusGlyph(tone: StatusTone(jobStatus: status, hasTime: job.scheduledFor != nil),
-                        label: late ? "Late, \(status.statusLabel)" : status.statusLabel,
-                        pending: pendingStatus != nil, size: 20)
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 0) {
-                    // One line, cut at the end: a long real title ("DEMO visit 2 - Gas tank water heater
-                    // replacement labor - 75 gal…") would otherwise make every row three or four lines.
-                    Text(job.title.dashKeptWithWordBefore).font(Theme.font(16, weight: .medium)).tracking(-0.16)
-                        .foregroundStyle(finished ? Theme.subtle : Theme.foreground)
-                        .lineLimit(stacked ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(subtitle).font(Theme.font(14))
-                        .foregroundStyle(late ? Theme.destructive : Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let assignee { PaperInitials(name: assignee) }
-            }
-            .padding(.vertical, 11)
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-        .contentShape(Rectangle())
+        // Owner 2026-11-21: the shared list row (title, one muted line, a trailing status only where
+        // the group label does not already say it). Paper 20's leading status ring and trailing
+        // initials are gone: the group says the status, the line says who.
+        let tone = StatusTone(jobStatus: status, hasTime: job.scheduledFor != nil)
+        RecordListRow(title: job.title.dashKeptWithWordBefore, detail: subtitle,
+                      trailing: showsStatus ? .status(status.statusLabel, tone) : .none,
+                      quiet: finished, urgent: late)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel([late ? "Late, \(status.statusLabel)" : status.statusLabel, job.title, subtitle].joined(separator: ", "))
     }
 }
 
