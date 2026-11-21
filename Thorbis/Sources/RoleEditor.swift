@@ -37,6 +37,13 @@ struct OrganizationRoleDetail: Decodable {
     let revision: Revision
 }
 
+/// What creating or saving a role answers: the role at its new version, without its name or
+/// grants. Those are read with `organizationRole(_:)`.
+struct OrganizationRoleIdentity: Decodable {
+    let id: String
+    let currentRevision: Int
+}
+
 extension APIClient {
     func roleBuilderCatalog() async throws -> RoleBuilderCatalog {
         try await send("GET", "/v1/organization/role-presets")
@@ -47,7 +54,7 @@ extension APIClient {
         return try await send("GET", "/v1/organization/roles/\(id)")
     }
 
-    func createOrganizationRole(name: String, description: String, idempotencyKey: String) async throws -> OrganizationRoleDetail {
+    func createOrganizationRole(name: String, description: String, idempotencyKey: String) async throws -> OrganizationRoleIdentity {
         struct Body: Encodable { let idempotencyKey: String; let name: String; let description: String; let grants: [RoleGrant]; let reason: String }
         return try await send("POST", "/v1/organization/roles",
                               body: Body(idempotencyKey: idempotencyKey, name: name, description: description, grants: [],
@@ -56,7 +63,7 @@ extension APIClient {
 
     /// The role id comes from the route only.
     func reviseOrganizationRole(_ id: String, expectedRevision: Int, name: String, description: String,
-                                grants: [RoleGrant]) async throws -> OrganizationRoleDetail {
+                                grants: [RoleGrant]) async throws -> OrganizationRoleIdentity {
         struct Body: Encodable { let expectedRevision: Int; let name: String; let description: String; let grants: [RoleGrant]; let reason: String }
         guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid role ID", status: nil, detail: id) }
         return try await send("POST", "/v1/organization/roles/\(id)/revise",

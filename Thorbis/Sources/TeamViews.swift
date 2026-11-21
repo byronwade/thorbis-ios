@@ -449,7 +449,7 @@ extension TeamView {
         do {
             let created = try await api.createOrganizationRole(name: trimmed, description: "", idempotencyKey: UUID().uuidString)
             await load()
-            editingRoleID = created.role.id
+            editingRoleID = created.id
         } catch { self.error = error.localizedDescription }
     }
 }
