@@ -383,41 +383,56 @@ struct JobMediaView: View {
         }
     }
 
-    /// The count chips (Paper 21A); at accessibility text sizes, one "Show" menu instead.
+    /// Owner 2026-11-21: decluttered. Paper 21A drew a second chip row here (All, Before, After,
+    /// Documents) under Activity's own chips. A page keeps one chip row, so the stage is one
+    /// "Show" control over the grid at every text size; the untagged warning stays beside it.
     @ViewBuilder private var selectorRow: some View {
         if readScope != nil && !(allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && !hasMore) {
-            HStack(spacing: 8) {
-                if dynamicTypeSize.isAccessibilitySize {
-                    ThorbisMenu(items: (MediaFilter.selector + [.untagged]).map { option in
-                        ThorbisMenuItem(option.rawValue, isSelected: filter == option) { filter = option; endSelecting() }
-                    }, title: "Show") {
-                        Label("Show · \(filter.rawValue)", systemImage: "line.3.horizontal.decrease.circle")
-                            .font(.body.weight(.medium)).foregroundStyle(Theme.foreground)
-                            .frame(minHeight: 44, alignment: .leading)
+            let counts = photoCounts
+            let documentCount = documents.count + waitingDocuments.count
+            let large = dynamicTypeSize.isAccessibilitySize
+            let layout = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                ThorbisMenu(items: stageOptions(documentCount: documentCount).map { option in
+                    ThorbisMenuItem(option.rawValue, isSelected: filter == option) {
+                        filter = option
+                        endSelecting()
                     }
-                    .accessibilityIdentifier("photo-filter-menu")
-                } else {
-                    // Paper 21A: count chips. Every chip carries `job-media-selector` and is named
-                    // by its stage alone ("After"); its count is the value.
-                    let counts = photoCounts
-                    let documentCount = documents.count + waitingDocuments.count
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            filterChip(.all, count: counts.all)
-                            filterChip(.before, count: counts.before)
-                            filterChip(.after, count: counts.after)
-                            if documentCount > 0 || filter == .documents {
-                                filterChip(.documents, count: documentCount)
-                            }
-                            if counts.untagged > 0 || filter == .untagged {
-                                untaggedChip(counts.untagged)
-                            }
-                        }
-                        .padding(.horizontal, 16)
+                }, title: "Show", accessibilityLabel: "Show, \(filter.rawValue)") {
+                    HStack(spacing: 6) {
+                        Text("\(filter.rawValue) \u{00B7} \(stageCount(filter, counts: counts, documents: documentCount))")
+                            .font(Theme.font(14, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                        PaperIcon(.chevronDown, size: 12, color: Theme.muted).accessibilityHidden(true)
                     }
-                    .padding(.horizontal, -16)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: PaperControl.chipHeight)
+                    .background(Theme.quietFill, in: Capsule())
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
+                .accessibilityIdentifier("photo-filter-menu")
+                if counts.untagged > 0 || filter == .untagged { untaggedChip(counts.untagged) }
+                if !large { Spacer(minLength: 0) }
             }
+        }
+    }
+
+    private func stageOptions(documentCount: Int) -> [MediaFilter] {
+        var options: [MediaFilter] = [.all, .before, .after]
+        if documentCount > 0 || filter == .documents { options.append(.documents) }
+        if filter == .untagged { options.append(.untagged) }
+        return options
+    }
+
+    private func stageCount(_ option: MediaFilter, counts: (all: Int, before: Int, after: Int, untagged: Int), documents: Int) -> Int {
+        switch option {
+        case .before: counts.before
+        case .after: counts.after
+        case .documents: documents
+        case .untagged: counts.untagged
+        default: counts.all
         }
     }
 
@@ -428,22 +443,6 @@ struct JobMediaView: View {
         let after = tags.filter { $0.contains("After") }.count
         let untagged = tags.filter { !$0.contains("Before") && !$0.contains("After") }.count
         return (tags.count, before, after, untagged)
-    }
-
-    /// "All · 6": 40 tall on the card; the chosen one sits on the brand tint in the brand text tone.
-    private func filterChip(_ option: MediaFilter, count: Int) -> some View {
-        let chosen = filter == option
-        return Button {
-            filter = option
-            if option == .documents { endSelecting() }
-        } label: {
-            PaperChoiceChipLabel(title: "\(option.rawValue) · \(count)", isOn: chosen)
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(option.rawValue)
-        .accessibilityValue("\(count)")
-        .accessibilityAddTraits(chosen ? .isSelected : [])
-        .accessibilityIdentifier("job-media-selector")
     }
 
     /// "1 untagged": the warning chip; tapping it shows only the photos with no stage.

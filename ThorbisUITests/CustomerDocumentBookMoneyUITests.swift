@@ -8,7 +8,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money", "--paper-preview-job-invoice-mixed-currency"]
         app.launch()
         let actions = app.buttons["Job actions"]
-        XCTAssertTrue(actions.waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        XCTAssertTrue(actions.waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
         let door = thorbisCustomerViewMenuItem(app)
         XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
@@ -24,7 +24,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money"]
         app.launch()
-        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
         let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
@@ -42,7 +42,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money"]
         app.launch()
-        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
         let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
@@ -55,7 +55,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
         let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
@@ -103,7 +103,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
                                "--paper-preview-job-documents", "--paper-preview-job-documents-money", "--paper-preview-job-invoice-signed"]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["job-share"].tap()
+        app.buttons["Job actions"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         let primary = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(primary.waitForExistence(timeout: 10))
@@ -269,7 +269,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"] + extra
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["job-share"].tap()
+        app.buttons["Job actions"].tap()
         let customerView = thorbisCustomerViewMenuItem(app)
         XCTAssertTrue(customerView.waitForExistence(timeout: 10))
         customerView.tap()

@@ -6,9 +6,30 @@ final class JobMediaQueueUITests: XCTestCase {
     // counts on each date heading ("Oct 27, 2026 · 1"), Import holds library photos and PDFs, and a
     // photo's stage is changed in the viewer. Since #221 stamps read "Nov 14, 2023, 5:13 PM".
 
-    /// One of the count chips (every chip carries `job-media-selector`; its label is the stage alone).
-    private func selector(_ title: String, in app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "job-media-selector", title)).firstMatch
+    /// Owner 2026-11-21: the stage chips (All, Before, After, Documents) were a second chip row
+    /// under Activity's; they are one "Show" control over the grid now (`photo-filter-menu`).
+    private var stageControl: String { "photo-filter-menu" }
+
+    /// Opens the Show control and picks a stage from its menu.
+    private func choose(_ title: String, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let control = app.buttons[stageControl]
+        XCTAssertTrue(control.waitForExistence(timeout: 20), file: file, line: line)
+        for _ in 0..<5 where !control.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78)))
+        }
+        XCTAssertTrue(control.isHittable, "The Show control is in reach", file: file, line: line)
+        control.tap()
+        // The menu's row is drawn last, over the page.
+        let rows = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", title, "photo-filter-menu"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), file: file, line: line)
+        (rows.allElementsBoundByIndex.last ?? rows.firstMatch).tap()
+    }
+
+    /// The Show control reads the chosen stage ("Show, Before").
+    private func assertShown(_ title: String, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let chosen = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "photo-filter-menu", "Show, \(title)")).firstMatch
+        XCTAssertTrue(chosen.waitForExistence(timeout: 5), "Show should read \(title)", file: file, line: line)
     }
 
     /// A date heading, "Oct 27, 2026 · 1": the day, then how many loaded photos it holds.
@@ -121,15 +142,14 @@ final class JobMediaQueueUITests: XCTestCase {
         let loadedNote = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Counts and filters apply to loaded items")).firstMatch
         for _ in 0..<4 where !loadedNote.exists { app.swipeUp() }
         XCTAssertTrue(loadedNote.exists)
-        for _ in 0..<4 where !selector("After", in: app).isHittable { app.swipeDown() }
-        selector("After", in: app).tap()
+        choose("After", in: app)
         XCTAssertTrue(app.staticTexts["No matches in loaded photos. More may be available."].waitForExistence(timeout: 5))
         let more = app.buttons["job-media-load-more-matches"]
         XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
         XCTAssertTrue(app.buttons["Photo, Later repair"].waitForExistence(timeout: 10))
         XCTAssertEqual(photoTiles(in: app).count, 1, "After shows the one After photo from the later page")
         // Documents sit under their own choice; the later page's document arrived too.
-        selector("Documents", in: app).tap()
+        choose("Documents", in: app)
         XCTAssertTrue(app.staticTexts["Later document.pdf"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["job-media-load-more"].exists)
     }
@@ -191,8 +211,8 @@ final class JobMediaQueueUITests: XCTestCase {
         let undated = dayHeading("Date unavailable", in: app)
         XCTAssertTrue(undated.waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
-        selector("Before", in: app).tap()
-        XCTAssertTrue(selector("Before", in: app).isSelected)
+        choose("Before", in: app)
+        assertShown("Before", in: app)
         XCTAssertTrue(undated.exists)
         XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
         assertViewerStage(app.buttons["Photo, Outdoor unit"], "Before", in: app)
@@ -232,13 +252,7 @@ final class JobMediaQueueUITests: XCTestCase {
         screenshot.name = "Job photos grouped by capture date"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        let afterFilter = selector("After", in: app)
-        for _ in 0..<5 where !afterFilter.isHittable {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
-                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78)))
-        }
-        XCTAssertTrue(afterFilter.isHittable)
-        afterFilter.tap()
+        choose("After", in: app)
         XCTAssertTrue(older.exists)
         XCTAssertTrue(finished.exists)
         XCTAssertFalse(newest.exists)
@@ -265,7 +279,7 @@ final class JobMediaQueueUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        // At accessibility sizes the selector folds into one "Show · All" menu.
+        // The selector is one "Show" menu at every size (checked here at an accessibility size).
         let filter = app.buttons["photo-filter-menu"]
         XCTAssertTrue(filter.waitForExistence(timeout: 20))
         for _ in 0..<6 where !filter.isHittable { app.swipeUp() }
@@ -347,9 +361,7 @@ final class JobMediaQueueUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media"]
         app.launch()
-        let afterFilter = selector("After", in: app)
-        XCTAssertTrue(afterFilter.waitForExistence(timeout: 20))
-        afterFilter.tap()
+        choose("After", in: app)
         XCTAssertTrue(app.staticTexts["No matching photos"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["No photos yet"].exists)
         let showAll = app.buttons["Show all photos"]
@@ -360,8 +372,7 @@ final class JobMediaQueueUITests: XCTestCase {
         recovery.lifetime = .keepAlways
         add(recovery)
         showAll.tap()
-        let all = selector("All", in: app)
-        XCTAssertTrue(all.isSelected)
+        assertShown("All", in: app)
         let photo = app.buttons["Photo, Outdoor unit"]
         for _ in 0..<8 where !photo.isHittable { app.swipeUp() }
         XCTAssertTrue(photo.isHittable)

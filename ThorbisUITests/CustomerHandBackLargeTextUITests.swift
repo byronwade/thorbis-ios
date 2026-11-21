@@ -30,7 +30,7 @@ final class CustomerHandBackLargeTextUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["job-share"].tap(); thorbisCustomerViewMenuItem(app).tap()
+        app.buttons["Job actions"].tap(); thorbisCustomerViewMenuItem(app).tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 15))
         return app
     }

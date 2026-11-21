@@ -2,6 +2,18 @@ import SwiftUI
 import CoreLocation
 import UIKit
 
+// Owner 2026-11-21: decluttered job page. Departs from Paper 21/21K/23/21A on purpose:
+// - The bar keeps two circles (+ and •••); Share's rows moved into •••.
+// - The header is the shared `RecordHeader` (number, ONE status badge, title, when and where) with
+//   the `RelatedRow` under it; the chip row (status, time, assignee, estimate) is gone. Time moves
+//   are in •••, the technician is a Details row.
+// - Status is said in two places only: the badge and the bottom bar's step. Job details no longer
+//   draws the "Step N of 5" card (field mode keeps its strip); ••• › Back to the visit resumes it.
+// - Details no longer repeats the customer and address; Contacts leave Call/Text for the primary
+//   person to the bottom bar.
+// - Money has one inline add (the section's +) and one customer row, "Show to customer".
+// - Activity has one chip row; Photos' Before/After/Documents is one control over the grid.
+
 struct JobDetailView: View {
     let jobId: String
     let showsBack: Bool
@@ -93,6 +105,8 @@ struct JobDetailView: View {
     @State private var showDeposit = false
     /// TF-01: the estimate opened from the next step; it goes straight to the customer when asked.
     @State private var openEstimate: OpenedEstimate?
+    /// The related row's customer pill.
+    @State private var openedCustomer: Customer?
     /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
     @State private var createdEstimateID: String?
     @State private var showWrapUp = false
@@ -447,6 +461,7 @@ struct JobDetailView: View {
             InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
+        .thorbisDestination(item: $openedCustomer) { CustomerDetailView(customer: $0) }
         .thorbisDestination(item: $openEstimate) { opened in
             EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
                 .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices(); await loadCloseout() } } }
@@ -933,6 +948,10 @@ struct JobDetailView: View {
     /// Native bar with Thorbis circles: our back on the left (`thorbisDestination`), share and
     /// the job's one menu on the right (HIG-005, JS-02).
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
+        if let job, !showsBarTitle(job), !showsPhotos {
+            // The job's name joins the bar once its header has scrolled under it.
+            RecordBarTitle(title: menuTitle(job), shown: tabsPinned)
+        }
         if let job, showsBarTitle(job) {
             // Paper F2 to F4: out on the visit the bar carries the job, centred: its title at
             // 17 Semibold over "Danielle Marlowe · JOB-2214" at 13 muted. The 34 Bold header is
@@ -958,19 +977,6 @@ struct JobDetailView: View {
             }
         }
         if let job {
-            // Paper 21: Share, then More. Field mode (F2) keeps More alone.
-            if !inField(job) {
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    // Paper 21's Share circle. Its sheet leads with Share job, then the other ways
-                    // the job goes out (Customer view, Email customer, Add to Calendar, Copy job ID)
-                    // and the favorite star, which Paper 21K's More no longer carries.
-                    ThorbisMenu(items: shareMenuItems(job), title: "Share", accessibilityLabel: "Share job",
-                                presentation: .sheet, subtitle: menuSubtitle(job)) {
-                        PaperIcon(.share, size: 20).frame(width: 44, height: 44).background(Theme.card, in: Circle())
-                    }
-                    .accessibilityIdentifier("job-share")
-                }
-            }
             // Add to job stays in reach at every stage: a note, a photo, an estimate, the invoice,
             // a payment or a contact are two taps from the job, driving or done.
             if hasAddRows(job) {
@@ -1154,6 +1160,13 @@ struct JobDetailView: View {
     /// Paper F8's brand card. The app has one job screen, so it opens Overview at the job's own
     /// details (the address, customer, money and activity under the field cards).
     private func fullDetailsLead(_ job: JobRecord) -> ThorbisMenuItem? {
+        // On Job details during a visit, the same card goes back to the visit's own screen (it was
+        // the "Step N of 5" card on Overview, which repeated the status).
+        if onVisit(job), !fieldModeOpen {
+            return ThorbisMenuItem("Back to the visit", icon: "figure.walk", subtitle: "The step you are on, and what it needs") {
+                withMotion(.snappy) { fieldModeOpen = true; selectedTab = "Overview" }
+            }
+        }
         guard inField(job) else { return nil }
         return ThorbisMenuItem("Full job details", icon: "doc.text", subtitle: "Overview, money and activity") {
             withMotion(.snappy) { fieldModeOpen = false; selectedTab = "Overview" }
@@ -1194,7 +1207,10 @@ struct JobDetailView: View {
     /// menu: who to reach and "Can't finish — pause this job" first, everything else under it.
     private func moreMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
         if inField(job) { return fieldMenuItems(job) }
-        var items: [ThorbisMenuItem] = []
+        // Owner 2026-11-21: what goes out leads (it was the Share circle's sheet): Share job,
+        // Customer view, Email customer, Add to Calendar, Copy job ID and the favorite star.
+        var items: [ThorbisMenuItem] = shareMenuItems(job)
+        var firstOfPaper = true
         var pause: ThorbisMenuItem?
         var wrapUp: ThorbisMenuItem?
         var deposit: ThorbisMenuItem?
@@ -1215,6 +1231,7 @@ struct JobDetailView: View {
         ]
         for var item in deviceMenuItems(job) + reachMenuItems(job) {
             item.glyph = glyphs[item.title]
+            if firstOfPaper { item.startsGroup = true; firstOfPaper = false }
             items.append(item)
         }
         // Beyond Paper 21K, kept because Paper gives them no other door on Job details:
@@ -1226,6 +1243,13 @@ struct JobDetailView: View {
         }
         if let wrapUp { items.append(wrapUp) }
         if let deposit { items.append(deposit) }
+        // The visit's time moves and Assign (they were the header's clock and person chips).
+        var moves = whenMenuItems(job)
+        if canAssignHere(job) { moves.append(menuActionItem(.assign, job: job)) }
+        if !moves.isEmpty {
+            moves[0].startsGroup = true
+            items.append(contentsOf: moves)
+        }
         var stops: [ThorbisMenuItem] = []
         if var pause {
             pause.glyph = .morePause
@@ -1276,10 +1300,10 @@ struct JobDetailView: View {
     }
 
     /// The job's estimates, handed to the customer to choose from (the locked Customer view on its
-    /// estimates). Its door is the Money tab's estimates card (`showEstimatesRow`); field mode's menu.
+    /// estimates). Its door is the Money tab's "Show to customer" row; field mode's menu.
     private func showEstimatesItem(_ job: JobRecord) -> ThorbisMenuItem? {
         guard !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") else { return nil }
-        return ThorbisMenuItem("Show estimates", icon: "iphone", subtitle: "Hand the estimates to the customer",
+        return ThorbisMenuItem("Show to customer", icon: "iphone", subtitle: "Hand the estimates to the customer",
                                isDisabled: !canOpenCustomerView) { openCustomerView(.estimates) }
     }
 
@@ -1534,49 +1558,24 @@ struct JobDetailView: View {
                     .padding(.bottom, barTitle ? 0 : 16)
             }
             if !barTitle {
-                // Paper 21: the job's number (and its place's name) is a 13 Semibold eyebrow over
-                // the 34 Bold title; who it is for and where sit under it at 15.
-                Text(headerLines(eyebrowParts(job).joined(separator: " \u{00B7} ")))
-                    .font(Theme.font(13, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(eyebrowParts(job).joined(separator: ", "))
-                    .accessibilityIdentifier("job-number")
-                    // A long press copies the full ID (also in •••).
-                    .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
-                // Three lines at most, like every page title: a 100-character title would otherwise
-                // fill the first screen. The whole title is in Edit and read by VoiceOver.
-                Text(job.title.isEmpty ? displayTitle(job) : job.title)
-                    .font(Theme.font(34, weight: .bold))
-                    .tracking(-0.85)
-                    .lineLimit(typeSize.isAccessibilitySize ? 6 : 3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 2)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("job-title")
-                if !subtitle.isEmpty {
-                    Text(headerLines(subtitle.joined(separator: " \u{00B7} ")))
-                        .font(Theme.font(15))
-                        .foregroundStyle(Theme.subtle)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
-                        .accessibilityLabel(subtitle.joined(separator: ", "))
-                        .accessibilityIdentifier("job-subtitle")
+                // The shared record header: "JOB-2214 · Home  [Dispatched]", the problem, then when
+                // and where on one line. The badge opens the status sheet; a long press on the
+                // number copies the full ID (also in •••).
+                RecordHeader(reference: headerLines(eyebrowParts(job).joined(separator: " \u{00B7} ")),
+                             referenceSpoken: eyebrowParts(job).joined(separator: ", "),
+                             referenceIdentifier: "job-number",
+                             title: job.title.isEmpty ? displayTitle(job) : job.title,
+                             titleIdentifier: "job-title",
+                             subtitle: subtitle.isEmpty ? nil : headerLines(subtitle.joined(separator: " \u{00B7} ")),
+                             subtitleSpoken: subtitle.joined(separator: ", "),
+                             subtitleIdentifier: "job-subtitle") {
+                    statusControl(job)
                 }
-            }
-            // Paper F2 to F5: field mode has no chips; the steps say where the visit is, and the
-            // status sheet is on Job details.
-            if !barTitle {
-            FlowRow(spacing: 8, lineSpacing: 8) {
-                statusControl(job)
-                whenControl(job)
-                assigneeControl(job)
-                if let estimate = estimateChipText { JobHeaderChip(text: estimate) { EmptyView() } }
-            }
-            // Paper: the chips sit 14 under the header's words.
-            .padding(.top, 14)
-            // Paper: the chips start 16 in, with the cards; the title keeps the 20 gutter.
-            .padding(.horizontal, 16 - Theme.gutter)
+                .padding(.horizontal, -Theme.gutter).padding(.top, -14)
+                .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
+                // The customer, the estimates and the invoice: one tap away, always here.
+                RelatedRow(links: relatedLinks(job))
+                    .padding(.horizontal, -Theme.gutter).padding(.top, 8)
             }
             // What to know before touching anything leads Overview's cards (`fieldLead`).
         }
@@ -1598,54 +1597,53 @@ struct JobDetailView: View {
         return parts
     }
 
-    /// "Danielle Marlowe · 412 Birchwood Ln · Member 15% off".
+    /// "Today · 10:30 AM · 4127 Birchwood Lane": when and where. Who it is for is the first
+    /// pill of the related row under the header, which opens them.
     private func subtitleParts(_ job: JobRecord) -> [String] {
         var parts: [String] = []
-        let customer = store.customerName(job.customerId)
-        if customer != "Customer" { parts.append(customer) }
+        if let when = whenText(job) { parts.append(when.replacingOccurrences(of: " \u{00B7} ", with: ", ")) }
         if let street = street(job), street != job.title { parts.append(street) }
         return parts
     }
 
-    /// The clock chip opens the visit's time moves (Reschedule, Running late, Can't start) as an
-    /// anchored menu, like the status chip beside it; a plain chip when there is none to make.
-    @ViewBuilder private func whenControl(_ job: JobRecord) -> some View {
-        let items = whenMenuItems(job)
-        if items.isEmpty {
-            whenChip(job)
-        } else {
-            // A finished job with no time still keeps its door (it reads "Not scheduled").
-            let text = whenText(job) ?? "Not scheduled"
-            ThorbisMenu(items: items, title: "Visit time", accessibilityLabel: "Visit time, \(text). Change time") {
-                JobHeaderChip(text: text) { PaperIcon(.jobClock, size: 14, color: Theme.muted) }
-            }
-            .accessibilityIdentifier("job-when")
+    /// The records this job belongs with, in the order every record page uses: the customer, then
+    /// the estimates, then the invoice. One estimate or invoice opens itself; several open Money.
+    private func relatedLinks(_ job: JobRecord) -> [RelatedLink] {
+        var links: [RelatedLink] = []
+        let name = store.customerName(job.customerId)
+        if let customer = linkedCustomer(job) {
+            links.append(RelatedLink(id: "job-customer-link", title: customer.name, hint: "Opens the customer's profile") { openedCustomer = customer })
+        } else if name != "Customer" {
+            // No door without customer access; the name still says who the job is for.
+            links.append(RelatedLink(id: "job-customer-name", title: name, hint: "") {})
         }
-    }
-
-    /// The person chip opens Assign (Paper 53A) for whoever may assign; a plain chip otherwise.
-    @ViewBuilder private func assigneeControl(_ job: JobRecord) -> some View {
-        if canAssignHere(job) {
-            let assignee = assignedDisplayName(for: job).flatMap { $0 == "Assigned" ? nil : $0 }
-            Button { showAssign = true } label: { assigneeChip(job) }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician")
-                .accessibilityValue(assignee ?? "Unassigned")
-                .accessibilityIdentifier("job-assignee")
-        } else if job.assignedToUserId == nil || job.assignedToUserId != session.user?.id {
-            // Your own job never tells you your own name: the chip only earns its place when
-            // the job is someone else's or nobody's.
-            assigneeChip(job)
-        }
-    }
-
-    /// Paper 21's clock chip: "Today · 10:30 AM", "Arrived 9:12 AM", or when it isn't booked yet.
-    @ViewBuilder private func whenChip(_ job: JobRecord) -> some View {
-        if let text = whenText(job) {
-            JobHeaderChip(text: text) {
-                PaperIcon(.jobClock, size: 14, color: Theme.muted)
+        if session.can("estimate.view", feature: "estimates"), estimatesLoaded, !jobEstimates.isEmpty {
+            if jobEstimates.count == 1, let estimate = jobEstimates.first, estimateRead?.freshIDs.contains(estimate.id) == true {
+                links.append(RelatedLink(id: "job-related-estimates", title: "Estimate",
+                                         detail: DocumentStatus(estimateStatus: estimate.status).word, hint: "Opens the estimate") {
+                    openEstimate = OpenedEstimate(id: estimate.id, present: false)
+                })
+            } else {
+                links.append(RelatedLink(id: "job-related-estimates", title: "Estimates", detail: "\(jobEstimates.count)",
+                                         hint: "Opens this job's estimates") { selectJobSection("Money") })
             }
         }
+        let bills = invoices.filter { $0.status != "void" }
+        if session.can("invoice.view", feature: "invoicing"), invoicesLoaded, !invoicesFailed, !bills.isEmpty {
+            let current = overviewInvoicesAuthority?.isCurrent(api: api, session: session) == true
+            if bills.count == 1, let invoice = bills.first, current, invoiceRead?.freshIDs.contains(invoice.id) == true {
+                let due = TechJobFlow.due(invoice)
+                let detail = invoice.status == "draft" ? "Draft"
+                    : due.map { $0 > 0 ? "\(money($0, currency: invoice.currency)) due" : "Paid" } ?? DocumentStatus(invoice: invoice).word
+                links.append(RelatedLink(id: "job-related-invoice", title: "Invoice", detail: detail, hint: "Opens the invoice") {
+                    openOverviewInvoice(invoice, job: job)
+                })
+            } else {
+                links.append(RelatedLink(id: "job-related-invoice", title: "Invoices", detail: "\(bills.count)",
+                                         hint: "Opens this job's invoices") { selectJobSection("Money") })
+            }
+        }
+        return links
     }
 
     private func whenText(_ job: JobRecord) -> String? {
@@ -1653,36 +1651,6 @@ struct JobDetailView: View {
             return Calendar.current.isDateInToday(scheduled) ? "Today \u{00B7} \(scheduled.tradeTime)" : scheduled.visitLabel()
         }
         return job.status != "completed" && job.status != "canceled" ? "Not scheduled" : nil
-    }
-
-    /// Paper 21's person chip: the assignee's initials on the brand surface, then the short name.
-    private func assigneeChip(_ job: JobRecord) -> some View {
-        let assignee = assignedDisplayName(for: job)
-        let named = assignee.flatMap { $0 == "Assigned" ? nil : $0 }
-        let text = named.map { shortName($0) } ?? assignee ?? "Unassigned"
-        return JobHeaderChip(text: text, leadingInset: named == nil ? 12 : 6) {
-            if let named {
-                Text(initials(named))
-                    .font(Theme.font(11, weight: .semibold)).tracking(-0.22)
-                    .foregroundStyle(Theme.brandText)
-                    .frame(width: 22, height: 22)
-                    .background(Theme.brandSurface, in: Circle())
-                    .dynamicTypeSize(...DynamicTypeSize.large)
-                    .accessibilityHidden(true)
-            } else {
-                Image(systemName: "person").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.subtle)
-                    .accessibilityHidden(true)
-            }
-        }
-    }
-
-    /// Paper 21L's "$480.00 est.": only when the job has one estimate with one set of lines, so the
-    /// chip never sums papers the customer chooses between.
-    private var estimateChipText: String? {
-        guard session.can("estimate.view", feature: "estimates"), estimatesLoaded, !estimatesFailed,
-              jobEstimates.count == 1, let estimate = jobEstimates.first, (estimate.options ?? []).isEmpty,
-              let total = paperLinesTotal(estimate.lines) else { return nil }
-        return "\(jobShortMoney(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD")) est."
     }
 
     /// The note circle and, on site, the office's call circle, as 40pt card circles beside the chips.
@@ -1952,12 +1920,11 @@ struct JobDetailView: View {
         let tone = StatusTone(jobStatus: queued ?? job.status, hasTime: JobFiltering.date(job.scheduledFor) != nil || job.status != "scheduled")
         // Paper 21: the status chip is tinted with its status (the word in the status's text colour)
         // and leads with the status mark; a chevron when it opens the status popover.
-        return JobHeaderChip(text: statusWordText(job, queued: queued, now: now), fill: tone.surface,
-                             textColor: tone.text, weight: .semibold, showsChevron: showsMenu,
-                             leadingInset: 12, trailingInset: showsMenu ? 10 : 12) {
-            StatusGlyph(tone: tone, label: "", pending: queued != nil, size: 14)
-                .accessibilityHidden(true)
-        }
+        // The one status badge every record header carries; a chevron when it opens the status sheet.
+        // Its tap target reaches 44 without making the number's line taller.
+        return RecordStatusBadge(word: statusWordText(job, queued: queued, now: now), tone: tone, opensMenu: showsMenu)
+            .padding(.vertical, 12).padding(.horizontal, 6).contentShape(Rectangle())
+            .padding(.vertical, -12).padding(.horizontal, -6)
     }
 
     private func statusWordText(_ job: JobRecord, queued: String?, now: Date) -> String {
@@ -1972,13 +1939,6 @@ struct JobDetailView: View {
         guard let assignedID = job.assignedToUserId else { return nil }
         guard assignedID == session.user?.id, let name = session.user?.name, !name.isEmpty else { return "Assigned" }
         return name
-    }
-
-    private func shortName(_ name: String) -> String {
-        let parts = name.split(whereSeparator: \.isWhitespace)
-        guard let first = parts.first else { return name }
-        guard let last = parts.dropFirst().last else { return String(first) }
-        return "\(first) \(last.prefix(1))."
     }
 
     private var invoiceBalanceCents: Int? {
@@ -2208,9 +2168,9 @@ struct JobDetailView: View {
     /// The money moves beside the bar's step: quiet pills, side by side (stacked at accessibility
     /// sizes). Nothing shows when there is nothing to collect, show or build.
     @ViewBuilder private var sideStepRow: some View {
-        // Working, the Estimate tile is on the screen, so the bar doesn't repeat it.
-        let tilesShow = inFieldNow && job.map { shownStatus($0) == "in_progress" } == true && !fieldWrapsUp
-        let steps = sideSteps.filter { !(tilesShow && $0 == .buildEstimate) }
+        // Owner 2026-11-21: one way to add. A new estimate starts from the bar's + (and Money's +),
+        // so the bar no longer floats a "New estimate" pill; Collect and Show estimate still ride here.
+        let steps = sideSteps.filter { $0 != .buildEstimate }
         if !steps.isEmpty {
             let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
             layout {
@@ -2734,7 +2694,6 @@ struct JobDetailView: View {
     private func detailsOverview(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 12) {
-                fieldModeCard(job)
                 accessCard(job)
                 descriptionCard(job)
                 // The call that booked the visit (who called, the recording, what was said) sits
@@ -2752,6 +2711,7 @@ struct JobDetailView: View {
                                    loaded: current && contactsLoaded, failed: current && contactsFailed,
                                    customerID: job.customerId, jobID: job.id,
                                    customerName: linkedCustomer(job)?.name,
+                                   barPhone: current ? customerPhone : nil,
                                    onAdd: addContact) { await loadContacts(job) }
             }
             partsPanel
@@ -2975,43 +2935,6 @@ struct JobDetailView: View {
             .buttonStyle(PressStyle())
             .accessibilityHint("Closes field mode and shows the job's details")
             .accessibilityIdentifier("job-paid-done")
-        }
-    }
-
-    /// Paper 21 "Field mode · Working": where the visit is on field mode's five steps, and the
-    /// way back into it.
-    @ViewBuilder private func fieldModeCard(_ job: JobRecord) -> some View {
-        if let shown = fieldStep(job) {
-            Button { withMotion(.snappy) { fieldModeOpen = true; selectedTab = "Overview" } } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        // Plain words: which step of the visit this is, not the name of a mode.
-                        Text("Step \(shown + 1) of \(JobFieldSteps.titles.count) \u{00B7} \(JobFieldSteps.titles[shown])")
-                            .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: 4) {
-                            ForEach(0..<JobFieldSteps.titles.count, id: \.self) { index in
-                                Capsule().fill(index < shown || shown == 4 ? Theme.statusDone : index == shown ? Theme.brand : Theme.foreground.opacity(0.12))
-                                    .frame(height: 4)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(shownStatus(job) == "dispatched" ? "Open" : "Resume").paperButton(.secondary, tone: .tinted)
-                }
-                .padding(.vertical, 12).padding(.leading, 16).padding(.trailing, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .panelBackground(cornerRadius: Theme.cardRadius)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressStyle())
-            // Paper: the next card sits 16 under this one (12 between the others).
-            .padding(.bottom, 4)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Field mode, \(JobFieldSteps.titles[shown]), step \(shown + 1) of \(JobFieldSteps.titles.count)")
-            .accessibilityHint("Resumes field mode")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("job-field-mode-card")
         }
     }
 
@@ -3320,31 +3243,24 @@ struct JobDetailView: View {
     private func customerPanel(_ job: JobRecord) -> some View {
         // Paper 21 "Details": one card of label-and-value rows (Customer, Address, Equipment),
         // 56 tall, the label in the marker grey and the value at 15 Medium on the right.
+        let hasRows = showsTechnicianRow(job) || equipmentLine(job) != nil || job.pauseReason != nil || job.pauseNextAction != nil
         return VStack(alignment: .leading, spacing: 8) {
+        if hasRows {
         JobPanelLabel(title: "Details")
         JobPanel {
-            if let customer = linkedCustomer(job) {
-                NavigationLink(value: customer) { customerRow(job, name: customer.name, opens: true) }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityIdentifier("job-customer-link")
-                    .accessibilityHint("Opens the customer's profile")
-            } else {
-                customerRow(job, name: store.customerName(job.customerId), opens: false)
-            }
-            if let address = detailsAddress(job) {
-                if let url = jobDirectionsURL(job) {
-                    Button { openURL(url) } label: {
-                        detailValueRow("Address", value: address, valueColor: Theme.brandText, glyph: .jobArrowOut,
-                                       symbolColor: Theme.brandText)
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityLabel("Address, \(address)")
-                    .accessibilityHint("Opens driving directions in Maps")
-                    .accessibilityIdentifier("job-details-address")
+            // The customer and the address are the header's (the related pill and the line under
+            // the title); Details keeps what the header does not say.
+            if showsTechnicianRow(job) {
+                let assignee = assignedDisplayName(for: job).flatMap { $0 == "Assigned" ? nil : $0 }
+                if canAssignHere(job) {
+                    Button { showAssign = true } label: { detailValueRow("Technician", value: assignee ?? "Unassigned", glyph: .jobUpDown) }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityLabel(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician")
+                        .accessibilityValue(assignee ?? "Unassigned")
+                        .accessibilityIdentifier("job-assignee")
                 } else {
-                    detailValueRow("Address", value: address)
+                    detailValueRow("Technician", value: assignee ?? (job.assignedToUserId == nil ? "Unassigned" : "Assigned"))
                         .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("job-details-address")
                 }
             }
             if let equipmentLine = equipmentLine(job) {
@@ -3366,10 +3282,16 @@ struct JobDetailView: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        // A container, so the link inside keeps its own `job-customer-link` identifier.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("job-customer-panel")
         }
+        }
+    }
+
+    /// Your own job never tells you your own name: the row earns its place when the job is someone
+    /// else's or nobody's, or when this person can reassign it.
+    private func showsTechnicianRow(_ job: JobRecord) -> Bool {
+        canAssignHere(job) || job.assignedToUserId == nil || job.assignedToUserId != session.user?.id
     }
 
     /// Paper 21: why the office sent the visit, as its own card of 15pt words (22 leading) with no
@@ -3459,28 +3381,6 @@ struct JobDetailView: View {
         .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .contentShape(Rectangle())
-    }
-
-    private func customerRow(_ job: JobRecord, name: String, opens: Bool) -> some View {
-        detailValueRow("Customer", value: name, glyph: opens ? .jobUpDown : nil)
-            // The name leads what is spoken, as it led the row before.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(name)
-    }
-
-    /// The job's own address in full, when its place is on file; else the street the header shows.
-    private func detailsAddress(_ job: JobRecord) -> String? {
-        if let locationID = job.locationId, let place = customerLocations.first(where: { $0.id == locationID }) {
-            let address = place.address.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !address.isEmpty { return address }
-        }
-        return street(job)
-    }
-
-    /// Directions to the job's own place. No site is inferred: only a place the job records.
-    private func jobDirectionsURL(_ job: JobRecord) -> URL? {
-        guard let locationID = job.locationId else { return nil }
-        return JobLocationPolicy.directions(for: locationID, in: customerLocations)
     }
 
     /// Paper 21 "Trane XR14 · 2019": the equipment on file at the job's place (the customer's, when
@@ -4272,7 +4172,7 @@ struct JobDetailView: View {
             invoiceContent(job)
             // With no estimate to sit beside, Customer view keeps its own one-row card so the door
             // is on Money whatever the job holds (the Share circle opens the same view).
-            if jobEstimates.isEmpty { JobPanel { customerViewRow } }
+            if jobEstimates.isEmpty { JobPanel { showToCustomerRow } }
         }
     }
 
@@ -4328,12 +4228,11 @@ struct JobDetailView: View {
 
     /// Paper 23's totals card; nothing when no estimate has an amount to add up yet.
     @ViewBuilder private var estimateSummaryCard: some View {
-        if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true) {
-            if canBuildEstimate {
-                JobEstimateSummaryCard(summary: summary, onBuild: { buildEstimate() })
-            } else {
-                JobEstimateSummaryCard(summary: summary)
-            }
+        // Totals only. Adding is the section's + (and the bar's +); a card that held nothing but
+        // "N estimates have pricing options" is left out, since each row already says its options.
+        if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true),
+           !summary.amounts.isEmpty || summary.approvedUnavailable {
+            JobEstimateSummaryCard(summary: summary)
         }
     }
 
@@ -4364,59 +4263,31 @@ struct JobDetailView: View {
             }
             // The estimates' customer door (it was More › Show estimates): after the estimates it
             // hands over, before "Add an estimate".
-            if !jobEstimates.isEmpty { showEstimatesRow; customerViewRow }
-            if canBuildEstimate { addEstimateRow }
+            if !jobEstimates.isEmpty { showToCustomerRow }
         }
     }
 
-    /// Paper 23: "Add an estimate", 56 tall, a brand plus in the status mark's column.
-    private var addEstimateRow: some View {
-        Button(action: buildEstimate) {
-            HStack(spacing: 12) {
-                PaperIcon(.jobPlus, size: 18, color: Theme.brandText).frame(width: 20)
-                Text("Add an estimate").font(Theme.font(16, weight: .medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Theme.brandText)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityIdentifier("job-add-estimate-row")
-    }
-
-    /// "Show estimates": the job's estimates in the locked Customer view, as a row of Paper 23's
-    /// estimates card (56 tall, its mark in the status column, the hint under the words).
-    private var showEstimatesRow: some View {
-        customerDoorRow(title: "Show estimates", detail: "Hand the estimates to the customer", symbol: "iphone",
-                        spokenHint: "Shows this job's estimates to the customer",
-                        identifier: "job-money-customer-view") { openCustomerView(.estimates) }
-    }
-
-    /// "Customer view": the same locked Customer view at its home (estimates, invoices and the
-    /// customer's own details), the door the Share circle also opens, beside Show estimates.
-    private var customerViewRow: some View {
-        customerDoorRow(title: "Customer view", detail: "Estimates, invoices and their details", symbol: "person.crop.rectangle",
-                        spokenHint: "Hands the phone to the customer",
-                        identifier: "job-money-customer-view-home") { openCustomerView(.home) }
+    /// "Show to customer": the one customer row on Money. With estimates it hands them over in the
+    /// locked Customer view (it was "Show estimates"); with none it opens that view's home (it was
+    /// "Customer view", which stays in •••).
+    private var showToCustomerRow: some View {
+        let start: CustomerViewStart = jobEstimates.isEmpty ? .home : .estimates
+        return customerDoorRow(title: "Show to customer", symbol: "iphone",
+                               spokenHint: "Hands the phone to the customer",
+                               identifier: "job-money-customer-view") { openCustomerView(start) }
     }
 
     /// One customer door on the Money section: 56 tall, its mark in the status column, the hint
     /// under the words, behind the same Customer view gate as every other door.
-    private func customerDoorRow(title: String, detail: String, symbol: String, spokenHint: String,
+    private func customerDoorRow(title: String, symbol: String, spokenHint: String,
                                  identifier: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: symbol).font(.system(size: 17, weight: .regular))
                     .foregroundStyle(Theme.foreground).frame(width: 20)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                }
-                .fixedSize(horizontal: false, vertical: true)
+                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
@@ -5923,39 +5794,5 @@ enum JobLocationPolicy {
         guard let locationID, let place = locations.first(where: { $0.id == locationID }),
               !place.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return Directions.url(address: place.address, coordinates: place.coordinates)
-    }
-}
-
-/// Paper 21 Job details' header chip: a 40pt pill (the card, or a status's tint) with a small mark
-/// and 14 Medium words. Its words wrap at accessibility sizes instead of being cut.
-private struct JobHeaderChip<Leading: View>: View {
-    let text: String
-    var fill: Color = Theme.card
-    var textColor: Color = Theme.subtle
-    /// A chevron after the words, for a chip that opens a menu.
-    var weight: Font.Weight = .medium
-    var showsChevron = false
-    var leadingInset: CGFloat = 12
-    var trailingInset: CGFloat = 12
-    @ViewBuilder var leading: Leading
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        HStack(spacing: 6) {
-            leading
-            Text(text)
-                .font(Theme.font(14, weight: weight))
-                .foregroundStyle(textColor)
-                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-            if showsChevron {
-                PaperIcon(.chevronDown, size: 12, color: textColor)
-            }
-        }
-        .padding(.leading, leadingInset).padding(.trailing, trailingInset).padding(.vertical, 6)
-        .frame(minHeight: 40)
-        .background(fill, in: Capsule())
-        .contentShape(Capsule())
     }
 }

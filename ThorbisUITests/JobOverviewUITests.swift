@@ -264,7 +264,7 @@ final class JobOverviewUITests: XCTestCase {
 
     func testCustomerLinkIsComfortableAndOpensCustomerProfile() {
         let app = preview("job", working: true)
-        // v2: the customer is one row of the customer panel on Overview (name, then "Residential · 2 jobs").
+        // Owner 2026-11-21: the customer is the first pill of the related row under the header.
         let customer = app.buttons["job-customer-link"]
         XCTAssertTrue(customer.waitForExistence(timeout: 20))
         // Bring the row into the open middle of the screen, clear of the bar above and the commit below.
@@ -337,31 +337,32 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertLessThanOrEqual(element.frame.maxY, barTop(), "\(element.label) should scroll clear of the job's bar")
     }
 
-    /// Paper 23, 24 and 21B: Money and Activity keep the job's header (its name, the status chip
-    /// and the other chips) over the sections. Overview's own cards (the customer, the balance,
-    /// Customer view, the capture tiles) and the visit's steps stay on Overview and come back with
-    /// it. (Paper F4: a job under way has no Call/Text/Directions circles; its Photo tile stands
-    /// for Overview's own actions.)
+    /// Owner 2026-11-21: Money and Activity keep the job's header (its name, the one status badge)
+    /// and the related row under it (the customer pill is on every section, in the same spot).
+    /// Job details draws no "Step N of 5" card and none of field mode's steps: status is the badge
+    /// and the bar's step. More › Back to the visit resumes field mode (it was the card's Resume).
     func testDocumentTabsKeepTheJobHeaderWithoutRepeatingOverviewCards() {
         let app = preview("job", working: true)
-        // Paper 21: a job under way leads Overview with its field-mode card.
-        XCTAssertTrue(app.buttons["job-field-mode-card"].waitForExistence(timeout: 20))
         XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["job-field-mode-card"].exists, "Job details has no step card: the badge and the bar say the status")
         for tab in ["Money", "Activity"] {
             thorbisSection(app, tab).tap()
             let name = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "AC not cooling", "412 Birchwood Ln")).firstMatch
             XCTAssertTrue(name.waitForExistence(timeout: 5), "\(tab) keeps the job's name")
-            // The header's status chip: a menu button when the status can move, a word otherwise.
+            // The header's status badge: a menu button when the status can move, a word otherwise.
             let status = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Job status,")).firstMatch
-            XCTAssertTrue(status.waitForExistence(timeout: 5), "\(tab) keeps the header's status chip")
-            XCTAssertFalse(app.buttons["job-field-mode-card"].exists, "\(tab) must not repeat Overview's field-mode card")
-            XCTAssertFalse(app.buttons["job-customer-link"].exists, "\(tab) must not repeat the customer line")
+            XCTAssertTrue(status.waitForExistence(timeout: 5), "\(tab) keeps the header's status badge")
+            XCTAssertFalse(app.buttons["job-field-mode-card"].exists, "\(tab) has no step card")
+            XCTAssertEqual(app.buttons.matching(identifier: "job-customer-link").count, 1, "\(tab) keeps the customer pill under the header, once")
             XCTAssertFalse(app.otherElements["job-field-steps"].exists, "\(tab) must not show field mode's steps")
         }
         thorbisSection(app, "Overview").tap()
-        XCTAssertTrue(app.buttons["job-field-mode-card"].waitForExistence(timeout: 5))
-        // Resume opens field mode: the steps and the capture tiles, no sections.
-        app.buttons["job-field-mode-card"].tap()
+        XCTAssertEqual(app.buttons.matching(identifier: "job-customer-link").count, 1, "Overview links the customer once, under the header")
+        // More › Back to the visit opens field mode: the steps and the capture tiles, no sections.
+        let more = app.buttons["Job actions"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        let back = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Back to the visit")).firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
         XCTAssertTrue(app.buttons["job-tool-photo"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["job-section-money"].exists, "Field mode has no sections")
     }
@@ -392,59 +393,40 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Job actions"].exists)
     }
 
-    /// Paper 21K trims More to its eight rows; every action it no longer carries stays one tap from
-    /// its door on Job details: the clock chip (Reschedule), the person chip (Reassign technician),
-    /// the Share circle (Add to Calendar, Customer view, Copy job ID). More keeps Wrap up's closeout
-    /// checklist while the bar is not carrying it.
+    /// Owner 2026-11-21: the bar keeps two circles (+ and More), so More is every secondary
+    /// action's one door: what goes out (it was the Share circle: Share job, Customer view, Add to
+    /// Calendar, Copy job ID), Paper 21K's rows, the visit's time moves (it was the clock chip) and
+    /// Wrap up's closeout checklist while the bar is not carrying it. The technician is a row of
+    /// Details (it was the person chip).
     func testEverySecondaryActionKeepsADoorAndSchedulingOpens() {
         continueAfterFailure = false
         let app = preview("job", working: true)
         // The financial step appears only after the job's paper finishes loading.
         XCTAssertTrue(thorbisJobBalanceLoaded(app, "$340.00").waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["job-share"].exists, "Share lives in More; the bar keeps + and More")
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
-        for title in ["Time and profit", "At this address", "Wrap up,"] {
+        for title in ["Share job", "Customer view", "Add to Calendar", "Copy job ID", "Time and profit", "At this address", "Wrap up,", "Reschedule"] {
             let action = button(startingWith: title, in: app)
             XCTAssertTrue(action.waitForExistence(timeout: 5), "Missing More row: \(title)")
             revealMenuRow(action, in: app)
             XCTAssertTrue(action.isHittable, "More row is unreachable: \(title)")
         }
-        for title in ["Reschedule", "Add to Calendar", "Customer view", "Copy job ID"] {
-            XCTAssertFalse(button(startingWith: title, in: app).exists, "\(title) moved out of More (Paper 21K)")
-        }
         capture(app, name: "Job More menu")
-        closeSheet(app)
 
-        // The Share circle's sheet.
-        let share = app.buttons["job-share"]
-        XCTAssertTrue(share.waitForExistence(timeout: 5)); share.tap()
-        XCTAssertTrue(app.buttons["Copy job ID"].waitForExistence(timeout: 5), "The Share sheet opens")
-        for title in ["Share job", "Customer view", "Add to Calendar", "Copy job ID"] {
-            // The circle itself is also "Share job": the sheet's row is the last match.
-            let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", title, "job-share")).firstMatch
-            XCTAssertTrue(action.waitForExistence(timeout: 5), "Missing Share row: \(title)")
-            revealMenuRow(action, in: app)
-            XCTAssertTrue(action.isHittable, "Share row is unreachable: \(title)")
-        }
-        capture(app, name: "Job Share sheet")
-        closeSheet(app)
-
-        // The person chip assigns.
-        let assignee = app.buttons["job-assignee"]
-        XCTAssertTrue(assignee.waitForExistence(timeout: 5))
-        XCTAssertTrue(assignee.label.hasPrefix("Reassign technician"), assignee.label)
-
-        // The clock chip reschedules.
-        let when = app.buttons["job-when"]
-        XCTAssertTrue(when.waitForExistence(timeout: 5)); reveal(when, in: app)
-        when.tap()
-        let reschedule = app.buttons["Reschedule"]
-        XCTAssertTrue(reschedule.waitForExistence(timeout: 5))
+        // More › Reschedule opens the schedule sheet (it was the clock chip's menu).
+        let reschedule = button(startingWith: "Reschedule", in: app)
         reschedule.tap()
         XCTAssertTrue(app.buttons["Save schedule"].waitForExistence(timeout: 5))
         // Paper 25: the schedule sheet closes from its Close circle.
         app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+
+        // Details' Technician row assigns.
+        let assignee = app.buttons["job-assignee"]
+        XCTAssertTrue(assignee.waitForExistence(timeout: 5)); reveal(assignee, in: app)
+        XCTAssertTrue(assignee.label.hasPrefix("Reassign technician"), assignee.label)
         XCTAssertTrue(more.waitForExistence(timeout: 5))
     }
 

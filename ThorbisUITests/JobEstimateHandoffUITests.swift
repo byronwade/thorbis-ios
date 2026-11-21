@@ -53,12 +53,8 @@ func thorbisOpenJobShare(_ app: XCUIApplication, unless row: XCUIElement) {
     guard !row.exists else { return }
     let more = app.buttons["Job actions"]
     guard more.waitForExistence(timeout: 30) else { return }
-    let share = app.buttons["job-share"]
-    guard share.exists else { return thorbisOpenJobMore(app, unless: row) }
-    let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: share)
-    guard XCTWaiter.wait(for: [reachable], timeout: 3) == .completed else { return }
-    share.tap()
-    if row.waitForExistence(timeout: 5) { thorbisRevealJobMenuRow(row, in: app) }
+    // Owner 2026-11-21: the Share circle's rows moved into More (the bar keeps + and More only).
+    thorbisOpenJobMore(app, unless: row)
 }
 
 /// Share › Customer view (More › Customer view in field mode), opening the sheet first when closed.
@@ -73,10 +69,12 @@ func thorbisCustomerViewDoor(_ app: XCUIApplication) -> XCUIElement {
 /// menu still carries it). Opens Money and scrolls the row into reach.
 @MainActor
 func thorbisShowCustomerDoor(_ app: XCUIApplication) -> XCUIElement {
-    let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show estimates")).firstMatch
+    // Owner 2026-11-21: Money's two customer rows are one, "Show to customer" (field mode's menu too).
+    let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show to customer")).firstMatch
     if row.exists && row.isHittable { return row }
     guard app.buttons["Job actions"].waitForExistence(timeout: 30) else { return row }
-    guard app.buttons["job-share"].exists else {
+    // Job details has its sections; field mode has none and keeps the row in More.
+    guard app.buttons["job-section-money"].exists || app.buttons["job-section-chooser"].exists else {
         thorbisOpenJobMore(app, unless: row)
         return row
     }

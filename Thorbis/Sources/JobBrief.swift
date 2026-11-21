@@ -153,6 +153,16 @@ enum JobContacts {
         return people
     }
 
+    /// True when both are the same phone number, however each was typed.
+    static func sameNumber(_ lhs: String?, _ rhs: String?) -> Bool {
+        func digits(_ raw: String?) -> String {
+            let all = (raw ?? "").prefix { !"xX,;".contains($0) }.filter(\.isNumber)
+            return all.count == 11 && all.hasPrefix("1") ? String(all.dropFirst()) : String(all)
+        }
+        let left = digits(lhs)
+        return left.count >= 7 && left == digits(rhs)
+    }
+
     /// "Prefers text" from the account's preferred channel.
     static func preference(_ customer: CustomerRecord?) -> String? {
         switch customer?.preferredContact {
@@ -176,6 +186,9 @@ struct JobContactsSection: View {
     /// The account's name as the job already shows it: a contact with the same name leads with
     /// its role instead of repeating the name (each fact once).
     var customerName: String? = nil
+    /// Owner 2026-11-21 (one fact, one place): the number the job's bottom bar already calls and
+    /// texts. A person reached on that same number shows no Call or Text of their own here.
+    var barPhone: String? = nil
     /// Paper 21 / 26A: the plus beside the label adds a contact. Nil when this person can't.
     var onAdd: (() -> Void)? = nil
     let retry: () async -> Void
@@ -207,6 +220,7 @@ struct JobContactsSection: View {
                     ForEach(people) { person in
                         JobContactRow(person: person, emailContext: "job:\(jobID):contact:\(person.id)",
                                       divided: person.id != people.first?.id,
+                                      reachedFromBar: JobContacts.sameNumber(person.phone, barPhone),
                                       route: customerID.flatMap { id in
                                           person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)
                                       })
@@ -224,6 +238,8 @@ private struct JobContactRow: View {
     let emailContext: String
     /// A hairline above the row's words (every row but the first).
     var divided = false
+    /// The job's bar calls and texts this same number, so the row does not repeat the circles.
+    var reachedFromBar = false
     var route: PaperRoute? = nil
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
@@ -252,8 +268,10 @@ private struct JobContactRow: View {
                 } else {
                     info.frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let call = reach.call { glyph("phone", label: "Call \(person.name)") { openURL(call) } }
-                if let text = reach.text { glyph("message", label: "Text \(person.name)") { inboxText(text, name: person.name, openURL: openURL) } }
+                if !reachedFromBar {
+                    if let call = reach.call { glyph("phone", label: "Call \(person.name)") { openURL(call) } }
+                    if let text = reach.text { glyph("message", label: "Text \(person.name)") { inboxText(text, name: person.name, openURL: openURL) } }
+                }
                 // Paper draws Call and Text; Email takes their place for a contact with no number.
                 if reach.call == nil, let email = reach.email { glyph("envelope", label: "Email \(person.name)") { inboxEmail(email, context: emailContext) } }
             }

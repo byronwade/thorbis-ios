@@ -135,7 +135,7 @@ final class CustomerDocumentBookRecoveryUITests: XCTestCase {
                                "--paper-preview-job-documents", extra] + additional
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["job-share"].tap()
+        app.buttons["Job actions"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         return app
     }

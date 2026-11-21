@@ -30,7 +30,7 @@ final class CustomerDocumentBookSigningUITests: XCTestCase {
         if signed { app.launchArguments.append("--paper-preview-job-invoice-signed") }
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["job-share"].tap()
+        app.buttons["Job actions"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10))
