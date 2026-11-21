@@ -587,6 +587,9 @@ final class APIClient: ObservableObject {
         origin.path = path
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
+        // URLComponents leaves "+" as it is in a query value, and the API reads a bare "+" as a
+        // space. Send it encoded, the way the web app does.
+        origin.percentEncodedQuery = origin.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
         let freshRead = requireFresh || (SavedCopies.liveOnly && method.uppercased() == "GET")
         var req = URLRequest(url: url, cachePolicy: freshRead ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)

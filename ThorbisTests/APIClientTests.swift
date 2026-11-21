@@ -57,6 +57,17 @@ final class APIClientTests: XCTestCase {
         ])
     }
 
+    func testAPlusSignInAQueryValueIsSentEncoded() async throws {
+        let session = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":null}"#)])
+        let client = APIClient(session: session, baseURL: "https://app.thorbis.com")
+
+        let _: Items<Job> = try await client.send("GET", "/v1/jobs", queryItems: [URLQueryItem(name: "q", value: "A+ Heating & Air")])
+
+        // The API reads a bare "+" in a query as a space, so it has to arrive as %2B.
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.absoluteString,
+                       "https://app.thorbis.com/v1/jobs?q=A%2B%20Heating%20%26%20Air")
+    }
+
     func testCustomersFollowKeysetCursorAndIncludeEveryPage() async throws {
         let session = URLProtocolFixture.session([
             .init(200, #"{"items":[{"id":"c1","name":"Acme"}],"nextCursor":"next"}"#),
