@@ -42,6 +42,27 @@ final class EquipmentMembershipTests: XCTestCase {
         XCTAssertEqual(body["serialNumber"] as? String, "2419E")
     }
 
+    func testTheEquipmentBookReadsEveryPage() async throws {
+        func unit(_ id: String) -> String {
+            #"{"id":"\#(id)","organizationId":"o","customerId":"\#(customerID)","name":"Unit","createdAt":"2026-10-27T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}"#
+        }
+        let first = "00000000-0000-4000-8000-000000006101"
+        let second = "00000000-0000-4000-8000-000000006102"
+        let session = URLProtocolFixture.session([
+            .init(200, #"{"items":[\#(unit(first))],"nextCursor":"\#(first)"}"#),
+            .init(200, #"{"items":[\#(unit(second))]}"#),
+        ])
+        let client = APIClient(session: session, baseURL: "https://app.thorbis.com")
+
+        let units = try await client.allEquipment()
+
+        XCTAssertEqual(units.map(\.id), [first, second])
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.absoluteString }, [
+            "https://app.thorbis.com/v1/equipment",
+            "https://app.thorbis.com/v1/equipment?cursor=\(first)",
+        ])
+    }
+
     func testDaysRoundTripWithoutTimeZoneDrift() {
         let day = EquipmentRecord.day("2029-06-12")!
         XCTAssertEqual(EquipmentRecord.dayString(day), "2029-06-12")

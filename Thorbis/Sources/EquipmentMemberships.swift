@@ -301,17 +301,40 @@ enum JobServiceContextLoader {
     }
 }
 
-private struct ItemsPage<T: Decodable>: Decodable { let items: [T] }
+private struct ItemsPage<T: Decodable>: Decodable {
+    let items: [T]
+    /// Set by the company-wide books while more rows remain. A customer's own list arrives whole.
+    let nextCursor: String?
+}
 
 extension APIClient {
+    /// Every page of a company-wide book. The server sends 200 rows a page and a `nextCursor`
+    /// while more remain, so one read is not the whole book.
+    private func allBookPages<T: Decodable>(_ path: String) async throws -> [T] {
+        let generation = requestGeneration
+        var items: [T] = []
+        var cursor: String?
+        var seen = Set<String>()
+        repeat {
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            let page: ItemsPage<T> = try await send("GET", path, cursor: cursor)
+            items.append(contentsOf: page.items)
+            cursor = page.nextCursor
+            if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
+                throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")
+            }
+        } while cursor != nil
+        return items
+    }
+
     func customerEquipment(_ customerID: String) async throws -> [EquipmentRecord] {
         let page: ItemsPage<EquipmentRecord> = try await send("GET", "/v1/customers/\(try uuid(customerID))/equipment")
         return page.items
     }
 
     func allEquipment() async throws -> [EquipmentRecord] {
-        let page: ItemsPage<EquipmentRecord> = try await send("GET", "/v1/equipment")
-        return page.items
+        try await allBookPages("/v1/equipment")
     }
 
     func addEquipment(_ customerID: String, _ input: EquipmentInput) async throws -> EquipmentRecord {
@@ -348,8 +371,7 @@ extension APIClient {
     }
 
     func allMemberships() async throws -> [MembershipRecord] {
-        let page: ItemsPage<MembershipRecord> = try await send("GET", "/v1/memberships")
-        return page.items
+        try await allBookPages("/v1/memberships")
     }
 
     func customerMemberships(_ customerID: String) async throws -> [MembershipRecord] {
