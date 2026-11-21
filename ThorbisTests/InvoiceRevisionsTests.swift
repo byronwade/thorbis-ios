@@ -339,6 +339,21 @@ final class InvoiceRevisionsTests: XCTestCase {
         XCTAssertThrowsError(try voided.removeLine(id: voided.lines[0].id)) { XCTAssertEqual($0 as? InvoiceLineEditorError, .notDraft) }
     }
 
+    /// What a real server answered a technician who took a quantity off an issued invoice.
+    func testALowerTotalRefusedForTheRoleReadsInPlainWords() {
+        let refused = Problem(title: "authorization", status: 403, detail: "not permitted: invoice.discount (out_of_scope)",
+                              code: nil, category: "authorization")
+        XCTAssertEqual(InvoiceRevisionWords.lineEditMessage(refused), InvoiceRevisionWords.lowerTotalRefused)
+        XCTAssertFalse(InvoiceRevisionWords.lineEditMessage(refused).contains("invoice.discount"))
+        let other = Problem(title: "authorization", status: 403, detail: "not permitted: invoice.edit (no_grant)",
+                            code: nil, category: "authorization")
+        XCTAssertEqual(InvoiceRevisionWords.lineEditMessage(other), InvoiceRevisionWords.roleRefused)
+        // A feature that is off keeps its own words.
+        let off = Problem(title: "feature unavailable", status: 403, detail: "invoice_revisions is not released to this organization",
+                          code: nil, category: "feature_unavailable")
+        XCTAssertEqual(InvoiceRevisionWords.lineEditMessage(off), "invoice_revisions is not released to this organization")
+    }
+
     func testLineEditRefusalsReadInPlainWordsAndKeepStaleHandling() {
         XCTAssertEqual(InvoiceRevisionWords.lineEditMessage(problem(409, code: "invoice_total_below_paid")),
                        "That would make the invoice less than what\u{2019}s been paid.")

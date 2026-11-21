@@ -225,11 +225,19 @@ enum InvoiceRevisionWords {
 
     /// What the line editor shows for a failed save: our words for a named refusal, else the server's.
     static func lineEditMessage(_ error: Error) -> String {
+        if let problem = error as? Problem, problem.status == 403, problem.category == "authorization" {
+            // The server names the permission ("not permitted: invoice.discount (out_of_scope)").
+            // Taking money off an invoice is a discount, which a technician's role does not hold.
+            return problem.detail?.contains("invoice.discount") == true ? lowerTotalRefused : roleRefused
+        }
         guard let problem = error as? Problem, problem.status == 409, let words = message(code: problem.code) else {
             return error.localizedDescription
         }
         return words
     }
+
+    static let lowerTotalRefused = "Your role can\u{2019}t lower an invoice total. Put the lines back, or ask your office to take it off."
+    static let roleRefused = "Your role can\u{2019}t change this invoice. Ask your office."
 
     /// A 409 the latest invoice would not fix (reloading and saving again gets the same answer),
     /// so the editor does not offer "Review latest invoice" for it. Every other 409 keeps the offer.
