@@ -13,6 +13,9 @@ concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  XCODE_APP: /Applications/Xcode_26.3.app
+
 jobs:
   controls-lint:
     name: Custom controls guard
@@ -24,37 +27,125 @@ jobs:
       - uses: actions/checkout@v4
       - name: Guard against stock SwiftUI controls
         run: ./scripts/lint-stock-controls.sh
+      - name: Check the UI test shards cover every class once
+        run: python3 scripts/ui_test_shards.py --shards 6 --check
+      - name: Test the guard and the shard planner
+        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards
 
+  # One job used to build, run 1,500 unit tests and then 450 UI tests in a row. The UI tests
+  # alone need more than two hours on one runner, so that job hit its time limit on every run
+  # and never reported. Now the app is built once here and the unit tests run here; the UI
+  # tests run from the same build in the `ui` shards below.
   build:
     runs-on: macos-15
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode 26.3
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '26.3'
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
-      - name: Build and test on an iPhone simulator
+      - name: Restore Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: swift-packages-${{ hashFiles('project.yml') }}
+      - name: Build the app and both test bundles
         # Signed to run locally (ad hoc, no team or profile): an unsigned test host has no keychain
         # access in the simulator (errSecMissingEntitlement, -34018), and the price book's denial
         # marker lives in the keychain.
         run: |
-          simulator_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for key,values in sorted(d["devices"].items(), reverse=True) if "iOS" in key for v in values if v["name"].startswith("iPhone")))')
+          simulator_id=$(scripts/ci-simulator-id.sh)
           xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
-            -resultBundlePath "${{ runner.temp }}/ThorbisTests.xcresult" \
-            -parallel-testing-enabled NO \
+            -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
-            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= test
-      - name: Save test evidence
+            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= build-for-testing
+      - name: Unit tests
+        run: |
+          simulator_id=$(scripts/ci-simulator-id.sh)
+          xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
+            -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
+            -resultBundlePath "${{ runner.temp }}/ThorbisUnitTests.xcresult" \
+            -parallel-testing-enabled NO \
+            -only-testing:ThorbisTests test-without-building
+      - name: Save unit test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-test-results
-          path: ${{ runner.temp }}/ThorbisTests.xcresult
+          name: ios-unit-test-results
+          path: ${{ runner.temp }}/ThorbisUnitTests.xcresult
           if-no-files-found: ignore
+          retention-days: 14
+      - name: Pack the build for the UI test shards
+        # tar keeps the bundles' symlinks, executable bits and ad hoc signatures intact.
+        run: tar -C "${{ runner.temp }}/ThorbisDerivedData/Build" -cf "${{ runner.temp }}/ThorbisTestBuild.tar" Products
+      - name: Hand the build to the UI test shards
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-build
+          path: ${{ runner.temp }}/ThorbisTestBuild.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  ui:
+    name: UI tests (${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # The split is by class and balanced by test count: scripts/ui_test_shards.py --list.
+        # Changing the number of entries here is the only edit needed to re-split, apart from
+        # the `--check` step in controls-lint.
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
+      - name: Fetch the build
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-test-build
+          path: ${{ runner.temp }}
+      - name: Run this shard's UI tests
+        run: |
+          mkdir -p "${{ runner.temp }}/ThorbisBuild"
+          tar -C "${{ runner.temp }}/ThorbisBuild" -xf "${{ runner.temp }}/ThorbisTestBuild.tar"
+          test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
+          [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
+          only_testing=$(python3 scripts/ui_test_shards.py --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
+          simulator_id=$(scripts/ci-simulator-id.sh)
+          # $only_testing is a list of -only-testing: arguments and must split on spaces.
+          # shellcheck disable=SC2086
+          xcodebuild -xctestrun "$test_run" \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -resultBundlePath "${{ runner.temp }}/ThorbisUITests-${{ matrix.shard }}.xcresult" \
+            -parallel-testing-enabled NO \
+            $only_testing test-without-building
+      - name: Save UI test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-test-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ThorbisUITests-${{ matrix.shard }}.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # One check to require instead of six: green only when every shard passed.
+  ui-tests:
+    name: UI tests
+    if: always()
+    needs: ui
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every UI test shard passed
+        run: |
+          [[ "${{ needs.ui.result }}" == "success" ]] || { echo "UI test shards: ${{ needs.ui.result }}" >&2; exit 1; }
