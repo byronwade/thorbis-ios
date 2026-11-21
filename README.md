@@ -1,7 +1,11 @@
 # Thorbis iOS (SwiftUI)
 
-Native field app: sign in, Schedule, Jobs (grouped by status), Job details with status transitions,
-Customers (A–Z) and customer detail, More menu. Design source: Paper → "Thorbis Mobile".
+Native field app for technicians, owners and office staff: schedule, jobs and the job screen,
+customers, estimates, invoices and payments, messages, search, reports, team and settings.
+Design source: Paper → "Thorbis Mobile".
+
+The app is a client of the Thorbis API, which lives in the `byronwade/Thorbis-TanStack`
+repository (`services/api`). No business rules live here.
 
 All iOS work follows the [app-wide golden rules](docs/design/ios-golden-rules.md)
 and [implementation/review process](docs/design/ios-implementation-process.md).
@@ -9,15 +13,16 @@ The full user-supplied field-management design guidelines are retained as contex
 existing implementation gaps remain explicit in [design coverage](docs/design/README.md).
 
 ```sh
-cd apps/ios
-xcodegen
+xcodegen generate
 xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -derivedDataPath build build
 ```
 
-Local API (in-memory, header identity): run the memory composition of `services/api` on
-`127.0.0.1:8788`, then pick **Local dev identity** on the sign-in screen. The API base URL can be
-changed on the sign-in screen (stored in UserDefaults).
+A release build talks only to `https://app.thorbis.com`. A debug build can be pointed at an API
+running on this Mac: set `THORBIS_API_URL` in the scheme's environment to a loopback address such
+as `http://localhost:8799` (where `pnpm dev` serves it), then sign in with an account on that
+API. Running the API locally is covered by `docs/runbooks/local-development.md` in
+`Thorbis-TanStack`.
 
 ## TestFlight
 
@@ -29,5 +34,11 @@ BUILD_NUMBER=17 scripts/testflight.sh             # test, archive, upload
 BUILD_NUMBER=17 scripts/testflight.sh --no-upload # stop after exporting the .ipa
 ```
 
-Record each upload in `docs/release/build-<n>.md`. CI (`.github/workflows/ios.yml`) runs the same
-simulator tests on every pull request.
+Record each upload in `docs/release/build-<n>.md`.
+
+## CI
+
+`.github/workflows/ios.yml` runs on every pull request. It builds the app once, runs the unit
+tests, and then runs the UI tests from that build in parallel shards
+(`scripts/ui_test_shards.py --shards 6 --list` shows the split). `UI tests` is the one check that
+says every shard passed.

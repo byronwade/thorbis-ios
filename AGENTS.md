@@ -1,16 +1,20 @@
 # Native iOS app (SwiftUI)
 
-`apps/ios` is the native SwiftUI field app built from the Paper "Thorbis Mobile" page
+This repository is the native SwiftUI field app built from the Paper "Thorbis Mobile" page
 (file "Thorbis — Schedule Redesign", page B-0, 390×844 artboards). It is a thin client of the
-canonical API (`services/api`, OpenAPI in `services/api/openapi.json`). No business rules live here.
+canonical API, which lives in the `byronwade/Thorbis-TanStack` repository (`services/api`; routes
+in `services/api/src/routes/manifest.ts`, OpenAPI in `services/api/openapi.json`). No business
+rules live here.
 
 - Generate the project with `xcodegen` (the `.xcodeproj` is not committed).
-- Apple commerce rules from `apps/mobile/AGENTS.md` and ADR-0018 apply: no plan purchase,
-  upgrade, pricing, StoreKit/IAP or external checkout surfaces, and no arbitrary URL opening.
-- Auth: production uses the Better Auth session cookie (`/api/auth/sign-in/email`). Against a
-  loopback API the app offers "Local dev identity", which sends the `x-thorbis-*` dev headers that
-  only `createDevHeaderIdentityResolver` accepts.
-- Not built by Thorbis CI; build locally with Xcode.
+- Apple commerce rules from `apps/mobile/AGENTS.md`, `contracts/mobile/` and ADR-0018 in
+  `Thorbis-TanStack` apply: no plan purchase, upgrade, pricing, StoreKit/IAP or external checkout
+  surfaces, and no arbitrary URL opening.
+- Auth: the Better Auth session cookie (`/api/auth/sign-in/email`). A release build talks only to
+  `https://app.thorbis.com`. A debug build can be pointed at an API on a loopback address with
+  `THORBIS_API_URL`; nothing else is accepted.
+- CI (`.github/workflows/ios.yml`) builds the app and runs the unit and UI tests on every pull
+  request. TestFlight builds are cut on a Mac with `scripts/testflight.sh`.
 
 ## App-wide golden rules — required for every change
 
