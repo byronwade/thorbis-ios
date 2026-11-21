@@ -591,7 +591,7 @@ struct JobAccessBanner: View {
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .contextMenu {
             ForEach(facts.filter(\.isCode)) { fact in
-                Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { UIPasteboard.general.string = fact.value }
+                Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { AccessCodeCopy.copy(fact.value) }
             }
         }
         .accessibilityElement(children: .combine)

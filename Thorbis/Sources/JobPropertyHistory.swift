@@ -1,5 +1,19 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+/// Copies a gate or alarm code so it stays on this phone and goes away on its own. A plain copy
+/// is handed to the person's other Apple devices and stays on the clipboard until something
+/// replaces it.
+enum AccessCodeCopy {
+    static let lifetime: TimeInterval = 120
+
+    @MainActor
+    static func copy(_ code: String) {
+        UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: code]],
+                                      options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(lifetime)])
+    }
+}
 
 /// "Before you go in": what the technician should know about the place, read from data the app
 /// already has (the job, the customer's locations, equipment and the job's visit history).
@@ -271,7 +285,7 @@ struct JobPropertyHistorySection: View {
                     JobPanelFact(label: fact.label, value: fact.value, mono: true)
                         .contentShape(Rectangle())
                         .contextMenu {
-                            Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { UIPasteboard.general.string = fact.value }
+                            Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { AccessCodeCopy.copy(fact.value) }
                         }
                         .accessibilityHint("Touch and hold to copy")
                 } else {
