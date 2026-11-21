@@ -39,7 +39,7 @@ struct EstimateCreationRecovery {
               created.lines.count == request.lines.count else { return false }
         return zip(request.lines, created.lines).allSatisfy { requested, saved in
             guard requested.description == saved.description, requested.quantity == saved.quantity,
-                  requested.unitPrice == saved.unitPrice else { return false }
+                  requested.unitPrice == saved.unitPrice || isMemberPriced(requested, saved: saved) else { return false }
             if (requested.showToCustomer ?? true) != (saved.showToCustomer ?? true) { return false }
             switch requested.source ?? .manual {
             case .manual: return saved.source == nil || saved.source?.kind == "manual"
@@ -50,6 +50,17 @@ struct EstimateCreationRecovery {
             case .unsupported: return false
             }
         }
+    }
+
+    /// The server charges a member the member price for a price-book line sent at list price:
+    /// it stores the lower price, marks `unit_price` overridden and keeps the list price as the
+    /// original. That is the submitted line, not a different one.
+    private static func isMemberPriced(_ requested: FieldEstimateLineInput, saved: FieldLine) -> Bool {
+        guard case .priceBookSelection = requested.source ?? .manual, let source = saved.source,
+              source.kind == "price_book", source.overriddenFields?.contains("unit_price") == true,
+              source.originalUnitPrice == requested.unitPrice else { return false }
+        return saved.unitPrice.currency == requested.unitPrice.currency &&
+            saved.unitPrice.amount >= 0 && saved.unitPrice.amount < requested.unitPrice.amount
     }
 
     enum GroupResult { case preserved, missing, conflicting }
