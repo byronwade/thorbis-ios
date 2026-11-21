@@ -1,4 +1,13 @@
 import SwiftUI
+
+// Owner 2026-11-21: decluttered customer page. Departs from Paper 48N/48D on purpose:
+// - The header is the shared `RecordHeader` (CUS number, the name, one line of facts).
+// - The hub is the one layout. Its rows follow the order every record page links in: Jobs,
+//   Estimates, Invoices, then Property, Equipment, Plan, Photos and files, Texts and calls, Notes.
+//   The "Everything for …" label over the one card is gone.
+// - The tabbed page is a sub-page of the hub (its rows push it), so it stays, cut from five
+//   segments to three like the job: Jobs, Money, Photos. "Overview" was a second Back, and
+//   Activity is its own page from Customer actions. The chips under Activity are unchanged.
 import UIKit
 
 enum CustomerJobHistory {
@@ -87,6 +96,11 @@ struct CustomersView: View {
                 PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading…" : "\(PaperCount.text(active.count)) \(active.count == 1 ? "customer" : "customers") · \(PaperCount.text(activeJobs)) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
                 // Paper 47: "Search or ask" on the card, the book's filter circle inside it.
                 searchBar
+                // Owner 2026-11-21: the one filter row every list uses (search, then chips).
+                RecordFilterChips(chips: [.init(id: CustomerListScope.all.rawValue, title: "All"),
+                                          .init(id: CustomerListScope.recent.rawValue, title: "Recent")],
+                                  selection: $selectedView, hint: "Filters the customers", inset: PaperCardMetrics.margin)
+                    .padding(.top, 12)
                 if let error = error ?? store.error {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
                         .padding(.top, 12)
@@ -97,13 +111,13 @@ struct CustomersView: View {
                 ForEach(Array(sections.enumerated()), id: \.element.0) { index, section in
                     // 22 under the search field, then 16 between a card and the next letter.
                     PaperCardLabel(title: section.0, count: section.1.count)
-                        .padding(.top, index == 0 ? 22 : 16)
+                        .padding(.top, index == 0 ? 14 : 16)
                     // Clipped to the card, so a swiped row's Archive cell keeps the card's corners.
                     // Row by row in the lazy stack: one card of every customer built at once stalls
                     // a large book.
                     ForEach(Array(section.1.enumerated()), id: \.element.id) { rowIndex, customer in
                         VStack(alignment: .leading, spacing: 0) {
-                            if rowIndex > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? 16 : 60) }
+                            if rowIndex > 0 { WellDivider(leading: 16) }
                             customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
                         }
                         .paperRowsCardSlice(first: rowIndex == 0, last: rowIndex == section.1.count - 1)
@@ -188,6 +202,7 @@ struct CustomersView: View {
                                 (late ? "Late, " : "") + job.status.statusLabel + (visitWhen(job, now: now).map { ", \($0)" } ?? "")
                             },
                             jobs: "\(jobCount) \(jobCount == 1 ? "job" : "jobs")",
+                            word: summaryJob.map { late ? "Late" : $0.status.statusLabel },
                             archived: customer.archived)
         }
         .buttonStyle(RowPressStyle())
@@ -239,7 +254,8 @@ struct CustomersView: View {
 
     /// Recent is the one thing that narrows the book; it shows in the field as a chip.
     private var scopeChips: [PaperFilterChip] {
-        scope == .all ? [] : [PaperFilterChip(id: "scope", title: scope.rawValue) { selectedView = CustomerListScope.all.rawValue }]
+        // The chip row under the field says the scope now; the field does not repeat it.
+        []
     }
 
     private var filterMenu: some View {
@@ -332,48 +348,22 @@ private struct CustomerBookRow: View {
     var spoken: String? = nil
     /// "3 jobs": read by VoiceOver when there is no open job to name.
     var jobs: String? = nil
+    /// The open job's status as the trailing word ("Dispatched", "Late").
+    var word: String? = nil
     var archived = false
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        let stacked = typeSize.isAccessibilitySize
-        HStack(alignment: .center, spacing: 0) {
-            // At accessibility sizes the initials give their width back to the name.
-            if !stacked {
-                CustomerInitials(name: name).frame(width: 44, alignment: .leading)
-            }
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(name).font(Theme.font(16, weight: .medium)).tracking(-0.16)
-                        .foregroundStyle(archived ? Theme.muted : Theme.foreground)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let street, !street.isEmpty {
-                        Text(street).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                            .lineLimit(stacked ? nil : 1)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                trailing
-            }
-            .padding(.trailing, 16).padding(.vertical, 11)
-        }
-        .padding(.leading, 16)
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityWords)
+        // Owner 2026-11-21: the shared list row (name, the street, the open job's status as a
+        // word). Paper 47's initials circle and trailing status ring are gone.
+        RecordListRow(title: name, detail: street ?? "", trailing: trailing, quiet: archived)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityWords)
     }
 
-    @ViewBuilder private var trailing: some View {
-        if archived {
-            Text("Archived").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize()
-        } else if let tone {
-            StatusGlyph(tone: tone, label: spoken ?? "", size: 18)
-        } else {
-            Color.clear.frame(width: 18, height: 18)
-        }
+    private var trailing: RecordListRow.Trailing {
+        if archived { return .status("Archived", .cancelled) }
+        if let tone, let word { return .status(word, tone) }
+        return .none
     }
 
     private var accessibilityWords: String {
@@ -403,7 +393,7 @@ private struct CustomerInitials: View {
 
 /// Paper 48N's hub rows, each a page about the customer.
 private enum CustomerHubPart: String, Hashable, Identifiable {
-    case jobs, comms, property, equipment, membership, money, notes
+    case jobs, estimates, comms, property, equipment, membership, money, notes
     /// Not hub rows: what Customer actions opens (contacts, details and preferences; the timeline),
     /// and the Media segment of the tabbed page.
     case details, activity, media
@@ -417,11 +407,12 @@ private enum CustomerHubPart: String, Hashable, Identifiable {
         case .notes: "Notes"
         case .property: "Property"
         case .equipment: "Equipment"
-        case .membership: "Membership"
-        case .money: "Money"
+        case .membership: "Plan"
+        case .estimates: "Estimates"
+        case .money: "Invoices"
         case .details: "Contacts and details"
         case .activity: "Activity"
-        case .media: "Media"
+        case .media: "Photos and files"
         }
     }
 
@@ -430,14 +421,16 @@ private enum CustomerHubPart: String, Hashable, Identifiable {
     var tab: String {
         switch self {
         case .jobs: "Jobs"
-        case .money: "Billing"
+        case .estimates, .money: "Billing"
         case .media: "Media"
         case .activity: "Activity"
         default: "Overview"
         }
     }
 
-    var isTabbed: Bool { tab != "Overview" }
+    /// Jobs, Money (estimates and invoices) and Photos share the three-segment page. Activity
+    /// keeps its `tab` for the loaders but is a page of its own.
+    var isTabbed: Bool { [.jobs, .estimates, .money, .media].contains(self) }
 }
 
 private struct CustomerHubRow: Identifiable {
@@ -538,6 +531,10 @@ struct CustomerDetailView: View {
     @State private var isRemovingLocation = false
     @State private var locationError: String?
     /// The records the open hub page needs: "Jobs" and "Money" load the compiled records.
+    /// The header has scrolled under the bar (the name joins the bar).
+    @State private var headerCollapsed = false
+    /// The hub's Estimates row opens Money with the estimates first; Invoices with the invoices first.
+    @State private var moneyLeadsWithEstimates = false
     @State private var tab = "Overview"
     /// Paper 48N: the hub row whose page is pushed ("Everything for Danielle").
     @State private var openPart: CustomerHubPart?
@@ -662,6 +659,7 @@ struct CustomerDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            RecordBarTitle(title: record?.name ?? customer.name, shown: headerCollapsed)
             let items = customerMenuItems
             if !items.isEmpty {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -681,6 +679,7 @@ struct CustomerDetailView: View {
             }
         }
         .onChange(of: openPart) { before, part in
+            if let part { moneyLeadsWithEstimates = part == .estimates }
             tab = part?.tab ?? "Overview"
             // Back from Equipment: the row's count and names follow what was added or removed.
             if before == .equipment && part == nil {
@@ -849,28 +848,32 @@ struct CustomerDetailView: View {
     /// Paper 48N "Everything for Danielle": one card of rows, each opening its own page.
     private var hub: some View {
         let rows = hubRows
-        return PaperSection("Everything for \(hubName)") {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 { WellDivider(leading: 16) }
-                    hubRow(row.part, subtitle: row.subtitle)
-                }
+        // One card, no label over it: the page is the customer, and the rows say what they open.
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 { WellDivider(leading: 16) }
+                hubRow(row.part, subtitle: row.subtitle)
             }
         }
+        .panelBackground(cornerRadius: Theme.cardRadius)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 
     /// The hub's rows, each with what the app already knows about it; a row with nothing to say
     /// yet shows its title alone.
     private var hubRows: [CustomerHubRow] {
-        // Paper 48N's order: Jobs, Texts and calls, Property, Equipment, Membership, Money, Notes.
+        // The order every record page links in (Jobs, Estimates, Invoices), then the place and
+        // what is on it, the plan, the photos, and what was said.
         var rows = [CustomerHubRow(part: .jobs, subtitle: jobsSummary)]
-        if session.user?.id != nil && session.activeOrganization?.id != nil {
-            rows.append(CustomerHubRow(part: .comms, subtitle: commsSummary))
-        }
+        if session.can("estimate.view", feature: "estimates") { rows.append(CustomerHubRow(part: .estimates, subtitle: nil)) }
+        if session.can("invoice.view", feature: "invoicing") { rows.append(CustomerHubRow(part: .money, subtitle: nil)) }
         rows += [CustomerHubRow(part: .property, subtitle: propertySummary),
                  CustomerHubRow(part: .equipment, subtitle: equipmentSummary),
                  CustomerHubRow(part: .membership, subtitle: membershipSummary),
-                 CustomerHubRow(part: .money, subtitle: "Estimates and invoices")]
+                 CustomerHubRow(part: .media, subtitle: nil)]
+        if session.user?.id != nil && session.activeOrganization?.id != nil {
+            rows.append(CustomerHubRow(part: .comms, subtitle: commsSummary))
+        }
         if phoneNotes.isOpen { rows.append(CustomerHubRow(part: .notes, subtitle: notesSummary)) }
         return rows
     }
@@ -979,15 +982,15 @@ struct CustomerDetailView: View {
             if part.isTabbed {
                 VStack(alignment: .leading, spacing: 0) {
                     OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
-                    CustomerTabsHeader(eyebrow: tabEyebrow, name: record?.name ?? customer.name,
-                                       tabs: ["Overview", "Jobs", "Billing", "Media", "Activity"],
+                    CustomerTabsHeader(reference: customerNumber, name: record?.name ?? customer.name,
+                                       subtitle: sinceLine,
+                                       tabs: [("Jobs", "Jobs"), ("Billing", "Money"), ("Media", "Photos")],
                                        selection: tab == "Overview" ? part.tab : tab) { chosen in
-                        if chosen == "Overview" { openPart = nil } else { tab = chosen }
+                        tab = chosen
                     }
                     switch tab == "Overview" ? part.tab : tab {
                     case "Billing": billingTab
                     case "Media": recordsParts([.photos, .documents], media: true).padding(.top, 14)
-                    case "Activity": activitySection.padding(.top, 14)
                     default:
                         if session.can("job.view", feature: "jobs") { jobsSection }
                         else { unavailable("Jobs", "You don’t have access to jobs in this workspace.").padding(.top, 22) }
@@ -1006,8 +1009,10 @@ struct CustomerDetailView: View {
                 OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
                 PaperPageTitle(title: hubTitle(part), subtitle: record?.name ?? customer.name, columnInset: PaperCardMetrics.margin)
                 switch part {
-                case .jobs, .money, .activity, .media:
+                case .jobs, .estimates, .money, .media:
                     EmptyView()
+                case .activity:
+                    activitySection
                 case .property:
                     locationsSection
                 case .equipment:
@@ -1091,10 +1096,8 @@ struct CustomerDetailView: View {
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
                 if part == .membership { planReload += 1 }
-                if part.isTabbed {
-                    await loadSelectedRecords()
-                    if tab == "Activity" { await loadActivity(reset: true) }
-                }
+                if part.isTabbed { await loadSelectedRecords() }
+                if part == .activity { await loadActivity(reset: true) }
                 if part.isTabbed && tab == "Jobs" { await loadJobRecords() }
                 if part == .comms && callsAvailable { await comms.refresh(api: api) }
             }
@@ -1159,22 +1162,22 @@ struct CustomerDetailView: View {
     /// ("Archived" leads when it is).
     private var customerIdentity: some View {
         let name = record?.name ?? customer.name
-        return PaperPageTitle(title: name, subtitle: identityLine, columnInset: PaperCardMetrics.margin)
+        return RecordHeader(reference: customerNumber, title: name, titleIdentifier: "customer-name", subtitle: identityLine) {
+            if isArchived { RecordStatusBadge(word: "Archived", tone: .cancelled) }
+        }
+        .reportsRecordHeaderCollapse($headerCollapsed)
+        .padding(.horizontal, -PaperCardMetrics.margin)
     }
 
-    /// Paper 48D: "CUS-0412 · Customer since Mar 2022" over the name on the tabbed page.
-    private var tabEyebrow: String? {
-        var parts = ["CUS-\(customer.id.suffix(4).uppercased())"]
-        if isArchived { parts.append("Archived") }
-        if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-            parts.append("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
-        }
-        return parts.joined(separator: " · ")
+    private var customerNumber: String { "CUS-\(customer.id.suffix(4).uppercased())" }
+
+    /// "Customer since Mar 2022", the one line under the name on the hub's sub-pages.
+    private var sinceLine: String? {
+        JobFiltering.date(record?.createdAt ?? customer.createdAt).map { "Customer since \($0.formatted(.dateTime.month(.abbreviated).year()))" }
     }
 
     private var identityLine: String? {
         var parts: [String] = []
-        if isArchived { parts.append("Archived") }
         if let phone = primaryPhone, !phone.isEmpty { parts.append(phone) }
         if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
             parts.append("customer since \(date.formatted(.dateTime.year()))")
@@ -1855,6 +1858,27 @@ struct CustomerDetailView: View {
         let open = invoices.filter { $0.isOpen && ($0.due ?? 0) > 0 && $0.currency == "USD" }
         let balance = open.reduce(0) { $0 + ($1.due ?? 0) }
         let estimates = compiled.estimates.flatMap(\.items) + compiled.estimatesOffJob
+        if moneyLeadsWithEstimates {
+            if compiled.estimatesAccessible, !estimates.isEmpty {
+                CustomerTabLabel(title: "Estimates")
+                CustomerRowsCard {
+                    ForEach(Array(estimates.enumerated()), id: \.element.id) { index, estimate in
+                        let row = CustomerMoneyRow.estimate(estimate)
+                        if index > 0 { WellDivider(leading: 16) }
+                        Button { openedRoute = row.route } label: {
+                            CustomerFigureRow(title: "\(row.reference) · \(row.title)",
+                                              line: [estimate.status.statusLabel, row.meta].compactMap { $0 }.joined(separator: " · "),
+                                              figure: row.amount.map { _ in "" }.flatMap { _ in
+                                                  CustomerDocumentAmounts(lines: estimate.lines, currency: "USD").map { summaryMoney($0.total, currency: "USD") }
+                                              })
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Opens the estimate")
+                        .accessibilityIdentifier("customer-estimate-\(estimate.id)")
+                    }
+                }
+            }
+        }
         if compiled.invoicesAccessible {
             CustomerBalanceCard(balance: money(balance, currency: "USD"),
                                 line: open.isEmpty ? "Nothing owed" : open.count == 1 ? open[0].heading : "\(open.count) unpaid invoices",
@@ -1896,22 +1920,24 @@ struct CustomerDetailView: View {
                 .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.top, 20)
                 .accessibilityIdentifier("customer-invoices-unavailable")
         }
-        if compiled.estimatesAccessible, !estimates.isEmpty {
-            CustomerTabLabel(title: "Estimates")
-            CustomerRowsCard {
-                ForEach(Array(estimates.enumerated()), id: \.element.id) { index, estimate in
-                    let row = CustomerMoneyRow.estimate(estimate)
-                    if index > 0 { WellDivider(leading: 16) }
-                    Button { openedRoute = row.route } label: {
-                        CustomerFigureRow(title: "\(row.reference) · \(row.title)",
-                                          line: [estimate.status.statusLabel, row.meta].compactMap { $0 }.joined(separator: " · "),
-                                          figure: row.amount.map { _ in "" }.flatMap { _ in
-                                              CustomerDocumentAmounts(lines: estimate.lines, currency: "USD").map { summaryMoney($0.total, currency: "USD") }
-                                          })
+        if !moneyLeadsWithEstimates {
+            if compiled.estimatesAccessible, !estimates.isEmpty {
+                CustomerTabLabel(title: "Estimates")
+                CustomerRowsCard {
+                    ForEach(Array(estimates.enumerated()), id: \.element.id) { index, estimate in
+                        let row = CustomerMoneyRow.estimate(estimate)
+                        if index > 0 { WellDivider(leading: 16) }
+                        Button { openedRoute = row.route } label: {
+                            CustomerFigureRow(title: "\(row.reference) · \(row.title)",
+                                              line: [estimate.status.statusLabel, row.meta].compactMap { $0 }.joined(separator: " · "),
+                                              figure: row.amount.map { _ in "" }.flatMap { _ in
+                                                  CustomerDocumentAmounts(lines: estimate.lines, currency: "USD").map { summaryMoney($0.total, currency: "USD") }
+                                              })
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Opens the estimate")
+                        .accessibilityIdentifier("customer-estimate-\(estimate.id)")
                     }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityHint("Opens the estimate")
-                    .accessibilityIdentifier("customer-estimate-\(estimate.id)")
                 }
             }
         }

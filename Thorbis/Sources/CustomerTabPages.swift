@@ -24,54 +24,48 @@ private struct WeightedRow: Layout {
     }
 }
 
-/// Paper 48D's header under the back and more circles: "CUS-0412 · Customer since Mar 2022" (14
-/// muted), the name (30 Bold, -0.025em), then the segments (card track radius 11, 2 in; 36-tall
-/// segments radius 9, the chosen one ink at 16%).
+/// Owner 2026-11-21: decluttered. The shared `RecordHeader` ("CUS-0412", the name, "Customer since
+/// Mar 2022") in place of Paper 48D's own 30 Bold header, then three segments (Jobs, Money, Photos)
+/// in place of five: "Overview" was a second Back and Activity is a page of its own. The track is
+/// Paper's (card track radius 11, 2 in; 36-tall segments radius 9, the chosen one ink at 16%).
 struct CustomerTabsHeader: View {
-    let eyebrow: String?
+    let reference: String
     let name: String
-    let tabs: [String]
+    var subtitle: String? = nil
+    /// Each segment's key (what the page loads by) and the word it shows.
+    let tabs: [(key: String, title: String)]
     let selection: String
     let select: (String) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                if let eyebrow {
-                    Text(eyebrow).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text(name).font(Theme.font(30, weight: .bold)).tracking(-0.75).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4).padding(.top, 12)
-            track.padding(.top, 16)
+            RecordHeader(reference: reference, title: name, subtitle: subtitle)
+                .padding(.horizontal, -PaperCardMetrics.margin)
+            track.padding(.top, 14)
         }
     }
 
     @ViewBuilder private var track: some View {
         if typeSize.isAccessibilitySize {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) { ForEach(tabs, id: \.self) { segment($0).padding(.horizontal, 12) } }
+                HStack(spacing: 0) { ForEach(tabs, id: \.key) { segment($0.key, title: $0.title).padding(.horizontal, 12) } }
                     .padding(2)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
         } else {
-            WeightedRow(weights: tabs.map { $0 == "Overview" ? 1.25 : 1 }) {
-                ForEach(tabs, id: \.self) { segment($0) }
+            WeightedRow(weights: tabs.map { _ in 1 }) {
+                ForEach(tabs, id: \.key) { segment($0.key, title: $0.title) }
             }
             .padding(2)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
     }
 
-    private func segment(_ tab: String) -> some View {
+    private func segment(_ tab: String, title: String) -> some View {
         let on = tab == selection
         return Button { select(tab) } label: {
-            Text(tab).font(Theme.font(14, weight: on ? .semibold : .medium))
+            Text(title).font(Theme.font(14, weight: on ? .semibold : .medium))
                 .foregroundStyle(on ? Theme.foreground : Theme.subtle)
                 .lineLimit(1).minimumScaleFactor(typeSize.isAccessibilitySize ? 1 : 0.85)
                 .frame(maxWidth: .infinity, minHeight: 36)
@@ -81,7 +75,7 @@ struct CustomerTabsHeader: View {
         }
         .buttonStyle(PressStyle())
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("customer-tab-\(tab.lowercased())")
+        .accessibilityIdentifier("customer-tab-\(title.lowercased())")
     }
 }
 
