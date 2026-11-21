@@ -1234,7 +1234,7 @@ struct BusinessSetupView: View {
             case .payments: PaymentsSetupView().thorbisBackButton()
             case .services:
                 WorkspacePriceBookView(api: api, canList: true,
-                                       canViewDetail: session.can("organization.settings.edit", feature: "price_book")).thorbisBackButton()
+                                       canViewDetail: session.can("pricebook.edit", feature: "price_book")).thorbisBackButton()
             case .team: EmptyView()
             }
         }
