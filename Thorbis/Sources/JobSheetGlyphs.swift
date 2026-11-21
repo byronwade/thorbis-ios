@@ -17,6 +17,7 @@ extension PaperGlyph {
 extension PaperGlyph {
     static let addEstimate = PaperGlyph(box: 22, [.stroke("M6 3H13L17 7V19H6V3Z", 1.5), .stroke("M13 3V7H17", 1.5)])
     static let addInvoice = PaperGlyph(box: 22, [.rect(3, 5.5, 16, 11, rx: 2, 1.5), .stroke("M3 9.5H19", 1.5)])
+    static let addChecklist = PaperGlyph(box: 22, [.stroke("M4.5 6.5L6.5 8.5L10 5", 1.5), .stroke("M13 7H18", 1.5), .stroke("M4.5 14.5L6.5 16.5L10 13", 1.5), .stroke("M13 15H18", 1.5)])
     static let addNote = PaperGlyph(box: 22, [.stroke("M14.5 4L18 7.5L8 17.5H4.5V14L14.5 4Z", 1.5), .stroke("M12 19H18", 1.5)])
     static let addContact = PaperGlyph(box: 24, [.circle(9, 7, 4, 1.6), .stroke("M2 21v-2a7 7 0 0 1 14 0v2M19 8v6M22 11h-6", 1.6)])
     static let addClose = PaperGlyph(box: 12, [.stroke("M3 3L9 9M9 3L3 9", 1.3)])

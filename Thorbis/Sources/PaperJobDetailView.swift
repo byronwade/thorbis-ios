@@ -105,6 +105,8 @@ struct JobDetailView: View {
     @State private var showDeposit = false
     /// TF-01: the estimate opened from the next step; it goes straight to the customer when asked.
     @State private var openEstimate: OpenedEstimate?
+    /// Acceptance receipts for approved estimates, by estimate: what Money's "Approved" total adds up.
+    @State private var acceptedEstimates: [String: JobEstimateAccepted] = [:]
     /// The related row's customer pill.
     @State private var openedCustomer: Customer?
     /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
@@ -1073,10 +1075,8 @@ struct JobDetailView: View {
 
     /// Paper F6 "Paid": the job's invoice has been issued and nothing is left owing on it.
     private var fieldPaid: Bool {
-        guard session.can("invoice.view", feature: "invoicing"), invoicesLoaded, !invoicesFailed,
-              let bill = WrapUpList.billingInvoice(invoices), bill.status != "draft", bill.status != "void",
-              bill.amountPaid > 0, let due = TechJobFlow.due(bill) else { return false }
-        return due == 0
+        guard session.can("invoice.view", feature: "invoicing"), invoicesLoaded, !invoicesFailed, let job else { return false }
+        return TechJobFlow.paidStage(status: shownStatus(job), completedAt: job.completedAt, invoices: invoices)
     }
 
     /// The job's next stop for this person today: the earliest booked job that isn't this one.
@@ -1378,6 +1378,9 @@ struct JobDetailView: View {
                                  subtitle: "Capture job-site media") {
                     if UIImagePickerController.isSourceTypeAvailable(.camera) { openCapture(.camera(stage: nil)) } else { openPhotos() }
                 }
+            case .checklist:
+                return JobAddRow(id: "checklist", glyph: .addChecklist, title: "Checklist",
+                                 subtitle: "Start or finish this visit's checklist") { showChecklist = true }
             case .note:
                 return JobAddRow(id: "note", glyph: .addNote, title: "Note",
                                  subtitle: "Log an update for the office") { openNoteTool() }
@@ -2252,7 +2255,7 @@ struct JobDetailView: View {
 
     /// True while the working commit is the estimate to hand the customer (Paper F4).
     private var workingCommitShowsEstimate: Bool {
-        guard onSiteWrapsUp, let next = wrapUpRows.first(where: { !$0.done }) else { return false }
+        guard onSiteWrapsUp, let next = WrapUpList.next(wrapUpRows) else { return false }
         return next.step == .approval && estimateCommitTitle != nil
     }
 
@@ -2284,7 +2287,7 @@ struct JobDetailView: View {
     /// estimate to show (F4) or the balance to collect (F5 "Collect $340.00"). Any other open row
     /// keeps "Wrap up · 3 left".
     private func workingCommitTitle(_ rows: [WrapUpRow]) -> String {
-        guard let next = rows.first(where: { !$0.done }) else { return commitTitle(rows) }
+        guard let next = WrapUpList.next(rows) else { return commitTitle(rows) }
         if next.step == .approval, let title = estimateCommitTitle { return title }
         if next.step == .payment, let bill = WrapUpList.billingInvoice(invoices), bill.status == "issued",
            let due = TechJobFlow.due(bill), due > 0, session.can("invoice.payment.create", feature: "payments") {
@@ -2298,7 +2301,7 @@ struct JobDetailView: View {
     /// Complete job, or the closeout screen when the server or this role can't complete yet.
     private var workingCommitButton: some View {
         let rows = wrapUpRows
-        let next = rows.first { !$0.done }
+        let next = WrapUpList.next(rows)
         let title = workingCommitTitle(rows)
         return Button {
             if let next { openWrapUpRow(next) } else if canCompleteHere { confirmComplete = true } else { showWrapUp = true }
@@ -2380,7 +2383,7 @@ struct JobDetailView: View {
     @ViewBuilder private func commitButton(_ step: TechJobStep) -> some View {
         if onSiteWrapsUp {
             let rows = wrapUpRows
-            let next = rows.first { !$0.done }
+            let next = WrapUpList.next(rows)
             Button {
                 if let next { openWrapUpRow(next) } else if canCompleteHere { confirmComplete = true } else { showWrapUp = true }
             } label: {
@@ -2724,7 +2727,7 @@ struct JobDetailView: View {
     /// what completes it; the bar collects.
     @ViewBuilder private func fieldWrapUp(_ job: JobRecord) -> some View {
         let rows = wrapUpRows
-        let open = rows.filter { !$0.done && $0.step != .signature && $0.step != .payment }
+        let open = rows.filter { !$0.done && $0.required && $0.step != .signature && $0.step != .payment }
         let bill = invoices.first(where: { $0.status == "draft" }) ?? WrapUpList.billingInvoice(invoices)
         let since = JobFiltering.date(job.arrivedAt) ?? JobFiltering.date(job.startedAt)
         VStack(alignment: .leading, spacing: 16) {
@@ -2781,7 +2784,7 @@ struct JobDetailView: View {
                         }
                     }
                     if liveMediaCountContext != nil, liveMediaCountContext == mediaCountContext, mediaCount != nil {
-                        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" }.count
+                        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" && !$0.isSignature }.count
                         fieldSummaryRow("Photos", value: "\(mediaPhotos.count + waiting)\(mediaHasMore ? "+" : "")")
                     }
                 }
@@ -2918,7 +2921,12 @@ struct JobDetailView: View {
     /// my way to Larch Ave" would start it from here, and the job list has no street to name).
     /// With no stop left today it closes field mode onto Job details.
     @ViewBuilder private var fieldPaidCommit: some View {
-        if let next = nextStopJob {
+        if let job, shownStatus(job) != "completed" {
+            // Paid is not closed: while the job is still in progress the commit is the wrap-up
+            // itself ("Wrap up · 2 left", then "Complete job"), never a "Done" that only left this
+            // screen with the job open.
+            workingCommitButton
+        } else if let next = nextStopJob {
             NavigationLink(value: next) {
                 HStack(spacing: 10) {
                     PaperIcon(.navigate, size: 18, color: .white)
@@ -3828,7 +3836,7 @@ struct JobDetailView: View {
         guard liveMediaCountContext != nil, liveMediaCountContext == mediaCountContext, mediaCount != nil else {
             return "Add to this job"
         }
-        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" }.count
+        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" && !$0.isSignature }.count
         let total = mediaPhotos.count + waiting
         if total == 0 { return "None yet" }
         return "\(total)\(mediaHasMore ? "+" : "") added"
@@ -3905,7 +3913,7 @@ struct JobDetailView: View {
     private func stagedPhotoCount(_ tag: String) -> Int? {
         guard mediaCount != nil else { return nil }
         let stored = mediaPhotos.filter { $0.tags.contains(tag) }.count
-        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" && $0.tags.contains(tag) }.count
+        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" && !$0.isSignature && $0.tags.contains(tag) }.count
         if stored + waiting == 0, mediaHasMore { return nil }
         return stored + waiting
     }
@@ -3927,7 +3935,7 @@ struct JobDetailView: View {
     private func wrapUpPanel(_ job: JobRecord) -> some View {
         let rows = wrapUpRows
         if !rows.isEmpty {
-            JobPanelSection(title: "Before you wrap up", count: "\(rows.count - WrapUpList.left(rows)) of \(rows.count)") {
+            JobPanelSection(title: "Before you wrap up", count: "\(WrapUpList.progress(rows).done) of \(WrapUpList.progress(rows).total)") {
                 ForEach(rows) { row in
                     Button { openWrapUpRow(row) } label: {
                         // v2: the row's state is a word with its mark ("Done" / "To do"), not a tick's colour.
@@ -3936,7 +3944,7 @@ struct JobDetailView: View {
                              + Text(row.detail.map { "  \($0)" } ?? "").font(Theme.monoFont(14)).foregroundStyle(Theme.muted))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            StatusLabel(tone: row.done ? .done : .unscheduled, word: row.done ? "Done" : "To do",
+                            StatusLabel(tone: row.done ? .done : .unscheduled, word: row.done ? "Done" : row.required ? "To do" : "Optional",
                                         emphasis: row.done ? .quiet : .strong)
                                 .fixedSize()
                         }
@@ -4230,9 +4238,19 @@ struct JobDetailView: View {
     @ViewBuilder private var estimateSummaryCard: some View {
         // Totals only. Adding is the section's + (and the bar's +); a card that held nothing but
         // "N estimates have pricing options" is left out, since each row already says its options.
-        if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true),
-           !summary.amounts.isEmpty || summary.approvedUnavailable {
-            JobEstimateSummaryCard(summary: summary)
+        Group {
+            if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true, accepted: acceptedEstimates),
+               !summary.amounts.isEmpty || summary.approvedUnavailable {
+                JobEstimateSummaryCard(summary: summary)
+            }
+        }
+        // An approved estimate with options (or one that does not say) proves its amount only by
+        // the customer's acceptance receipt: read it so "Approved" shows the real total.
+        .task(id: jobEstimates.filter(JobEstimateSummary.needsReceipt).map { "\($0.id):\($0.currentRevisionNumber ?? 0)" }.joined(separator: ",")) {
+            for record in jobEstimates where JobEstimateSummary.needsReceipt(record) && acceptedEstimates[record.id]?.matches(record) != true {
+                guard let receipt = await api.jobEstimateAccepted(record), !Task.isCancelled else { continue }
+                acceptedEstimates[record.id] = receipt
+            }
         }
     }
 
@@ -4953,9 +4971,15 @@ struct JobDetailView: View {
     private func openNoteTool() {
         activityFilter = "All"
         withMotion(.snappy) { selectedTab = "Activity" }
+        // From "Add to job" the sheet is still leaving and Activity's field is not on screen yet, so
+        // one early try was lost (and the first typing with it): ask until the field takes focus.
         Task {
-            try? await Task.sleep(for: .milliseconds(350))
-            noteFocused = true
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, selectedTab == "Activity", !showsPhotos else { return }
+                if noteFocused { return }
+                noteFocused = true
+            }
         }
     }
 
@@ -5508,13 +5532,30 @@ struct JobDetailView: View {
 
     private func loadPricingAndEquipment(generation: UUID) async {
         guard let job else { return }
-        async let pricingRead = try? await api.memberPricing(job.customerId)
-        // Quiet: a refused read (technicians on some servers) or an older server leaves the rows out.
-        let wantsEquipment = session.can("customer.view", feature: "core_crm")
-        async let equipmentRead = wantsEquipment ? (try? await api.customerEquipment(job.customerId)) : nil
         // The plans on sale, only for someone who may add one to the customer.
         async let plansRead = MembershipAccess.canEditMemberships(session) ? (try? await api.membershipPlans()) : nil
-        let (pricing, loaded, plans) = await (pricingRead, equipmentRead, plansRead)
+        // The job's own service context first: a technician without customer.view may read it,
+        // where the customer's equipment and member pricing are refused.
+        var pricing: MemberPricing?
+        var loaded: [EquipmentRecord]?
+        var fallsBack = false
+        do {
+            let context = try await JobServiceContextLoader.load(job.id, api: api)
+            if context.customerId == job.customerId {
+                pricing = context.memberPricing
+                loaded = context.equipmentRecords
+            }
+        } catch {
+            fallsBack = JobServiceContextLoader.fallsBackToCustomerReads(after: error)
+        }
+        if fallsBack {
+            async let pricingRead = try? await api.memberPricing(job.customerId)
+            // Quiet: a refused read (technicians on some servers) or an older server leaves the rows out.
+            let wantsEquipment = session.can("customer.view", feature: "core_crm")
+            async let equipmentRead = wantsEquipment ? (try? await api.customerEquipment(job.customerId)) : nil
+            (pricing, loaded) = await (pricingRead, equipmentRead)
+        }
+        let plans = await plansRead
         guard session.generation == generation, self.job?.customerId == job.customerId else { return }
         if let plans { sellablePlans = plans }
         if let pricing { memberPricing = pricing }
@@ -5561,8 +5602,10 @@ struct JobDetailView: View {
             guard !Task.isCancelled, mediaCountRequest == request, liveMediaCountContext == context,
                   loaded.items.allSatisfy({ $0.kind == "photo" }) else { return }
             try JobMediaPageIntegrity.validate(loaded, jobID: jobId, organizationID: organization, seen: [])
-            mediaCount = loaded.nextCursor == nil ? "\(loaded.items.count)" : "\(loaded.items.count) loaded"
-            mediaPhotos = loaded.items.filter { !$0.archived }
+            // A signature image is paperwork, not a job photo: it neither shows nor counts.
+            let photos = loaded.items.filter { !$0.isSignature }
+            mediaCount = loaded.nextCursor == nil ? "\(photos.count)" : "\(photos.count) loaded"
+            mediaPhotos = photos.filter { !$0.archived }
             mediaHasMore = loaded.nextCursor != nil
             mediaCountContext = context
         } catch { }

@@ -8,6 +8,19 @@ struct PendingMediaScope: Codable, Equatable, Sendable {
     let origin: String
 }
 
+/// A customer's signature is stored as a job image tagged "signature" (the hand-off and invoice
+/// sign-off upload it). It is paperwork, not a job photo: it never shows in Photos, counts in
+/// "Photos 3", or reads as an untagged photo to sort, even while its upload is still pending.
+enum JobPhotoRules {
+    static func isSignature(tags: [String]) -> Bool {
+        tags.contains { $0.caseInsensitiveCompare("signature") == .orderedSame }
+    }
+}
+
+extension MediaAssetRecord {
+    var isSignature: Bool { JobPhotoRules.isSignature(tags: tags) }
+}
+
 struct PendingMedia: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let jobID: String
@@ -18,6 +31,8 @@ struct PendingMedia: Codable, Identifiable, Hashable, Sendable {
     let mime: String
     /// Sent with registration, e.g. "Marked up" or a site measurement. Absent on older saves.
     var caption: String? = nil
+
+    var isSignature: Bool { JobPhotoRules.isSignature(tags: tags) }
 
     var title: String { kind == "document" ? filename : caption ?? (kind == "video" ? "Video clip" : tags.first.map { "\($0) photo" } ?? "Photo") }
 }

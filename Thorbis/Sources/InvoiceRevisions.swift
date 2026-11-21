@@ -200,6 +200,13 @@ enum InvoiceRevisionWords {
     static let flag = "invoice_revisions"
     static let staleMessage = "This invoice changed. Check it and try again."
 
+    /// The confirm before an invoice is issued. With invoice revisions on its lines can still be
+    /// changed afterwards, so it must not say they become final.
+    static func issueConfirm(flagOn: Bool) -> String {
+        flagOn ? "Issue this invoice? The customer can be sent this invoice. You can still change it later."
+               : "Issue this invoice? Its line items will become final."
+    }
+
     /// Plain words for a refusal the server names with a code; nil when the code is not one of ours.
     static func message(code: String?) -> String? {
         switch code {

@@ -254,17 +254,21 @@ extension Array where Element == EstimateRevisionLineDraft {
     func memberTotal(_ pricing: MemberPricing?) -> Int? {
         guard let pricing, pricing.isMember, pricing.discountPercent > 0, !isEmpty else { return nil }
         var sum = 0
+        // Nothing left to discount (every priced line was saved at the member price): no hint.
+        var anyDiscounted = false
         for line in self {
             guard let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice),
                   let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)),
                   (1...100_000).contains(quantity) else { return nil }
             // Same bounds as `subtotal`: a long quantity must read as "not yet", never trap.
-            let (amount, overflow) = quantity.multipliedReportingOverflow(by: cents > 0 ? pricing.memberPrice(cents) : cents)
+            let discounts = cents > 0 && !line.memberPriced
+            if discounts { anyDiscounted = true }
+            let (amount, overflow) = quantity.multipliedReportingOverflow(by: discounts ? pricing.memberPrice(cents) : cents)
             let (next, overflowSum) = sum.addingReportingOverflow(amount)
             guard !overflow, !overflowSum else { return nil }
             sum = next
         }
-        return sum
+        return anyDiscounted ? sum : nil
     }
 }
 

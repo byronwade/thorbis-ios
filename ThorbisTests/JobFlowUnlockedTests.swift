@@ -106,6 +106,57 @@ final class JobFlowUnlockedTests: XCTestCase {
                        .transition("in_progress"))
     }
 
+    // MARK: Paid stage and wrap up
+
+    func testPaidStageNeedsEverythingBilledAndPaid() {
+        let paid = invoice("a", "issued", paid: 48_000)
+        XCTAssertTrue(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [paid]))
+        XCTAssertFalse(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [paid, invoice("b", "draft")]),
+                       "New unbilled work keeps the job on Working")
+        XCTAssertFalse(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [paid, invoice("b", "issued")]),
+                       "New unpaid work keeps the job on Working")
+        XCTAssertFalse(TechJobFlow.paidStage(status: "in_progress", completedAt: "2026-11-20T15:40:00Z", invoices: [paid]),
+                       "A reopened job opens on Working, not on Paid")
+        XCTAssertTrue(TechJobFlow.paidStage(status: "completed", completedAt: "2026-11-20T15:40:00Z", invoices: [paid]))
+        XCTAssertFalse(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [invoice("a", "issued")]))
+    }
+
+    private func closeout(notes: Bool, photos: Int, noteCount: Int = 0) -> FieldCloseout {
+        func rule(_ kind: String, asked: Bool, met: Bool) -> FieldCloseoutRequirement {
+            FieldCloseoutRequirement(requirement: kind, kind: kind, outcome: !asked ? "not_required" : met ? "satisfied" : "blocked",
+                                     detail: asked ? "company policy requires it" : "company policy does not require a job \(kind)",
+                                     nextAction: asked && !met ? (kind == "notes" ? "add_job_note" : "add_job_photo") : nil, commercialSource: nil)
+        }
+        return FieldCloseout(
+            policy: FieldCloseoutPolicy(organizationId: "o", requireNotes: notes, requiredPhotoCount: photos, requiredChecks: [], updatedByUserId: nil, updatedAt: nil),
+            facts: FieldCloseoutFacts(noteCount: noteCount, photoCount: 0, acknowledgedCheckKeys: [],
+                                      authorizationTarget: FieldCloseoutTarget(id: "j", organizationId: "o", customerId: "c", locationId: nil, estimateId: nil, estimateRevisionNumber: nil)),
+            acknowledged: [],
+            requirements: [rule("notes", asked: notes, met: noteCount > 0), rule("photos", asked: photos > 0, met: false)],
+            unmet: [], completable: !notes && photos == 0)
+    }
+
+    func testWrapUpAsksOnlyForWhatThePolicyRequires() {
+        // No note, no photo, no signature required: nothing sends the tech to the camera.
+        let free = WrapUpList.rows(.init(beforePhotos: 0, afterPhotos: 0, estimates: [], invoices: [invoice("a", "issued", paid: 48_000)],
+                                         closeout: closeout(notes: false, photos: 0)))
+        XCTAssertEqual(free.map(\.step), [.payment], "Rows the policy does not ask for are not shown")
+        XCTAssertNil(WrapUpList.next(free))
+        XCTAssertEqual(WrapUpList.left(free), 0)
+        XCTAssertTrue(CloseoutChecklist.items(closeout(notes: false, photos: 0)).isEmpty, "No 'does not require' rows")
+
+        // A required note and photo are asked for; the photo rule is the server's own row.
+        let strict = WrapUpList.rows(.init(beforePhotos: 0, afterPhotos: 0, estimates: [], invoices: nil, closeout: closeout(notes: true, photos: 2)))
+        XCTAssertEqual(WrapUpList.next(strict)?.step, .diagnosisNote)
+        XCTAssertEqual(WrapUpList.left(strict), 2)
+        XCTAssertFalse(strict.first { $0.step == .beforePhotos }?.required ?? true, "Before photos are never what Wrap up opens")
+
+        // A photo already taken still shows as done, and counts.
+        let taken = WrapUpList.rows(.init(beforePhotos: 2, afterPhotos: 0, estimates: [], invoices: nil, closeout: closeout(notes: false, photos: 0)))
+        XCTAssertEqual(taken.map(\.step), [.beforePhotos])
+        XCTAssertEqual(WrapUpList.progress(taken).done, 1)
+    }
+
     // MARK: Add to job
 
     private var everything: JobAddOffer.Inputs {
@@ -119,7 +170,7 @@ final class JobFlowUnlockedTests: XCTestCase {
             inputs.status = status
             let rows = JobAddOffer.rows(inputs)
             XCTAssertEqual(rows.billing, [.estimate, .showEstimate, .invoice, .payment], status)
-            XCTAssertEqual(rows.onTheJob, [.photo, .note, .contact], status)
+            XCTAssertEqual(rows.onTheJob, [.photo, .checklist, .note, .contact], status)
         }
     }
 
@@ -134,7 +185,7 @@ final class JobFlowUnlockedTests: XCTestCase {
     func testAddRowsFollowTheRoleAndWhatTheJobHas() {
         var inputs = JobAddOffer.Inputs(status: "en_route", canAddNote: true)
         XCTAssertEqual(JobAddOffer.rows(inputs).billing, [])
-        XCTAssertEqual(JobAddOffer.rows(inputs).onTheJob, [.note])
+        XCTAssertEqual(JobAddOffer.rows(inputs).onTheJob, [.checklist, .note], "A checklist can be started at every open stage")
         // An invoice that exists is opened, never made twice.
         inputs.canOpenInvoice = true
         XCTAssertEqual(JobAddOffer.rows(inputs).billing, [.openInvoice])
@@ -143,7 +194,7 @@ final class JobFlowUnlockedTests: XCTestCase {
         inputs.canCollect = true
         inputs.canAddMedia = true
         XCTAssertEqual(JobAddOffer.rows(inputs).billing, [.invoice, .payment])
-        XCTAssertEqual(JobAddOffer.rows(inputs).onTheJob, [.photo, .note])
+        XCTAssertEqual(JobAddOffer.rows(inputs).onTheJob, [.photo, .checklist, .note])
     }
 
     // MARK: Running late and Can't start
@@ -304,5 +355,53 @@ final class JobFlowUnlockedTests: XCTestCase {
         XCTAssertEqual(MediaImportPlan.summary(added: 2, failed: 0, trimmed: 1), "One video was long, so its first part was kept.")
         XCTAssertEqual(MediaImportPlan.summary(added: 3, failed: 1, trimmed: 2),
                        "3 added. 1 couldn\u{2019}t be added. 2 videos were long, so their first parts were kept.")
+    }
+}
+
+/// The schedule's Now card offers directions only while there is still a drive.
+final class ScheduleLeadStepTests: XCTestCase {
+    func testAtTheJobTheCardNamesTheNextStepInsteadOfNavigate() {
+        for status in ["scheduled", "dispatched", "en_route"] { XCTAssertNil(ScheduleLead.stepTitle(status: status), status) }
+        XCTAssertEqual(ScheduleLead.stepTitle(status: "arrived"), "Start work")
+        XCTAssertEqual(ScheduleLead.stepTitle(status: "in_progress"), "Continue job")
+        XCTAssertEqual(ScheduleLead.stepTitle(status: "paused"), "Resume job")
+    }
+}
+
+/// A refused optional read is not asked for again in the same sign-in.
+final class RefusedReadsTests: XCTestCase {
+    private let job = "00000000-0000-4000-8000-000000002214"
+
+    func testOnlyTheOptionalReadsAreRemembered() {
+        XCTAssertEqual(RefusedReads.key("/v1/jobs/\(job)/booking-call"), "/v1/jobs/{id}/booking-call")
+        XCTAssertEqual(RefusedReads.key("/v1/customers/\(job)/history"), "/v1/customers/{id}/history")
+        XCTAssertEqual(RefusedReads.key("/v1/activity/invoice/\(job)"), "/v1/activity/invoice/{id}")
+        XCTAssertEqual(RefusedReads.key("/v1/organization/mobile-layout"), "/v1/organization/mobile-layout")
+        XCTAssertNil(RefusedReads.key("/v1/jobs/\(job)"))
+        XCTAssertNil(RefusedReads.key("/v1/invoices/\(job)"))
+    }
+
+    func testA403IsRememberedForTheSignInAndA404OnlyForAMissingRoute() {
+        var reads = RefusedReads()
+        let scope = UUID()
+        reads.note("/v1/jobs/\(job)/booking-call", status: 404, scope: scope)
+        XCTAssertFalse(reads.isRefused("/v1/jobs/\(job)/booking-call", scope: scope), "No call on this job says nothing about the next")
+        reads.note("/v1/jobs/\(job)/booking-call", status: 403, scope: scope)
+        XCTAssertTrue(reads.isRefused("/v1/jobs/00000000-0000-4000-8000-000000002209/booking-call", scope: scope))
+        reads.note("/v1/organization/mobile-layout", status: 404, scope: scope)
+        XCTAssertTrue(reads.isRefused("/v1/organization/mobile-layout", scope: scope))
+        reads.note("/v1/jobs/\(job)", status: 403, scope: scope)
+        XCTAssertFalse(reads.isRefused("/v1/jobs/\(job)", scope: scope))
+        XCTAssertFalse(reads.isRefused("/v1/organization/mobile-layout", scope: UUID()), "A new sign-in asks again")
+    }
+}
+
+/// The job reads service-context first and only falls back where that route cannot answer.
+final class JobServiceContextFallbackTests: XCTestCase {
+    func testOnlyAMissingRouteOrNoAnswerFallsBack() {
+        XCTAssertTrue(JobServiceContextLoader.fallsBackToCustomerReads(after: Problem(title: "Not found", status: 404, detail: nil)))
+        XCTAssertTrue(JobServiceContextLoader.fallsBackToCustomerReads(after: URLError(.notConnectedToInternet)))
+        XCTAssertFalse(JobServiceContextLoader.fallsBackToCustomerReads(after: Problem(title: "Forbidden", status: 403, detail: nil)))
+        XCTAssertFalse(JobServiceContextLoader.fallsBackToCustomerReads(after: CancellationError()))
     }
 }

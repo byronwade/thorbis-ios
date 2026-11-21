@@ -142,6 +142,16 @@ final class MediaLargeUploadTests: XCTestCase {
     }
 
     func testTheWordsAPersonReads() {
+        XCTAssertTrue(JobPhotoRules.isSignature(tags: ["signature"]))
+        XCTAssertTrue(PendingMedia(id: "p", jobID: "j", filename: "signature.png", tags: ["signature"], capturedAt: Date(), kind: "photo", mime: "image/png").isSignature)
+        XCTAssertFalse(JobPhotoRules.isSignature(tags: ["Before"]))
+        XCTAssertFalse(JobPhotoRules.isSignature(tags: []))
+        XCTAssertEqual(MediaUploadWords.limitNote(.yes), "Photos and PDFs up to 50 MB. Videos up to 200 MB.")
+        XCTAssertEqual(MediaUploadWords.limitNote(.no), "Photos, PDFs and clips up to 8 MB.")
+        XCTAssertFalse(MediaUploadWords.limitNote(.unknown).contains("8 MB"), "Not known yet: no 8 MB promise while big files are tried")
+        XCTAssertFalse(MediaUploadWords.documentLimitNote(.unknown).contains("8 MB"))
+        XCTAssertTrue(InvoiceRevisionWords.issueConfirm(flagOn: false).contains("become final"))
+        XCTAssertFalse(InvoiceRevisionWords.issueConfirm(flagOn: true).contains("final"))
         XCTAssertEqual(MediaUploadWords.tooBigForNow, "This file is too big to send yet. Files can be up to 8 MB.")
         XCTAssertEqual(MediaUploadWords.storageDown, "Photos can\u{2019}t be saved right now. They\u{2019}re kept on this phone and will send later.")
         XCTAssertEqual(MediaUploadWords.keptFirstPart(seconds: 20.6), "Video clips are limited to 8 MB for now, so the first 20 seconds were kept.")

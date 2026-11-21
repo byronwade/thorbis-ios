@@ -26,7 +26,8 @@ enum ReleaseNotes {
                       detail: "Jobs, Customers, Estimates and Invoices each have one row of filters and the same simple rows."),
                 .init(symbol: "sparkles", title: "Less on each screen",
                       detail: "Status, customer, call and text each show once, so the job page is quicker to read."),
-            ]),
+            ],
+            fixes: 12),
         ReleaseNote(
             id: "2026-11-20-on-site",
             date: "2026-11-20",

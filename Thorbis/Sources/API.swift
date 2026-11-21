@@ -65,6 +65,52 @@ struct Items<T: Codable>: Codable {
     let nextCursor: String?
 }
 
+/// The handful of optional reads a job screen makes that a role may not be allowed (403) or a
+/// server may not have (404). Once one is refused it is remembered for the sign-in (`scope` is
+/// the client's request generation, which changes with the session and workspace), so the screen
+/// stops asking on every open. Only these routes: anything else is always asked.
+struct RefusedReads {
+    private var scope: UUID?
+    private var keys = Set<String>()
+
+    /// The route family a path belongs to, ids replaced; nil for every route that is not remembered.
+    static func key(_ path: String) -> String? {
+        let parts = path.split(separator: "/").map(String.init)
+        func isID(_ part: String) -> Bool { UUID(uuidString: part) != nil }
+        switch parts.count {
+        case 3 where parts[0] == "v1" && parts[1] == "organization" && ["profile", "assignees", "mobile-layout"].contains(parts[2]):
+            return path
+        case 4 where parts[0] == "v1" && parts[1] == "jobs" && isID(parts[2]) && parts[3] == "booking-call":
+            return "/v1/jobs/{id}/booking-call"
+        case 4 where parts[0] == "v1" && parts[1] == "customers" && isID(parts[2]) && parts[3] == "history":
+            return "/v1/customers/{id}/history"
+        case 4 where parts[0] == "v1" && parts[1] == "activity":
+            return "/v1/activity/\(parts[2])/{id}"
+        default:
+            return nil
+        }
+    }
+
+    /// A 403 says the role may not read the family. A 404 is remembered only where it means the
+    /// route itself is missing (no id in it); for a record it only means that record has none.
+    static func remembers(_ path: String, status: Int?) -> Bool {
+        guard let key = key(path) else { return false }
+        if status == 403 { return true }
+        return status == 404 && !key.contains("{id}")
+    }
+
+    func isRefused(_ path: String, scope: UUID) -> Bool {
+        guard self.scope == scope, let key = Self.key(path) else { return false }
+        return keys.contains(key)
+    }
+
+    mutating func note(_ path: String, status: Int?, scope: UUID) {
+        guard Self.remembers(path, status: status), let key = Self.key(path) else { return }
+        if self.scope != scope { self.scope = scope; keys = [] }
+        keys.insert(key)
+    }
+}
+
 struct Problem: Codable, Error, LocalizedError {
     let title: String?
     let status: Int?
@@ -149,6 +195,8 @@ final class APIClient: ObservableObject {
 
     private let session: URLSession
     @Published private(set) var requestGeneration = UUID()
+    /// Reads this sign-in was refused, so a job screen does not ask again on every open.
+    private var refusedReads = RefusedReads()
     var onUnauthorized: (() -> Void)?
 
     func invalidateRequests() {
@@ -321,9 +369,21 @@ final class APIClient: ObservableObject {
     }
 
     func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, requireFresh: Bool = false) async throws -> T {
-        let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
-                                          cursor: cursor, authed: authed, requireFresh: requireFresh)
-        return try decodeResponse(response)
+        // A read this sign-in was already refused (a technician's 403 on the company profile, the
+        // roster, a booking call, a customer's history, an invoice's activity) or that this
+        // server does not have (the company layout's 404) is not asked for again this session.
+        let scope = requestGeneration
+        if method == "GET", refusedReads.isRefused(path, scope: scope) {
+            throw Problem(title: "Not available", status: 403, detail: "This sign-in can\u{2019}t read that.")
+        }
+        do {
+            let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
+                                              cursor: cursor, authed: authed, requireFresh: requireFresh)
+            return try decodeResponse(response)
+        } catch let problem as Problem {
+            if method == "GET" { refusedReads.note(path, status: problem.status, scope: scope) }
+            throw problem
+        }
     }
 
     func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil, requireFresh: Bool = false,

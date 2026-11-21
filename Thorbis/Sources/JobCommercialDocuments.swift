@@ -271,6 +271,35 @@ enum JobEstimateCreation {
     }
 }
 
+/// What the customer accepted on an approved estimate (`GET /v1/estimates/{id}/revisions/{n}/acceptance`):
+/// the one figure that proves an approved amount when the estimate has options, or does not say
+/// whether it has. Read for display on the job's Money totals only.
+struct JobEstimateAccepted: Decodable, Equatable {
+    let estimateId: String
+    let revisionNumber: Int
+    let totalAmount: Int
+    let currency: String
+
+    /// The receipt is for this estimate as it stands now, with an amount that can be shown.
+    func matches(_ record: EstimateRecord) -> Bool {
+        record.status == "approved" && estimateId.caseInsensitiveCompare(record.id) == .orderedSame
+            && revisionNumber == record.currentRevisionNumber && totalAmount >= 0
+            && currency.utf8.count == 3 && currency.utf8.allSatisfy { (65...90).contains($0) }
+    }
+}
+
+extension APIClient {
+    /// Nil when there is no receipt, it does not match, or this person may not read it: the total
+    /// then stays "unavailable" rather than guessed.
+    func jobEstimateAccepted(_ record: EstimateRecord) async -> JobEstimateAccepted? {
+        guard record.status == "approved", let revision = record.currentRevisionNumber, revision > 0,
+              let path = try? financialPath("/v1/estimates", id: record.id, suffix: "/revisions/\(revision)/acceptance"),
+              let receipt: JobEstimateAccepted = try? await send("GET", path, requireFresh: true),
+              receipt.matches(record) else { return nil }
+        return receipt
+    }
+}
+
 struct JobEstimateSummary {
     struct Amount: Equatable, Identifiable {
         let status: String
@@ -282,14 +311,27 @@ struct JobEstimateSummary {
     let optionCount: Int
     let approvedUnavailable: Bool
 
-    init?(records: [EstimateRecord], complete: Bool) {
+    /// Whether an approved estimate's own lines prove what was accepted (no options, and the
+    /// record says so). When they do not, the acceptance receipt is the proof.
+    static func needsReceipt(_ record: EstimateRecord) -> Bool {
+        record.status == "approved" && (record.options == nil || record.options?.isEmpty == false)
+    }
+
+    init?(records: [EstimateRecord], complete: Bool, accepted: [String: JobEstimateAccepted] = [:]) {
         guard complete else { return nil }
         var sums: [String: [String: Int]] = [:]
         var options = 0
         var unavailable = false
         for record in records {
             // Neither missing alternatives nor an option list identifies accepted work.
-            if record.status == "approved", record.options == nil || record.options?.isEmpty == false {
+            if Self.needsReceipt(record) {
+                // The customer's acceptance receipt says what was approved, option or not.
+                if let receipt = accepted[record.id], receipt.matches(record) {
+                    let sum = (sums["approved"]?[receipt.currency] ?? 0).addingReportingOverflow(receipt.totalAmount)
+                    guard !sum.overflow else { return nil }
+                    sums["approved", default: [:]][receipt.currency] = sum.partialValue
+                    continue
+                }
                 unavailable = true
                 if record.options?.isEmpty == false { options += 1 }
                 continue

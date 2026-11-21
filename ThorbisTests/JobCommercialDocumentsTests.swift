@@ -437,6 +437,29 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(summary.amounts, [.init(status: "sent", currency: "USD", cents: 2500)])
     }
 
+    func testAcceptanceReceiptsGiveTheRealApprovedTotal() throws {
+        func approvedWithoutOptionsKey(_ n: Int) throws -> EstimateRecord {
+            var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(n).utf8)) as? [String: Any])
+            payload["status"] = "approved"
+            payload["currentRevisionNumber"] = 2
+            payload.removeValue(forKey: "options")
+            return try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: payload))
+        }
+        let first = try approvedWithoutOptionsKey(10), second = try approvedWithoutOptionsKey(11)
+        XCTAssertTrue(JobEstimateSummary.needsReceipt(first))
+        let receipts = [first.id: JobEstimateAccepted(estimateId: first.id, revisionNumber: 2, totalAmount: 17_739, currency: "USD"),
+                        second.id: JobEstimateAccepted(estimateId: second.id, revisionNumber: 2, totalAmount: 30_000, currency: "USD")]
+        let summary = try XCTUnwrap(JobEstimateSummary(records: [first, second], complete: true, accepted: receipts))
+        XCTAssertFalse(summary.approvedUnavailable)
+        XCTAssertEqual(summary.amounts, [.init(status: "approved", currency: "USD", cents: 47_739)])
+        // One receipt missing, or for an older revision: nothing is guessed.
+        let partial = try XCTUnwrap(JobEstimateSummary(records: [first, second], complete: true, accepted: [first.id: receipts[first.id]!]))
+        XCTAssertTrue(partial.approvedUnavailable)
+        XCTAssertTrue(partial.amounts.isEmpty)
+        let stale = [first.id: JobEstimateAccepted(estimateId: first.id, revisionNumber: 1, totalAmount: 17_739, currency: "USD")]
+        XCTAssertTrue(try XCTUnwrap(JobEstimateSummary(records: [first], complete: true, accepted: stale)).approvedUnavailable)
+    }
+
     func testApprovedOptionEstimateDoesNotShowBaseLinesAsAcceptedAmount() throws {
         var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
         payload["status"] = "approved"

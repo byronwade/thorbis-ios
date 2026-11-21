@@ -45,6 +45,10 @@ struct FieldCloseoutRequirement: Codable, Hashable {
     let detail: String
     let nextAction: String?
     let commercialSource: String?
+
+    /// False for a rule the workspace's policy does not ask for ("company policy does not require
+    /// a job note"): it is nothing to do and nothing to show.
+    var applies: Bool { outcome != "not_required" }
 }
 
 struct FieldCloseout: Codable, Hashable {

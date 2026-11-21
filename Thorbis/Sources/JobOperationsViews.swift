@@ -23,7 +23,8 @@ enum CloseoutChecklist {
     }
 
     static func items(_ closeout: FieldCloseout) -> [CloseoutChecklistItem] {
-        let requirements = closeout.requirements.enumerated().map { offset, requirement in
+        // A rule the policy does not ask for is not a row (its offset still names the others).
+        let requirements = closeout.requirements.enumerated().filter { $0.element.applies }.map { offset, requirement in
             CloseoutChecklistItem(id: "requirement-\(offset)-\(requirement.requirement)", title: requirement.detail,
                                   done: requirement.outcome != "blocked", kind: requirement.kind,
                                   nextAction: requirement.outcome == "blocked" ? requirement.nextAction : nil, checkKey: nil)
@@ -64,6 +65,9 @@ struct WrapUpRow: Identifiable, Hashable {
     /// Short and on the right: a count or an amount ("3", "$480.00 due").
     var detail: String? = nil
     let done: Bool
+    /// False for good practice the workspace's closeout policy does not ask for (a before photo
+    /// when no photo is required): shown when done, never what "Wrap up job" sends the tech to.
+    var required = true
 
     var id: String {
         if case .server(let item) = step { return item.id }
@@ -109,13 +113,21 @@ enum WrapUpList {
         let blockedSteps = Set(requirements.filter { $0.outcome == "blocked" }.compactMap(covering))
         var rows: [WrapUpRow] = []
 
-        if let before = inputs.beforePhotos {
-            rows.append(WrapUpRow(step: .beforePhotos, title: "Before photos", detail: before > 0 ? "\(before)" : nil, done: before > 0))
+        // Only what the workspace's closeout policy asks for is asked of the tech. Photos and a
+        // note the policy does not require are listed once they exist, and never as something to do.
+        // Until the policy has loaded, the photo rows show but are not required.
+        let known = inputs.closeout != nil
+        func asked(_ kind: String) -> Bool { requirements.contains { $0.kind == kind && $0.applies } }
+        let photosAsked = asked("photos")
+        if let before = inputs.beforePhotos, before > 0 || !known || photosAsked {
+            rows.append(WrapUpRow(step: .beforePhotos, title: "Before photos", detail: before > 0 ? "\(before)" : nil, done: before > 0, required: false))
         }
         if let closeout = inputs.closeout {
             let notes = closeout.facts.noteCount
-            rows.append(WrapUpRow(step: .diagnosisNote, title: "Diagnosis note", detail: notes > 1 ? "\(notes)" : nil,
-                                  done: notes > 0 && !blockedSteps.contains(.diagnosisNote)))
+            if asked("notes") || notes > 0 {
+                rows.append(WrapUpRow(step: .diagnosisNote, title: "Diagnosis note", detail: notes > 1 ? "\(notes)" : nil,
+                                      done: notes > 0 && !blockedSteps.contains(.diagnosisNote), required: asked("notes")))
+            }
         }
         // Approval only when the visit has an estimate in play; a call billed from the truck has none.
         if let estimates = inputs.estimates, !estimates.isEmpty, !estimates.allSatisfy({ $0.status == "declined" }) {
@@ -127,13 +139,18 @@ enum WrapUpList {
                 rows.append(WrapUpRow(step: .approval, title: "Customer approval", done: false))
             }
         }
-        if let after = inputs.afterPhotos {
-            rows.append(WrapUpRow(step: .afterPhotos, title: "After photos", detail: after > 0 ? "\(after)" : nil, done: after > 0))
+        if let after = inputs.afterPhotos, after > 0 || !known || photosAsked {
+            rows.append(WrapUpRow(step: .afterPhotos, title: "After photos", detail: after > 0 ? "\(after)" : nil, done: after > 0, required: false))
         }
         if let invoices = inputs.invoices {
             let invoice = billingInvoice(invoices)
             let signed = invoice.map { invoice in invoice.customerAuthorization?.linesRevision == invoice.linesRevision } ?? false
-            rows.append(WrapUpRow(step: .signature, title: "Customer signature", done: signed && !blockedSteps.contains(.signature)))
+            // A signature the policy does not ask for is listed once it is there, not asked for.
+            let signatureAsked = !known || requirements.contains { covering($0) == .signature && $0.applies }
+            if signatureAsked || signed {
+                rows.append(WrapUpRow(step: .signature, title: "Customer signature", done: signed && !blockedSteps.contains(.signature),
+                                      required: signatureAsked))
+            }
             let due = invoice.flatMap { TechJobFlow.due($0) }
             let owed = invoice?.status == "draft" ? invoice.flatMap { paperLinesTotal($0.lines) } : due
             let paid = invoice.map { $0.status == "paid" || ($0.status == "issued" && due == 0) } ?? false
@@ -160,7 +177,17 @@ enum WrapUpList {
         return rows
     }
 
-    static func left(_ rows: [WrapUpRow]) -> Int { rows.filter { !$0.done }.count }
+    /// What is still to do: open rows the policy (or the money owed) asks for.
+    static func left(_ rows: [WrapUpRow]) -> Int { rows.filter { !$0.done && $0.required }.count }
+
+    /// The row "Wrap up job" opens next: the first open one that is asked for.
+    static func next(_ rows: [WrapUpRow]) -> WrapUpRow? { rows.first { !$0.done && $0.required } }
+
+    /// "3 of 4": the rows that count (asked for, or already done).
+    static func progress(_ rows: [WrapUpRow]) -> (done: Int, total: Int) {
+        let counted = rows.filter { $0.required || $0.done }
+        return (counted.filter(\.done).count, counted.count)
+    }
 }
 
 struct JobCloseoutView: View {
@@ -238,7 +265,7 @@ struct JobCloseoutView: View {
         }
     }
     /// Photos of this job still on this phone (`PendingMediaStore`).
-    private var waitingPhotos: Int { pendingMedia.items.filter { $0.jobID == jobID && $0.kind == "photo" }.count }
+    private var waitingPhotos: Int { pendingMedia.items.filter { $0.jobID == jobID && $0.kind == "photo" && !$0.isSignature }.count }
     private var unassociatedPendingPayments: [OutboxEntry.PaymentPayload] {
         outbox.pending.compactMap { entry in
             guard case .payment(let payment) = entry.action, payment.jobId == nil else { return nil }
@@ -327,15 +354,17 @@ struct JobCloseoutView: View {
                     let checks = CloseoutChecklist.acknowledgementChecks(closeout)
                     let waitingChecks = outbox.waitingChecks(jobID: jobID)
                     // Work saved on this phone counts toward the checklist (OF-01), shown as waiting.
-                    let progress = (done: closeout.requirements.filter { $0.outcome != "blocked" || waitingSatisfies($0) }.count
+                    // Rules the policy does not ask for ("does not require a job note") are not rows.
+                    let asked = Array(closeout.requirements.enumerated()).filter { $0.element.applies }
+                    let progress = (done: asked.filter { $0.element.outcome != "blocked" || waitingSatisfies($0.element) }.count
                                         + checks.filter { closeout.facts.acknowledgedCheckKeys.contains($0.key) || waitingChecks.contains($0.key) }.count,
-                                    total: closeout.requirements.count + checks.count)
+                                    total: asked.count + checks.count)
                     // Paper 83: "Before you close" with "3 of 4" at the trailing edge, over one card.
-                    if !closeout.requirements.isEmpty || !checks.isEmpty {
+                    if !asked.isEmpty || !checks.isEmpty {
                     PaperSection(title: checklistTitle) { VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { offset, requirement in
+                    ForEach(asked, id: \.offset) { offset, requirement in
                         let step = CloseoutNextStep(requirement)
-                        if offset > 0 { WellDivider(leading: PaperCardMetrics.inset + markWidth) }
+                        if offset != asked.first?.offset { WellDivider(leading: PaperCardMetrics.inset + markWidth) }
                         let waiting = waitingSatisfies(requirement)
                         let canRecover = !waiting && !session.isOffline && step?.buttonTitle != nil
                             && (step?.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) ?? false)
@@ -353,7 +382,7 @@ struct JobCloseoutView: View {
                     }
                     ForEach(checks, id: \.key) { check in
                         let waiting = waitingChecks.contains(check.key)
-                        if check.key != checks.first?.key || !closeout.requirements.isEmpty { WellDivider(leading: PaperCardMetrics.inset + markWidth) }
+                        if check.key != checks.first?.key || !asked.isEmpty { WellDivider(leading: PaperCardMetrics.inset + markWidth) }
                         let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key) || waiting
                         let canConfirm = !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs")
                         checklistLayout {
@@ -375,7 +404,7 @@ struct JobCloseoutView: View {
                             .foregroundStyle(Theme.muted)
                     }
                     }
-                    if closeout.requirements.isEmpty && checks.isEmpty {
+                    if asked.isEmpty && checks.isEmpty {
                         PaperSection(checklistTitle) {
                             Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted)
                                 .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 56)

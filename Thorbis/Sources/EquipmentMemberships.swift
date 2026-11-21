@@ -199,6 +199,25 @@ struct MemberPricing: Codable, Hashable {
     func memberPrice(_ cents: Int) -> Int {
         Int((Double(cents) * Double(100 - discountPercent) / 100).rounded())
     }
+
+    /// A saved line the server already charged at the member price: it stored the lower price and
+    /// marked `unit_price` overridden. Discounting it again would show a price nobody pays.
+    static func alreadyMemberPriced(_ source: FieldLineSource?) -> Bool {
+        source?.overriddenFields?.contains("unit_price") == true
+    }
+
+    /// What a member pays for saved lines, for the hint under a total: nil when this is not a
+    /// member, or when the total already is the member price (every priced line member-priced).
+    func memberTotal(of lines: [FieldLine]) -> Int? {
+        guard isMember, discountPercent > 0, !lines.isEmpty else { return nil }
+        let open = lines.filter { $0.unitPrice.amount > 0 && !Self.alreadyMemberPriced($0.source) }
+        guard !open.isEmpty else { return nil }
+        return lines.reduce(0) { sum, line in
+            let price = Self.alreadyMemberPriced(line.source) || line.unitPrice.amount <= 0
+                ? line.unitPrice.amount : memberPrice(line.unitPrice.amount)
+            return sum.addingClamped(line.quantity, times: price)
+        }
+    }
 }
 
 /// `GET /v1/jobs/{id}/service-context` (job.view): the equipment and member pricing a tech needs
@@ -251,6 +270,16 @@ enum JobServiceContextLoader {
         inFlight[jobID] = task
         defer { inFlight[jobID] = nil }
         return try await task.value
+    }
+
+    /// The job reads its equipment and member pricing from the service context (anyone on the job
+    /// may). The customer's own equipment and member-pricing reads are the fallback only for a
+    /// server without the route (404) or when nothing answered at all (offline: a saved copy may).
+    /// A refusal or any other answer is final: the customer reads would be refused the same way.
+    nonisolated static func fallsBackToCustomerReads(after error: Error) -> Bool {
+        if error is CancellationError { return false }
+        guard let problem = error as? Problem, let status = problem.status else { return true }
+        return status == 404
     }
 }
 

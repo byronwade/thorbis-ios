@@ -62,6 +62,18 @@ enum PaperWorkGroups {
 enum ScheduleLead {
     /// Statuses that mean the tech is already on this job.
     static let activeStatuses: Set<String> = ["en_route", "arrived", "in_progress", "paused"]
+
+    /// The Now / Next up card's first pill. Driving directions only while the drive is still ahead
+    /// or under way; once the tech is at the job it names the job's real next step, nil meaning
+    /// Navigate. (An arrived job used to offer "Navigate" to where the tech already stood.)
+    static func stepTitle(status: String) -> String? {
+        switch status {
+        case "arrived": "Start work"
+        case "in_progress": "Continue job"
+        case "paused": "Resume job"
+        default: nil
+        }
+    }
 }
 
 struct ScheduleView: View {
@@ -676,13 +688,19 @@ private struct ScheduleHero: View {
             if let locationNotice {
                 NextStopLocationNotice(dismiss: locationNotice)
             }
-            if place?.directions != nil || place?.call != nil || text != nil {
-                // One row: Navigate, then call and message. At accessibility sizes Navigate takes
+            if place?.directions != nil || place?.call != nil || text != nil || ScheduleLead.stepTitle(status: status) != nil {
+                // One row: Navigate (or, at the job, its next step), then call and message. At accessibility sizes Navigate takes
                 // its own line so the word never squeezes.
                 let actions = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                                       : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
                 actions {
-                    if let directions = place?.directions {
+                    if let step = ScheduleLead.stepTitle(status: status) {
+                        NavigationLink(value: job) { PaperPillLabel(title: step, glyph: .navigate) }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel(step)
+                            .accessibilityHint("Opens the job at this step")
+                            .accessibilityIdentifier("next-stop-step")
+                    } else if let directions = place?.directions {
                         Button { openURL(directions) } label: { PaperPillLabel(title: "Navigate", glyph: .navigate) }
                             .buttonStyle(PressStyle())
                             .accessibilityLabel("Navigate")

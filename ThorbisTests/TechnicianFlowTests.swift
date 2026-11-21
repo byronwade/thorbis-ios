@@ -169,3 +169,38 @@ final class LargeQuantityTests: XCTestCase {
         XCTAssertEqual(real.memberTotal(pricing), 17_000)
     }
 }
+
+/// A saved member-priced estimate must not show a second, lower "Member price" under its total.
+@MainActor
+final class MemberPriceHintTests: XCTestCase {
+    private let pricing = MemberPricing(isMember: true, discountPercent: 10, membership: nil)
+
+    private func line(_ cents: Int, quantity: Int = 1, overridden: [String]? = nil) -> FieldLine {
+        FieldLine(id: UUID().uuidString, description: "Coil", quantity: quantity,
+                  unitPrice: FieldMoney(amount: cents, currency: "USD"),
+                  source: FieldLineSource(kind: "price_book", overriddenFields: overridden))
+    }
+
+    func testListPricedLinesGetTheMemberHint() {
+        XCTAssertEqual(pricing.memberTotal(of: [line(10_000, quantity: 2)]), 18_000)
+    }
+
+    func testLinesTheServerAlreadyMemberPricedAreNotDiscountedAgain() {
+        XCTAssertNil(pricing.memberTotal(of: [line(17_739, overridden: ["unit_price"])]),
+                     "The total already is the member price: no hint")
+        XCTAssertEqual(pricing.memberTotal(of: [line(9_000, overridden: ["unit_price"]), line(10_000)]), 18_000,
+                       "Only the list-priced line is discounted")
+    }
+
+    func testNoHintForSomeoneWhoIsNotAMember() {
+        XCTAssertNil(MemberPricing(isMember: false, discountPercent: 10, membership: nil).memberTotal(of: [line(10_000)]))
+    }
+
+    func testEditorDoesNotDiscountAMemberPricedDraftAgain() {
+        var saved = EstimateRevisionLineDraft(description: "Coil", quantity: "1", unitPrice: "90.00")
+        saved.memberPriced = true
+        XCTAssertNil([saved].memberTotal(pricing))
+        let added = EstimateRevisionLineDraft(description: "Filter", quantity: "1", unitPrice: "100.00")
+        XCTAssertEqual([saved, added].memberTotal(pricing), 18_000)
+    }
+}

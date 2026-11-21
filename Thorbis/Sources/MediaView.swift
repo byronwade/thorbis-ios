@@ -124,7 +124,7 @@ struct JobMediaView: View {
     }
     private var waiting: [PendingMedia] {
         guard currentPendingContext != nil else { return [] }
-        return pendingMedia.items.filter { $0.jobID == jobID }
+        return pendingMedia.items.filter { $0.jobID == jobID && !$0.isSignature }
     }
     private var canShowSelection: Bool {
         guard let captureContext, let currentPendingContext else { return false }
@@ -140,7 +140,7 @@ struct JobMediaView: View {
     }
     private var visible: [MediaAssetRecord] {
         guard let scope = readScope, scope == sourceScope else { return [] }
-        return records.filter { !$0.archived }
+        return records.filter { !$0.archived && !$0.isSignature }
     }
     private var hasMore: Bool { readScope != nil && readScope == sourceScope && nextCursor != nil }
     private var previewIsCurrent: Bool {
@@ -219,7 +219,7 @@ struct JobMediaView: View {
         } }
         .sheet(isPresented: $showAddDocument, onDismiss: { pendingDocumentSource?(); pendingDocumentSource = nil }) { SheetSurface {
             MediaAddDocumentSheet(jobNumber: "JOB-\(jobID.suffix(4).uppercased())", canScan: tools.scan,
-                                  limitNote: MediaLargeUploads.answer(origin: api.normalizedOrigin) == .yes ? "PDFs up to 50 MB." : "Up to 8 MB.") { source in
+                                  limitNote: MediaUploadWords.documentLimitNote(MediaLargeUploads.answer(origin: api.normalizedOrigin))) { source in
                 switch source {
                 case .scan: pendingDocumentSource = { showScanner = true }
                 case .photos: pendingDocumentSource = { showLibrary = true }
@@ -1206,9 +1206,7 @@ struct JobMediaView: View {
     /// The size line under the add buttons. The big limits are promised only once this server
     /// has taken a big file.
     private var limitNote: String {
-        MediaLargeUploads.answer(origin: api.normalizedOrigin) == .yes
-            ? "Photos and PDFs up to 50 MB. Videos up to 200 MB."
-            : "Photos, PDFs and clips up to 8 MB."
+        MediaUploadWords.limitNote(MediaLargeUploads.answer(origin: api.normalizedOrigin))
     }
 
     /// The library pick. One photo keeps the quick tag step; several photos and any videos are

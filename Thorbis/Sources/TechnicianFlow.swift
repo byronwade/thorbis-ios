@@ -149,6 +149,22 @@ enum TechJobFlow {
     }
 
     /// Balance due in cents, or nil when the lines can't be totalled exactly.
+    /// Field mode's "Paid" stage: the job's invoice is issued with nothing owing, and nothing else
+    /// on the job is waiting to be billed or paid. A job put back in progress after it was
+    /// completed (reopened) has work to do again, so it opens on Working, not on "Paid · Done".
+    static func paidStage(status: String, completedAt: String?, invoices: [InvoiceRecord]) -> Bool {
+        if status != "completed", completedAt != nil { return false }
+        let live = invoices.filter { $0.status != "void" && $0.status != "voided" }
+        guard let bill = live.first(where: { $0.origin == "job_completion" }) ?? live.first,
+              bill.status != "draft", bill.amountPaid > 0, due(bill) == 0 else { return false }
+        // Another invoice still in draft with lines on it (unbilled), or issued and owing (unpaid).
+        return !live.contains { other in
+            guard other.id != bill.id else { return false }
+            if other.status == "draft" { return !other.lines.isEmpty }
+            return (due(other) ?? 1) > 0 && other.status != "paid"
+        }
+    }
+
     static func due(_ invoice: InvoiceRecord) -> Int? {
         guard let total = paperLinesTotal(invoice.lines) else { return nil }
         return max(0, total - invoice.amountPaid)
@@ -197,7 +213,7 @@ extension TechJobStep {
 /// One thing "Add to job" can offer (Paper 22's rows, plus the money moves a tech reaches for
 /// at any stage).
 enum JobAddKind: String, Equatable, CaseIterable {
-    case estimate, showEstimate, invoice, openInvoice, payment, plan, photo, note, contact
+    case estimate, showEstimate, invoice, openInvoice, payment, plan, photo, checklist, note, contact
 }
 
 /// What "Add to job" offers. The server refuses none of these by job stage (only a canceled job
@@ -233,6 +249,9 @@ enum JobAddOffer {
             if inputs.canCollect { billing.append(.payment) }
             if inputs.canAddPlan { billing.append(.plan) }
             if inputs.canAddMedia { onTheJob.append(.photo) }
+            // A checklist can be started at any stage: guided mode only shows its tile while
+            // working, so this row is its door before and after.
+            onTheJob.append(.checklist)
         }
         // A note and a contact are records about the job and its customer; they stay on a canceled job.
         if inputs.canAddNote { onTheJob.append(.note) }

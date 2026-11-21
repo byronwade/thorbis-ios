@@ -112,6 +112,26 @@ enum MediaUploadWords {
     /// The server's storage is not answering (502 or 504). Nothing is lost.
     static let storageDown = "Photos can\u{2019}t be saved right now. They\u{2019}re kept on this phone and will send later."
 
+    /// The size line under the add buttons, following what this server has shown it can take:
+    /// the big limits once it took a big file, 8 MB once it refused one, and neither promise
+    /// while it is not known yet (a big file is tried then, with a smaller copy kept beside it).
+    static func limitNote(_ answer: MediaLargeUploads.Answer) -> String {
+        switch answer {
+        case .yes: "Photos and PDFs up to 50 MB. Videos up to 200 MB."
+        case .no: "Photos, PDFs and clips up to 8 MB."
+        case .unknown: "Photos, PDFs and videos. A very big file may be sent as a smaller copy."
+        }
+    }
+
+    /// The same line for a document on its own.
+    static func documentLimitNote(_ answer: MediaLargeUploads.Answer) -> String {
+        switch answer {
+        case .yes: "PDFs up to 50 MB."
+        case .no: "Up to 8 MB."
+        case .unknown: "PDF files."
+        }
+    }
+
     /// "Video clips are limited to 8 MB for now, so the first 20 seconds were kept."
     static func keptFirstPart(seconds: Double?) -> String {
         guard let seconds else { return "Video clips are limited to 8 MB for now, so a smaller copy was sent." }

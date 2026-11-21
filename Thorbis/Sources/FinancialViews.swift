@@ -507,8 +507,9 @@ struct EstimateDetailView: View {
 
     /// MF-05: a member's price is the supporting line under a total, never a second total.
     private func memberLine(_ lines: [FieldLine], currency: String) -> String? {
-        guard let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0, !lines.isEmpty else { return nil }
-        let memberTotal = lines.reduce(0) { $0.addingClamped($1.quantity, times: memberPricing.memberPrice($1.unitPrice.amount)) }
+        // Lines the server already saved at the member price are not discounted a second time; when
+        // every line is, the total above already is the member price and no hint is shown.
+        guard let memberPricing, let memberTotal = memberPricing.memberTotal(of: lines) else { return nil }
         return "Member price \(money(memberTotal, currency: currency)) · \(memberPricing.discountPercent)% off"
     }
 
@@ -1177,7 +1178,7 @@ struct InvoiceDetailView: View {
             }
         }
         .sensoryFeedback(.success, trigger: issued)
-        .thorbisConfirm("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue,
+        .thorbisConfirm(InvoiceRevisionWords.issueConfirm(flagOn: session.isFeatureOn(InvoiceRevisionWords.flag)), isPresented: $confirmIssue,
                         actions: [ThorbisConfirmAction(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }])
         .sheet(isPresented: $showEditDraft) { SheetSurface {
             if let record {

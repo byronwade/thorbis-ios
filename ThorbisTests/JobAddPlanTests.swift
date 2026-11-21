@@ -17,7 +17,7 @@ final class JobAddPlanTests: XCTestCase {
     func testThePlanRowSitsLastUnderBillingAndNeverOnACanceledJob() {
         var inputs = JobAddOffer.Inputs(status: "in_progress", canCreateEstimate: true, canCollect: true, canAddNote: true, canAddPlan: true)
         XCTAssertEqual(JobAddOffer.rows(inputs).billing, [.estimate, .payment, .plan])
-        XCTAssertEqual(JobAddOffer.rows(inputs).onTheJob, [.note])
+        XCTAssertEqual(JobAddOffer.rows(inputs).onTheJob, [.checklist, .note], "A checklist can be started at every open stage")
         inputs.canAddPlan = false
         XCTAssertEqual(JobAddOffer.rows(inputs).billing, [.estimate, .payment])
         inputs.canAddPlan = true
