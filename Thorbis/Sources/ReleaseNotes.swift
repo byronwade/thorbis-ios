@@ -13,6 +13,21 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-21-cleaner-pages",
+            date: "2026-11-21",
+            highlights: [
+                .init(symbol: "rectangle.grid.1x2", title: "One simple top for every page",
+                      detail: "Jobs, customers, estimates and invoices all start the same: number, status, name and one line."),
+                .init(symbol: "link", title: "Jump between linked records",
+                      detail: "Pills under the name open the customer, job, estimate or invoice. Back returns where you were."),
+                .init(symbol: "plus", title: "One way to add to a job",
+                      detail: "The + at the top adds anything. Share, reschedule and assign now live under the three dots."),
+                .init(symbol: "line.3.horizontal.decrease", title: "Lists filter the same way",
+                      detail: "Jobs, Customers, Estimates and Invoices each have one row of filters and the same simple rows."),
+                .init(symbol: "sparkles", title: "Less on each screen",
+                      detail: "Status, customer, call and text each show once, so the job page is quicker to read."),
+            ]),
+        ReleaseNote(
             id: "2026-11-20-on-site",
             date: "2026-11-20",
             highlights: [
