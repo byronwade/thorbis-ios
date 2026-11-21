@@ -91,6 +91,46 @@ final class OfflineSessionTests: XCTestCase {
         XCTAssertTrue(offline.can("job.edit", feature: "jobs"))
     }
 
+    func testAServerConfirmedSignedOutSessionForgetsTheOfflineSnapshot() async {
+        let snapshots = MemorySessionSnapshotStore()
+        let online = make(signIn, snapshots: snapshots)
+        await online.restore()
+        XCTAssertNotNil(snapshots.snapshot)
+
+        let revoked = make([.init(200, "null")], snapshots: snapshots)
+        await revoked.restore()
+        XCTAssertEqual(revoked.phase, .signedOut)
+        XCTAssertNil(snapshots.snapshot, "A session the server ended must not reopen offline")
+
+        let offline = make([URLProtocolFixture.offline], snapshots: snapshots)
+        await offline.restore()
+        XCTAssertNotEqual(offline.phase, .ready)
+        XCTAssertFalse(offline.can("job.view", feature: "jobs"))
+    }
+
+    func testALostMembershipForgetsTheOfflineSnapshot() async {
+        let snapshots = MemorySessionSnapshotStore()
+        let online = make(signIn, snapshots: snapshots)
+        await online.restore()
+        XCTAssertNotNil(snapshots.snapshot)
+
+        let otherWorkspace = #"[{"id":"019f0000-0000-7000-8000-000000000002","name":"Another workspace"}]"#
+        let removed = make([.init(200, session), .init(200, otherWorkspace)], snapshots: snapshots)
+        await removed.restore()
+        XCTAssertEqual(removed.phase, .failed)
+        XCTAssertNil(snapshots.snapshot)
+    }
+
+    func testNoSignalKeepsTheOfflineSnapshot() async {
+        let snapshots = MemorySessionSnapshotStore()
+        let online = make(signIn, snapshots: snapshots)
+        await online.restore()
+
+        let offline = make([URLProtocolFixture.offline], snapshots: snapshots)
+        await offline.restore()
+        XCTAssertNotNil(snapshots.snapshot, "No signal is not proof the session ended")
+    }
+
     func testOfflineSnapshotDoesNotAuthorizePriceBookAcrossOrigins() async {
         let snapshots = MemorySessionSnapshotStore()
         let online = make(signIn, snapshots: snapshots)

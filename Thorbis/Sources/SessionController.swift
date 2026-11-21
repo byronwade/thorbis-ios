@@ -331,6 +331,8 @@ final class SessionController: ObservableObject {
         // Notifications for the old workspace stop before the switch.
         await onWillUnbindDevice?()
         snapshots.clear()
+        // The widgets drop the old workspace's jobs before the new one writes its own.
+        TodaySnapshot.clear()
         let requestGeneration = invalidate(next: .restoring)
         do {
             struct Selection: Encodable { let organizationId: String }
@@ -417,6 +419,8 @@ final class SessionController: ObservableObject {
             )
             guard generation == requestGeneration else { return }
             guard let payload else {
+                // The server says this session is gone: the offline copy must not reopen it.
+                snapshots.clear()
                 phase = .signedOut
                 onVerifiedIdentity?(nil, nil)
                 return
@@ -426,6 +430,7 @@ final class SessionController: ObservableObject {
                   let sessionExpiry = Self.date(payload.session.expiresAt)
             else { throw SessionValidationError(reason: "Invalid session identity.") }
             guard Date() < sessionExpiry else {
+                snapshots.clear()
                 phase = .signedOut
                 onVerifiedIdentity?(nil, nil)
                 return
@@ -552,6 +557,9 @@ final class SessionController: ObservableObject {
         if failure.isTransientServerFailure, !defaults.bool(forKey: Self.explicitSignOutKey),
            adoptSnapshot(generation: requestGeneration) { return }
         let description = failure.plainMessage()
+        // Only an answer that proves the session or membership is gone forgets the offline copy.
+        // A captive portal or a CDN page must not end a technician's offline access.
+        if failure is SessionValidationError || (failure as? Problem)?.status == 401 { snapshots.clear() }
         invalidate(next: .failed)
         error = description
     }

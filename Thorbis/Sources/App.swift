@@ -97,6 +97,8 @@ struct ThorbisApp: App {
             } else {
                 DayPrefetch.shared.cancel()
                 api?.savedCopyScope = nil
+                // Expired, signed out elsewhere, no workspace: the widgets stop showing customers.
+                TodaySnapshot.clear()
             }
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
@@ -110,6 +112,9 @@ struct ThorbisApp: App {
         }
         store.onRefreshed = { [weak session, weak api] jobs, customers in
             guard let session, session.phase == .ready else { return }
+            // An emptied list replaces the widgets' old rows; the writer skips an empty store so a
+            // cold launch does not flash "No more jobs today".
+            if jobs.isEmpty, session.can("job.view", feature: "jobs") { TodaySnapshot.save(TodaySnapshot(items: [], writtenAt: Date())) }
             if let api { DayPrefetch.shared.start(jobs: jobs, api: api, session: session) }
             SpotlightIndex.shared.replace(jobs: jobs, customers: customers,
                                           includeJobs: session.can("job.view", feature: "jobs"),

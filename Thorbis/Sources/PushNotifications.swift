@@ -32,8 +32,10 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         self.signedIn = signedIn
         if !signedIn, !Self.disabled {
             // Signed out, possibly offline so the server never heard: stop this phone taking alerts
-            // meant for the person who just left. Signing in registers again.
+            // meant for the person who just left, and take theirs off the Lock Screen. Signing in
+            // registers again.
             UIApplication.shared.unregisterForRemoteNotifications()
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         }
         guard signedIn, !Self.disabled else { return }
         Task {
@@ -57,6 +59,8 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     /// Before sign-out or a workspace switch, while the session can still authorize the call.
     func unbind() async {
+        // A workspace switch does not pass through a signed-out identity; drop the old company's alerts here.
+        if !Self.disabled { UNUserNotificationCenter.current().removeAllDeliveredNotifications() }
         guard let api, !Self.disabled, pushOn() else { return }
         _ = try? await api.send("POST", "/v1/devices/unregister", body: ["installationId": Self.installationID]) as DeviceRemoval
     }
