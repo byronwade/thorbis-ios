@@ -604,8 +604,18 @@ final class JobSavedViewsBook: ObservableObject {
         } catch is CancellationError {
         } catch {
             guard identity == self.identity else { return }
-            problem = "Could not load saved views. \(error.localizedDescription)"
+            problem = Self.loadProblem(error)
+            // A role that may not read the workspace's views simply has none; that is not a failure.
+            if problem == nil { views = []; favorites = []; loaded = true }
         }
+    }
+
+    /// What the Jobs list says when saved views fail to load, or nil when there is nothing to say:
+    /// the server refuses the list to a role that only sees its own jobs (a technician's
+    /// "not permitted: job.view (out_of_scope)"), and that role just has no saved views.
+    nonisolated static func loadProblem(_ error: Error) -> String? {
+        if let problem = error as? Problem, problem.status == 403 { return nil }
+        return "Could not load saved views. \(error.localizedDescription)"
     }
 
     /// Saves the current filters as a new personal view and returns it.

@@ -33,6 +33,17 @@ final class JobSavedViewsTests: XCTestCase {
 
     /// GET /v1/views?resourceId=jobs: a ListedView page (ViewDefinition + source + rowId), as
     /// `storedViewToDefinition` builds it. The last page has no nextCursor.
+    /// A technician's Jobs list against a real server: `GET /v1/views?resourceId=jobs` is 403
+    /// "not permitted: job.view (out_of_scope)". That is no saved views, not an error banner.
+    func testARoleThatCannotReadSavedViewsGetsNoErrorBanner() {
+        let refused = Problem(title: "authorization", status: 403, detail: "not permitted: job.view (out_of_scope)",
+                              code: nil, category: "authorization")
+        XCTAssertNil(JobSavedViewsBook.loadProblem(refused))
+        let down = Problem(title: "Server error", status: 500, detail: "Something went wrong", code: nil, category: nil)
+        XCTAssertEqual(JobSavedViewsBook.loadProblem(down), "Could not load saved views. Something went wrong")
+        XCTAssertNotNil(JobSavedViewsBook.loadProblem(URLError(.notConnectedToInternet)))
+    }
+
     func testDecodesAListedViewPage() throws {
         let page = try decode(SavedJobViewPage.self, #"""
         {"items":[
