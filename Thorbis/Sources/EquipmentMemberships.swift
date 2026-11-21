@@ -44,7 +44,8 @@ struct EquipmentRecord: Codable, Identifiable, Hashable {
     }()
 }
 
-/// The fields a person edits. Nil means "leave out"; on update the server leaves absent fields alone.
+/// The fields a person edits. Encoded as it stands it is an edit: an emptied field is sent as
+/// null, which clears it on the server. A new unit goes out as `NewEquipmentBody` instead.
 struct EquipmentInput: Encodable, Equatable {
     var name: String
     var locationId: String?
@@ -58,11 +59,19 @@ struct EquipmentInput: Encodable, Equatable {
 
     /// Empty strings become null so clearing a field in the form clears it on the server.
     func encode(to encoder: Encoder) throws {
+        try encode(to: encoder, emptyFieldsAsNull: true)
+    }
+
+    fileprivate func encode(to encoder: Encoder, emptyFieldsAsNull: Bool) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(name, forKey: .name)
         func put(_ value: String?, _ key: CodingKeys) throws {
             let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-            try c.encode(trimmed?.isEmpty == false ? trimmed : nil, forKey: key)
+            if let trimmed, !trimmed.isEmpty {
+                try c.encode(trimmed, forKey: key)
+            } else if emptyFieldsAsNull {
+                try c.encodeNil(forKey: key)
+            }
         }
         try put(locationId, .locationId)
         try put(kind, .kind)
@@ -74,6 +83,15 @@ struct EquipmentInput: Encodable, Equatable {
         try put(notes, .notes)
     }
     private enum CodingKeys: String, CodingKey { case name, locationId, kind, brand, model, serialNumber, installedOn, warrantyExpiresOn, notes }
+}
+
+/// A new unit on the wire. The server refuses null when adding equipment, so empty fields are
+/// left out; only an edit may send null.
+private struct NewEquipmentBody: Encodable {
+    let input: EquipmentInput
+    func encode(to encoder: Encoder) throws {
+        try input.encode(to: encoder, emptyFieldsAsNull: false)
+    }
 }
 
 struct MembershipPlan: Codable, Identifiable, Hashable {
@@ -297,7 +315,7 @@ extension APIClient {
     }
 
     func addEquipment(_ customerID: String, _ input: EquipmentInput) async throws -> EquipmentRecord {
-        try await send("POST", "/v1/customers/\(try uuid(customerID))/equipment", body: input)
+        try await send("POST", "/v1/customers/\(try uuid(customerID))/equipment", body: NewEquipmentBody(input: input))
     }
 
     func updateEquipment(_ customerID: String, equipmentID: String, _ input: EquipmentInput) async throws -> EquipmentRecord {
