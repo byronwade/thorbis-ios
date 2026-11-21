@@ -324,7 +324,7 @@ struct JobCustomerDocumentsView: View {
     private func invoiceRow(_ invoice: InvoiceRecord, fresh: Bool) -> CustomerHomeDocumentRow {
         let facts = JobDocumentRow(invoice: invoice, fresh: fresh, customerFacing: true)
         let word = invoice.status == "issued" ? (facts.detail ?? "Unpaid") : invoice.status.statusLabel
-        return CustomerHomeDocumentRow(title: invoice.origin == "estimate_deposit" || jobTitle.isEmpty ? facts.title : jobTitle,
+        return CustomerHomeDocumentRow(title: invoice.isDeposit || jobTitle.isEmpty ? facts.title : jobTitle,
                                        reference: facts.reference,
                                        word: fresh ? word : "Needs refresh",
                                        tint: fresh ? StatusWord.documentTint(invoice.status) : nil,

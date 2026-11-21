@@ -248,7 +248,7 @@ enum PaperPreview {
         return [primary,
          changed(alternate, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
                             ? "00000000-0000-4000-8000-000000012209" : "00000000-0000-4000-8000-000000002240",
-                           "status": equalBalances || mixedBalance ? "issued" : "paid", "origin": "estimate_deposit",
+                           "status": equalBalances || mixedBalance ? "issued" : "paid", "origin": "deposit",
                            "currency": mixedBalance ? "EUR" : original.currency,
                            "amountPaid": equalBalances || mixedBalance ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),

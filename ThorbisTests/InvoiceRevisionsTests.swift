@@ -278,7 +278,7 @@ final class InvoiceRevisionsTests: XCTestCase {
 
     func testTheJobsInvoiceIsItsCompletionInvoiceNeverADepositOrAVoid() throws {
         let completion = try invoice()
-        let deposit = try invoice { var object = $0; object["id"] = "00000000-0000-4000-8000-0000000000d1"; object["origin"] = "estimate_deposit"; return object }
+        let deposit = try invoice { var object = $0; object["id"] = "00000000-0000-4000-8000-0000000000d1"; object["origin"] = "deposit"; return object }
         let voided = try invoice(status: "void") { var object = $0; object["id"] = "00000000-0000-4000-8000-0000000000d2"; return object }
         let other = try invoice { var object = $0; object["id"] = "00000000-0000-4000-8000-0000000000d3"; object["jobId"] = "00000000-0000-4000-8000-0000000000ee"; return object }
         XCTAssertEqual(InvoiceEstimateBilling.jobInvoice([deposit, voided, other, completion], jobID: jobID)?.id, completion.id)

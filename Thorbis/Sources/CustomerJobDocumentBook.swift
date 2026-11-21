@@ -447,7 +447,7 @@ private struct CustomerInvoiceBookPage: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(invoice.origin == "estimate_deposit" ? "Deposit invoice" : "Invoice")
+                    Text(invoice.isDeposit ? "Deposit invoice" : "Invoice")
                         .font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("customer-invoice-summary")

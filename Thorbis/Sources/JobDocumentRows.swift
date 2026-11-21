@@ -237,7 +237,7 @@ extension JobDocumentRow {
 
     init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false, invoiceReference: String? = nil) {
         reference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
-        title = invoice.origin == "estimate_deposit" ? "Deposit" : "Invoice"
+        title = invoice.isDeposit ? "Deposit" : "Invoice"
         status = invoice.status
         if customerFacing {
             if let verified = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) {

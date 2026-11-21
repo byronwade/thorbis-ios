@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-21-saves-that-stick",
+            date: "2026-11-21",
+            highlights: [
+                .init(symbol: "key", title: "Save a custom role",
+                      detail: "Making or changing a role in Team now saves and opens it instead of showing an error."),
+                .init(symbol: "wrench.and.screwdriver", title: "Add equipment with only a name",
+                      detail: "A unit saves with just what you know. Brand, model, serial and dates can be added later."),
+                .init(symbol: "doc.text", title: "Deposits say Deposit",
+                      detail: "A deposit invoice is labeled Deposit on the job and for the customer, apart from the job\u{2019}s invoice."),
+            ]),
+        ReleaseNote(
             id: "2026-11-21-cleaner-pages",
             date: "2026-11-21",
             highlights: [

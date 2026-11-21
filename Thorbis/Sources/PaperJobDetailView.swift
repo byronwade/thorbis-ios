@@ -4536,7 +4536,7 @@ struct JobDetailView: View {
             } label: {
                 if let due {
                     JobInvoiceBalanceHeader(reference: reference,
-                                            kind: invoice.origin == "estimate_deposit" ? "Deposit" : nil,
+                                            kind: invoice.isDeposit ? "Deposit" : nil,
                                             status: invoice.status, amount: money(due, currency: invoice.currency))
                         .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 16)
                 } else {
