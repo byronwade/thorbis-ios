@@ -16,14 +16,19 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 30))
         var row = thorbisJobFavoriteRow(app)
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        if row.label == "Remove from favorites" { row.tap(); row = thorbisJobFavoriteRow(app) }
+        // Each choice closes the sheet; the closing sheet's row is still in the tree for a moment,
+        // and reading it would report the old state. Wait it out, then open the sheet again.
+        func choose(_ current: XCUIElement) -> XCUIElement {
+            current.tap()
+            XCTAssertTrue(current.waitForNonExistence(timeout: 5), "The Share sheet closes on each choice")
+            return thorbisJobFavoriteRow(app)
+        }
+        if row.label == "Remove from favorites" { row = choose(row) }
         XCTAssertEqual(row.label, "Add to favorites")
         XCTAssertGreaterThanOrEqual(row.frame.height, 43.99)
-        row.tap()
-        row = thorbisJobFavoriteRow(app)
+        row = choose(row)
         XCTAssertEqual(row.label, "Remove from favorites")
-        row.tap()
-        row = thorbisJobFavoriteRow(app)
+        row = choose(row)
         XCTAssertEqual(row.label, "Add to favorites")
     }
 
