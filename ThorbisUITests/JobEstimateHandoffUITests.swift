@@ -207,6 +207,10 @@ func thorbisTapStableButton(_ app: XCUIApplication, _ identifier: String) -> XCU
 
 @MainActor
 final class JobEstimateHandoffUITests: XCTestCase {
+    /// How long Customer view's first estimate may take to appear after the door is tapped: the
+    /// handoff reads its job, membership and prices, and the two-window hierarchy is slow to query
+    /// (one CI existence check took 9.2 s). The same 45 s testLoadingNextPageReusesVerifiedPrices uses.
+    private let customerViewFirstEstimate: TimeInterval = 45
     func testLongEstimateTitleAndStatusAtNormalText() {
         let app = open(["--paper-preview-handoff-long-title", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
@@ -857,7 +861,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-retire-api"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
         toggleSampleControls(app)
         XCTAssertTrue(app.buttons["Retire sample API shortly"].waitForExistence(timeout: 5))
         app.buttons["Retire sample API shortly"].tap()
@@ -905,7 +909,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
         thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(second.waitForExistence(timeout: 10)); selectEstimate(app, second)
         thorbisStableButton(app, "handoff-review-selected").tap()
@@ -944,7 +948,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = open(["--paper-preview-handoff-duplicate-titles", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         visible(app, second)
         XCTAssertLessThanOrEqual(second.frame.maxY, app.buttons["Review selected (1)"].frame.minY)
@@ -981,7 +985,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     private func reachSignTogether(_ app: XCUIApplication, optionID: String? = nil, third: Bool = false) {
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
         if let optionID { app.buttons[optionID].tap() }
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         visible(app, second); selectEstimate(app, second)
@@ -1084,7 +1088,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = open()
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
         thorbisStableButton(app, "handoff-review-selected").tap()
         XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10)); thorbisStableButton(app, "handoff-continue-signatures").tap()
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10)); draw(app)
@@ -1135,7 +1139,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = open(["--paper-preview-handoff-options", "--paper-preview-handoff-receipt"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
         let package = app.buttons["handoff-option-00000000-0000-4000-8000-000000008101-00000000-0000-4000-8000-000000008201"]
         visible(app, package); package.tap()
         thorbisStableButton(app, "handoff-review-selected").tap()
@@ -1260,7 +1264,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 2)
         XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 0, "Nothing is approved before the customer commits")
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         visible(app, second); selectEstimate(app, second)
         thorbisStableButton(app, "handoff-review-selected").tap()
