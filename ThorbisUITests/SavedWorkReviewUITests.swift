@@ -80,7 +80,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["saved-work-done"].isHittable)
         capture(app, "Mixed saved work with native Done")
         app.buttons["saved-work-done"].tap()
-        XCTAssertTrue(app.scheduleTitle.isHittable)
+        XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
         XCTAssertFalse(app.savedWorkReview.exists)
     }
     func testUncachedJobBackAndNestedBannerReturnUseSameSheet() {
@@ -102,7 +102,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["saved-work-done"].isHittable)
         capture(app, "Nested job banner returns to same review")
         app.buttons["saved-work-done"].tap()
-        XCTAssertTrue(app.scheduleTitle.isHittable)
+        XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
     }
     func testOfflineReviewKeepsSyncDisabledAndDiscardNeedsConfirmation() {
         let app = open(["--paper-preview-saved-work-offline"])
@@ -126,7 +126,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         app.buttons["Sample controls"].tap()
         app.buttons["Retire sample requests"].tap()
         XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.scheduleTitle.isHittable)
+        XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
         app.buttons["saved-work-summary"].tap()
         XCTAssertTrue(app.savedWorkReview.waitForExistence(timeout: 5))
     }
@@ -135,7 +135,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         app.buttons["Sample controls"].tap()
         app.buttons["Rebind sample commands"].tap()
         XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.scheduleTitle.isHittable)
+        XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
         app.buttons["saved-work-summary"].tap()
         XCTAssertTrue(app.savedWorkReview.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["saved-work-dismiss-00000000-0000-4000-8000-000000009711"].exists)
@@ -231,7 +231,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         capture(app, "Large text dark recovery actions")
         XCTAssertTrue(app.buttons["saved-work-done"].isHittable)
         app.buttons["saved-work-done"].tap()
-        XCTAssertTrue(app.scheduleTitle.isHittable)
+        XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
     }
     func testMixedSavedWorkOpensAndSurvivesRelaunch() {
         continueAfterFailure = false
@@ -261,6 +261,12 @@ private extension XCUIApplication {
     /// The schedule place's title. It reads "Today", "This week" or "Board" with the range, so the
     /// review's return is checked by identifier, not by the words.
     var scheduleTitle: XCUIElement { staticTexts["schedule-title"] }
+    /// Schedule is reachable again. The review sheet slides away after Done or a retirement, so a
+    /// single read can land mid-slide (CI 41ac2c7, shard 3); wait for it, as the workspace-change test does.
+    func waitForSchedule(timeout: TimeInterval = 5) -> Bool {
+        let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: scheduleTitle)
+        return XCTWaiter.wait(for: [shown], timeout: timeout) == .completed
+    }
     /// The discard confirmation is a Thorbis confirm sheet (not a system alert): its question is
     /// the sheet's title, and its choices are the "Cancel" and "Discard" buttons.
     var discardQuestion: XCUIElement { staticTexts["Discard saved change?"] }

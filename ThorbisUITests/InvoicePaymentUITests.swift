@@ -186,7 +186,9 @@ final class InvoicePaymentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Payment link expired"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.images["invoice-payment-qr"].exists)
         XCTAssertFalse(app.buttons["share-invoice-payment-link"].exists)
-        XCTAssertTrue(app.buttons["Create new payment link"].isEnabled)
+        // The page re-checks the invoice after the link expires; Create waits for that check (CI 41ac2c7, shard 6).
+        let create = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Create new payment link"])
+        XCTAssertEqual(XCTWaiter.wait(for: [create], timeout: 10), .completed, "An expired link offers a working Create new payment link")
         capture(app, "Expired payment link recovery")
     }
 
