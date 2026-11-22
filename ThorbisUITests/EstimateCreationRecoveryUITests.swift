@@ -206,7 +206,11 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
         XCTAssertTrue(item.waitForExistence(timeout: 15))
         item.tap()
-        app.buttons["price-book-done"].tap()
+        let done = app.buttons["price-book-done"]
+        done.tap()
+        // Done must close the price book. If it does not, the next tap (Save, behind the sheet) lands
+        // on the open picker instead and the failure shows up later as missing requests.
+        XCTAssertTrue(done.waitForNonExistence(timeout: 10), "Done must close the price book and return to the estimate")
     }
 
     func testFailedLinkKeepsSavedEstimateLockedAndRetriesWithoutCreatingAgain() {
