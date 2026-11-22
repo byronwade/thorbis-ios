@@ -122,8 +122,9 @@ jobs:
         # Three failures landed in a shard's first two minutes that way: a first launch that timed
         # out in Xcode, and two taps the app received and never acted on while the system was still
         # starting services and rendering the app's widgets (BYR-1835). This step does that work
-        # before any test: boot, install the app once, then wait (at most three minutes) for the
-        # machine's load to come back under its core count.
+        # before any test: boot, install the app once, then wait (at most about three minutes)
+        # until half the machine's CPU is idle. The load average is no use for this: on these
+        # three-core runners it reads near 200 for minutes after a simulator boots.
         run: |
           mkdir -p "${{ runner.temp }}/ThorbisBuild"
           tar -C "${{ runner.temp }}/ThorbisBuild" -xf "${{ runner.temp }}/ThorbisTestBuild.tar"
@@ -135,13 +136,14 @@ jobs:
           else
             echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
           fi
-          cores=$(sysctl -n hw.ncpu)
-          for _ in $(seq 1 36); do
-            load=$(sysctl -n vm.loadavg | awk '{print $2}')
-            if awk -v load="$load" -v cores="$cores" 'BEGIN { exit !(load < cores) }'; then break; fi
-            sleep 5
+          idle=0
+          for _ in $(seq 1 30); do
+            # The second sample is the current one; the first covers the time since boot.
+            idle=$({ top -l 2 -n 0 2>/dev/null || true; } | awk '/CPU usage/ { value = $7 } END { sub("%", "", value); print value + 0 }')
+            if awk -v idle="$idle" 'BEGIN { exit !(idle >= 50) }'; then break; fi
+            sleep 4
           done
-          echo "Load before the first test: $(sysctl -n vm.loadavg) on $cores cores"
+          echo "CPU idle before the first test: ${idle}% (load $(sysctl -n vm.loadavg))"
       - name: Run this shard's UI tests
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
