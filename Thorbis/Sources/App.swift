@@ -518,7 +518,7 @@ enum StoreRefreshResult: Equatable {
 
 /// iPad sidebar sections.
 enum TabletSection: Hashable {
-    case schedule, jobs, customers, more
+    case schedule, jobs, customers
     /// Any other place from the phone menu, so the sidebar lists the same places.
     case place(MenuItem)
     /// A record kept only on this device (Fleet, Equipment, Agreements, ...).
