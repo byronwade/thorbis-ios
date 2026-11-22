@@ -36,6 +36,16 @@ final class DocumentStatusTests: XCTestCase {
         XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 48_000)), DocumentStatus(tone: .invoiced, word: "Paid"))
     }
 
+    /// Search and the job's rows read the record, not the bare status: part paid reads "Partly paid".
+    @MainActor
+    func testInvoiceStatusWordReadsTheAmountPaid() {
+        XCTAssertEqual(StatusWord(invoice: invoice("issued")).text, "Unpaid")
+        XCTAssertEqual(StatusWord(invoice: invoice("issued", paid: 10_000)).text, "Partly paid")
+        XCTAssertEqual(StatusWord(invoice: invoice("paid", paid: 48_000)).text, "Paid")
+        XCTAssertEqual(StatusWord(invoice: invoice("issued", paid: 10_000)).tint, StatusWord(documentStatus: "issued").tint)
+        XCTAssertEqual(JobDocumentRow(invoice: invoice("issued", paid: 10_000), fresh: true).invoiceWord, "Partly paid")
+    }
+
     private func invoice(_ status: String, total: Int = 48_000, paid: Int = 0) -> InvoiceRecord {
         InvoiceRecord(id: "i", organizationId: "o", customerId: "c", jobId: "j", createdByUserId: "u", locationId: nil, scheduleId: nil,
                       origin: "job_completion", sourceOperationKey: "k", sourceEstimateId: nil, sourceEstimateRevisionNumber: nil,

@@ -16,6 +16,8 @@ struct JobDocumentRow: View {
     var jobEstimateCard = false
     /// What happened with the status, e.g. "Signed 9:24 AM" on an approved estimate.
     var statusNote: String? = nil
+    /// An invoice's word from the record ("Partly paid" when part is paid); nil for an estimate.
+    var invoiceWord: String? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -41,8 +43,9 @@ struct JobDocumentRow: View {
 
     private var statusKey: String { status.lowercased() }
 
-    /// The status as a word ("Unpaid" for an issued invoice), as `StatusWord(documentStatus:)` says it.
-    private var statusWordText: String { statusKey == "issued" ? "Unpaid" : status.statusLabel }
+    /// The status as a word ("Unpaid" for an issued invoice, "Partly paid" once part is paid), as
+    /// `StatusWord(invoice:)` and `StatusWord(documentStatus:)` say it.
+    private var statusWordText: String { invoiceWord ?? (statusKey == "issued" ? "Unpaid" : status.statusLabel) }
 
     /// "Sent · Waiting on customer": the status word in its tone at 14 Medium, the rest muted.
     private func statusLine(_ notes: [String]) -> Text {
@@ -239,6 +242,7 @@ extension JobDocumentRow {
         reference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
         title = invoice.isDeposit ? "Deposit" : "Invoice"
         status = invoice.status
+        invoiceWord = DocumentStatus(invoice: invoice).word
         if customerFacing {
             if let verified = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) {
                 amount = money(verified.total, currency: invoice.currency)

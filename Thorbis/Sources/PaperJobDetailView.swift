@@ -4506,7 +4506,8 @@ struct JobDetailView: View {
                 if let due {
                     JobInvoiceBalanceHeader(reference: reference,
                                             kind: invoice.isDeposit ? "Deposit" : nil,
-                                            status: invoice.status, amount: money(due, currency: invoice.currency))
+                                            status: invoice.status, amount: money(due, currency: invoice.currency),
+                                            amountPaid: invoice.amountPaid)
                         .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 16)
                 } else {
                     JobDocumentRow(invoice: invoice, fresh: fresh, invoiceReference: reference).onWell()

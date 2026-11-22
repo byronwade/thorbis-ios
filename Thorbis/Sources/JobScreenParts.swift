@@ -859,9 +859,14 @@ struct JobInvoiceBalanceHeader: View {
     var kind: String? = nil
     let status: String
     let amount: String
+    /// What is already paid, so a part-paid invoice reads "Partly paid" (the shared money word table).
+    var amountPaid = 0
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    private var statusWord: String { status == "issued" ? "Unpaid" : status.statusLabel }
+    private var statusWord: String {
+        guard status == "issued" else { return status.statusLabel }
+        return amountPaid > 0 ? "Partly paid" : "Unpaid"
+    }
     private var caption: String {
         [reference, kind, "Balance due"].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }

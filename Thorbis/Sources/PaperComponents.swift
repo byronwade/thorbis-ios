@@ -1474,6 +1474,12 @@ extension StatusWord {
         self.init(text: status == "issued" ? "Unpaid" : status.statusLabel, tint: StatusWord.documentTone(status)?.hue)
     }
 
+    /// An invoice's word from the record, so a part-paid invoice reads "Partly paid" (the shared
+    /// money word table), with the same dot as `init(documentStatus:)`.
+    init(invoice: InvoiceRecord) {
+        self.init(text: DocumentStatus(invoice: invoice).word, tint: StatusWord.documentTone(invoice.status)?.hue)
+    }
+
     /// The `DocumentStatus` tone for a bare status word, estimate or invoice (staff screens). Nil
     /// for anything that isn't a document status (a search hit's "active"), which keeps no dot.
     static func documentTone(_ status: String) -> StatusTone? {
