@@ -111,7 +111,8 @@ struct JobPropertyHistory: Codable, Hashable {
     }
 
     /// The job's street (the first line of its own location's address), or nil when the job
-    /// records no site (BYR-1593). The account's addresses are never promoted to the job site.
+    /// records no site (BYR-1593). A job without one is shown at `JobFallbackAddress`, with its
+    /// caveat, never as if it were the job's own site.
     static func street(job: JobRecord, locations: [ServiceLocationRecord]) -> String? {
         guard let locationID = job.locationId,
               let place = locations.first(where: { $0.id == locationID && $0.customerId == job.customerId && $0.organizationId == job.organizationId })
@@ -150,6 +151,39 @@ struct JobPropertyHistory: Codable, Hashable {
             parts.append(years < 1 ? "Under a year" : "\(years) \(years == 1 ? "yr" : "yrs")")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// Where a job that records no site of its own is shown to be, until BYR-1593 settles which field
+/// holds a job's site: the customer's only service location, else, when they have none, the
+/// customer's own address (`customers.address`), as the server's job notices and the web job page
+/// already do. Every surface that shows it says `caveat`. Never a guess between several service
+/// locations, and nothing while the customer's locations are unread.
+struct JobFallbackAddress: Equatable {
+    static let caveat = "From the customer's only address on file"
+
+    let address: String
+    let coordinates: FieldCoordinates?
+
+    /// The street line, as a stop's own address reads it.
+    var street: String? { NextStopPlace.firstLine(address) }
+    var directions: URL? { Directions.url(address: address, coordinates: coordinates) }
+
+    /// - Parameters:
+    ///   - locationID: the job's own `locationId`; a job that has one gets no fallback.
+    ///   - locations: the customer's locations as read, or nil while they are unread or failed.
+    ///   - customerAddress: the customer record's own address.
+    static func make(locationID: String?, customerID: String?, organizationID: String?,
+                     locations: [ServiceLocationRecord]?, customerAddress: String?) -> JobFallbackAddress? {
+        guard locationID == nil, let customerID, let organizationID, let locations else { return nil }
+        let service = locations.filter {
+            $0.customerId == customerID && $0.organizationId == organizationID && $0.kind != "billing"
+        }
+        if service.count > 1 { return nil }
+        let place = service.first
+        let address = (place?.address ?? customerAddress)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !address.isEmpty else { return nil }
+        return JobFallbackAddress(address: address, coordinates: place?.coordinates)
     }
 }
 

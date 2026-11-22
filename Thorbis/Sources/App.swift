@@ -388,10 +388,17 @@ final class Store: ObservableObject {
         didSet { if requestedSearch != nil { openedForRecord = true } }
     }
     @Published var customers: [Customer] = [] {
-        didSet { customerNames = Dictionary(customers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
+        didSet {
+            customerNames = Dictionary(customers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+            customerAddresses = Dictionary(customers.compactMap { customer in customer.address.map { (customer.id, $0) } },
+                                           uniquingKeysWith: { first, _ in first })
+        }
     }
     /// Names by id, so each row's lookup does not walk the whole customer list.
     private var customerNames: [String: String] = [:]
+    /// Each customer's own address by id, from the same list: where a job with no site of its own
+    /// is shown (JobFallbackAddress), with no read of its own.
+    private(set) var customerAddresses: [String: String] = [:]
     @Published var error: String?
     @Published var loading = false
     /// When the shown jobs came from the on-device copy instead of the server.
@@ -507,6 +514,10 @@ final class Store: ObservableObject {
 
     func customerName(_ id: String?) -> String {
         id.flatMap { customerNames[$0] } ?? "Customer"
+    }
+
+    func customerAddress(_ id: String?) -> String? {
+        id.flatMap { customerAddresses[$0] }
     }
 }
 

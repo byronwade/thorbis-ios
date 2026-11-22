@@ -4,8 +4,9 @@ import MapKit
 import SwiftUI
 
 // Next stop (technician home): the Schedule's lead card says where the tech is going, how long
-// the drive is and how to get there. The address is the job's own service location only; a
-// customer's other addresses never stand in for the job site (JobLocationPolicy).
+// the drive is and how to get there. The address is the job's own service location; a job that
+// records none is shown at the customer's only address on file, with that caveat
+// (JobFallbackAddress), and never at a guess between several of their addresses.
 
 /// The job's place and a number to call, as last read. Cached per job so the card still shows
 /// the address offline; it lives with the job detail cache and is cleared on sign-out with it.
@@ -17,13 +18,39 @@ struct NextStopPlace: Codable, Equatable {
     var address: String?
     var coordinates: FieldCoordinates?
     var phone: String?
+    /// True when the job records no site and `address` is the customer's only address on file.
+    /// Optional, so a copy saved on this phone before it existed still reads.
+    var fromCustomer: Bool?
 
     /// The street line: what a tech reads at a glance before tapping Directions.
-    var firstLine: String? {
+    var firstLine: String? { Self.firstLine(address) }
+
+    static func firstLine(_ address: String?) -> String? {
         guard let address else { return nil }
         let line = address.split(whereSeparator: { $0 == "," || $0 == "\n" }).first
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         return line.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Said with the street when it is the customer's address rather than the job's own site.
+    var caveat: String? { fromCustomer == true && firstLine != nil ? JobFallbackAddress.caveat : nil }
+
+    /// The place from the customer's locations as just read: the job's own site, or, when the job
+    /// records none, the customer's only address on file.
+    mutating func setPlace(from locations: [ServiceLocationRecord], customerAddress: String?) {
+        if let locationID {
+            // The job's own service location only, for its own customer (JobLocationPolicy).
+            let record = locations.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
+            address = record?.address
+            coordinates = record?.coordinates
+            fromCustomer = nil
+        } else {
+            let fallback = JobFallbackAddress.make(locationID: nil, customerID: customerID, organizationID: organizationID,
+                                                   locations: locations, customerAddress: customerAddress)
+            address = fallback?.address
+            coordinates = fallback?.coordinates
+            fromCustomer = fallback == nil ? nil : true
+        }
     }
 
     var directions: URL? {
@@ -83,36 +110,53 @@ extension NextStopDay {
 }
 
 /// Street lines for the jobs on screen, read from each customer's own service locations (one
-/// request per customer, cached). A job without a `locationId`, or whose place can't be read,
-/// has no street and its row leads with the job title instead (BYR-1593).
+/// request per customer, cached). A job whose place can't be read has no street and its row leads
+/// with the job title instead. A job without a `locationId` (BYR-1593) gets the customer's only
+/// address on file (JobFallbackAddress) on the screens that pass `customerAddresses`; elsewhere it
+/// has no street and its customer's places are not read for it.
 @MainActor
 final class JobAddressBook: ObservableObject {
     @Published private(set) var streets: [String: String] = [:]
     /// The full place behind each street, so a row's Directions needs no read of its own.
     private(set) var places: [String: (address: String, coordinates: FieldCoordinates?)] = [:]
+    /// For jobs without a site of their own: the customer's only address on file, by customer.
+    @Published private(set) var fallbacks: [String: JobFallbackAddress] = [:]
     private var loaded: Set<String> = []
     private var key = ""
 
     /// Keyed by customer and place, so a place is only ever read for its own customer's job.
     func street(_ job: Job) -> String? {
-        guard let locationID = job.locationId, let customerID = job.customerId else { return nil }
+        guard let customerID = job.customerId else { return nil }
+        guard let locationID = job.locationId else { return fallbacks[customerID]?.street }
         return streets["\(customerID)|\(locationID)"]
     }
 
-    /// Directions to the job's own service location (never another of the customer's addresses).
+    /// Said with `street` when it is the customer's only address on file, not the job's own site.
+    func caveat(_ job: Job) -> String? {
+        job.locationId == nil && street(job) != nil ? JobFallbackAddress.caveat : nil
+    }
+
+    /// Directions to the job's own service location (never another of the customer's addresses),
+    /// or, for a job without one, to the customer's only address on file.
     func directions(_ job: Job) -> URL? {
-        guard let locationID = job.locationId, let customerID = job.customerId,
-              let place = places["\(customerID)|\(locationID)"] else { return nil }
+        guard let customerID = job.customerId else { return nil }
+        guard let locationID = job.locationId else { return fallbacks[customerID]?.directions }
+        guard let place = places["\(customerID)|\(locationID)"] else { return nil }
         return Directions.url(address: place.address, coordinates: place.coordinates)
     }
 
     /// Reads the places for `jobs`, in their order (callers put the job that matters most first).
     /// Never more than `limit` customers per screen.
-    func load(_ jobs: [Job], api: APIClient, organizationID: String?, identity: String, limit: Int = 20) async {
-        if identity != key { key = identity; streets = [:]; places = [:]; loaded = [] }
+    /// - Parameter customerAddresses: each customer's own address, already loaded with the
+    ///   customer list (`Store.customerAddresses`). When given, the customers of jobs without a
+    ///   site are read too, so those jobs can show the only address on file; nil reads only the
+    ///   customers of jobs with a site.
+    func load(_ jobs: [Job], api: APIClient, organizationID: String?, identity: String, limit: Int = 20,
+              customerAddresses: [String: String]? = nil) async {
+        if identity != key { key = identity; streets = [:]; places = [:]; fallbacks = [:]; loaded = [] }
         guard let organizationID else { return }
         var seen = Set<String>()
-        let customers = jobs.compactMap { $0.locationId == nil ? nil : $0.customerId }
+        let customers = jobs.compactMap { $0.locationId == nil && customerAddresses == nil ? nil : $0.customerId }
             .filter { !loaded.contains($0) && seen.insert($0).inserted }.prefix(limit)
         for customerID in customers {
             guard !Task.isCancelled else { return }
@@ -125,12 +169,15 @@ final class JobAddressBook: ObservableObject {
             guard identity == key else { return }
             loaded.insert(customerID)
             for place in places where place.customerId == customerID && place.organizationId == organizationID {
-                let line = NextStopPlace(jobID: "", organizationID: organizationID, customerID: customerID,
-                                         locationID: place.id, address: place.address).firstLine
+                let line = NextStopPlace.firstLine(place.address)
                 if !place.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     self.places["\(customerID)|\(place.id)"] = (place.address, place.coordinates)
                 }
                 if let line { streets["\(customerID)|\(place.id)"] = line }
+            }
+            if let customerAddresses {
+                fallbacks[customerID] = JobFallbackAddress.make(locationID: nil, customerID: customerID, organizationID: organizationID,
+                                                                locations: places, customerAddress: customerAddresses[customerID])
             }
         }
     }

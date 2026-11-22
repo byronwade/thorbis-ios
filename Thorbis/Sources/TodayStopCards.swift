@@ -99,16 +99,20 @@ final class StopCardPlaces: ObservableObject {
 
     func place(_ job: Job) -> NextStopPlace? { places[job.id] }
 
-    func load(_ jobs: [Job], api: APIClient, organizationID: String?, canView: Bool, identity: String) async {
+    /// - Parameter customerAddresses: each customer's own address (`Store.customerAddresses`), for a
+    ///   job that records no site of its own (JobFallbackAddress).
+    func load(_ jobs: [Job], api: APIClient, organizationID: String?, canView: Bool, identity: String,
+              customerAddresses: [String: String] = [:]) async {
         if identity != self.identity { self.identity = identity; places = [:]; access = [:]; loaded = [] }
         guard canView, let organizationID else { return }
         for job in jobs where !loaded.contains(job.id) {
             guard !Task.isCancelled else { return }
-            await load(job, api: api, organizationID: organizationID, identity: identity)
+            await load(job, api: api, organizationID: organizationID, identity: identity,
+                       customerAddress: job.customerId.flatMap { customerAddresses[$0] })
         }
     }
 
-    private func load(_ job: Job, api: APIClient, organizationID: String, identity: String) async {
+    private func load(_ job: Job, api: APIClient, organizationID: String, identity: String, customerAddress: String?) async {
         guard let customerID = job.customerId else { loaded.insert(job.id); return }
         let cached = JobDetailCache.stop(job.id).flatMap {
             $0.organizationID == organizationID && $0.customerID == customerID && $0.locationID == job.locationId ? $0 : nil
@@ -117,16 +121,15 @@ final class StopCardPlaces: ObservableObject {
         var next = cached ?? NextStopPlace(jobID: job.id, organizationID: organizationID, customerID: customerID, locationID: job.locationId)
         var reached = false
         var accessLine: String?
-        if let locationID = job.locationId, let records = try? await api.fieldLocations(customerID) {
+        if let records = try? await api.fieldLocations(customerID) {
             reached = true
-            // The job's own service location only, for its own customer (JobLocationPolicy).
-            let record = records.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
-            next.address = record?.address
-            next.coordinates = record?.coordinates
+            // The job's own service location, or with none recorded the customer's only address on file.
+            next.setPlace(from: records, customerAddress: customerAddress)
+            // Access facts only for the job's own site; the job screen's banner says the rest with its caveat.
+            let record = job.locationId.flatMap { locationID in
+                records.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
+            }
             accessLine = record.flatMap(TodayStopAccess.line)
-        } else if job.locationId == nil {
-            next.address = nil
-            next.coordinates = nil
         }
         if let contacts = try? await api.fieldContacts(customerID) {
             reached = true
@@ -308,6 +311,8 @@ private struct TodayStopCard<Commit: View>: View {
     private var headline: String { place?.firstLine ?? street ?? job.title }
     private var hasStreet: Bool { place?.firstLine != nil || street != nil }
     private var supporting: String { hasStreet ? "\(job.title) · \(customer)" : customer }
+    /// Said under the street when it is the customer's only address on file, not the job's own site.
+    private var caveat: String? { place?.caveat }
     private var status: String { pendingStatus ?? job.status }
     private var tone: StatusTone { StatusTone(jobStatus: status, hasTime: job.scheduledFor != nil) }
     private var time: String? { JobFiltering.date(job.scheduledFor)?.clockTime }
@@ -331,6 +336,7 @@ private struct TodayStopCard<Commit: View>: View {
 
     private var spokenSummary: String {
         var text = TodayStopOrder.spoken(index: index, total: total, place: headline, status: statusWord(now: .now), time: time)
+        if let caveat { text += ", \(caveat)" }
         if let drive { text += ", \(drive)" }
         if let access { text += ", \(access)" }
         return text
@@ -424,6 +430,11 @@ private struct TodayStopCard<Commit: View>: View {
                     .foregroundStyle(Theme.foreground)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                if let caveat {
+                    Text(caveat).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text(supporting).font(Theme.font(16)).foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.leading)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)

@@ -26,6 +26,9 @@ struct NewCustomerSheet: View {
     @State private var editingReferral = false
     /// The saved customer whose new job is open ("Save and book a job").
     @State private var bookFor: Customer?
+    /// Set once the customer is saved while their address is not a property yet: Save then tries
+    /// only the property again and never makes a second customer.
+    @State private var owed: NewCustomerSave.Owed?
     @State private var busy = false
     @State private var error: String?
     @State private var lookup: CustomerPhoneLookup = .notApplicable
@@ -59,48 +62,52 @@ struct NewCustomerSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if let error { ErrorBanner(message: error, tint: Theme.destructive, outer: 0) }
-                    card {
-                        field("Name", text: $request.name, prompt: "Danielle Marlowe", focus: .name, error: nameProblem)
-                            .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
-                        WellDivider(leading: 16)
-                        field("Mobile", text: $phone, prompt: "(916) 555-0142", focus: .phone, error: phoneProblem)
-                            .textContentType(.telephoneNumber).keyboardType(.phonePad)
-                        WellDivider(leading: 16)
-                        field("Email", text: $email, prompt: "danielle@example.com", focus: .email,
-                              error: emailChecked && !emailValid ? "Check the email address, like danielle@example.com." : nil)
-                            .textContentType(.emailAddress).keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .submitLabel(.next).onSubmit { focused = .address }
-                    }
-                    if case .found(let existing) = lookup { existingCustomerCard(existing) }
-                    card {
-                        HStack(alignment: .center, spacing: 12) {
-                            field("Service address", text: $address, prompt: "412 Birchwood Ln, Sacramento", focus: .address,
-                                  error: addressProblem, padded: false)
-                                .textContentType(.fullStreetAddress).submitLabel(.done)
-                                .onSubmit { Task { await commit() } }
-                            PaperIcon(.formPin, size: 20, color: Theme.muted)
-                                .frame(width: 20, height: 20).accessibilityHidden(true)
+                    Group {
+                        card {
+                            field("Name", text: $request.name, prompt: "Danielle Marlowe", focus: .name, error: nameProblem)
+                                .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
+                            WellDivider(leading: 16)
+                            field("Mobile", text: $phone, prompt: "(916) 555-0142", focus: .phone, error: phoneProblem)
+                                .textContentType(.telephoneNumber).keyboardType(.phonePad)
+                            WellDivider(leading: 16)
+                            field("Email", text: $email, prompt: "danielle@example.com", focus: .email,
+                                  error: emailChecked && !emailValid ? "Check the email address, like danielle@example.com." : nil)
+                                .textContentType(.emailAddress).keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .submitLabel(.next).onSubmit { focused = .address }
                         }
-                        .padding(.horizontal, 16).padding(.vertical, 12)
-                        WellDivider(leading: 16)
-                        choice("Account type") {
-                            ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Commercial")],
-                                             selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 }))
+                        if case .found(let existing) = lookup { existingCustomerCard(existing) }
+                        card {
+                            HStack(alignment: .center, spacing: 12) {
+                                field("Service address", text: $address, prompt: "412 Birchwood Ln, Sacramento", focus: .address,
+                                      error: addressProblem, padded: false)
+                                    .textContentType(.fullStreetAddress).submitLabel(.done)
+                                    .onSubmit { Task { await commit() } }
+                                PaperIcon(.formPin, size: 20, color: Theme.muted)
+                                    .frame(width: 20, height: 20).accessibilityHidden(true)
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 12)
+                            WellDivider(leading: 16)
+                            choice("Account type") {
+                                ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Commercial")],
+                                                 selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 }))
+                            }
+                        }
+                        // Paper 47A: how they found us, then how they like to be reached, on one card.
+                        card {
+                            referralRow
+                            WellDivider(leading: 16)
+                            VStack(alignment: .leading, spacing: 8) {
+                                PreferredContactLabel(isSet: request.preferredContact != nil) { request.preferredContact = nil }
+                                ThorbisSegmented(options: [("sms", "Text"), ("phone", "Call"), ("email", "Email")],
+                                                 selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 }))
+                            }
+                            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    // Paper 47A: how they found us, then how they like to be reached, on one card.
-                    card {
-                        referralRow
-                        WellDivider(leading: 16)
-                        VStack(alignment: .leading, spacing: 8) {
-                            PreferredContactLabel(isSet: request.preferredContact != nil) { request.preferredContact = nil }
-                            ThorbisSegmented(options: [("sms", "Text"), ("phone", "Call"), ("email", "Email")],
-                                             selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 }))
-                        }
-                        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    // Saved: what they typed is on the record now; only the property is left to add.
+                    .disabled(owed != nil)
                     if offersBooking && canCreate && session.can("job.create", feature: "jobs") { bookingAction }
                 }
                 .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 32)
@@ -163,9 +170,13 @@ struct NewCustomerSheet: View {
 
     /// Paper's title row: Cancel on a card pill, the title, Save customer on the brand pill.
     private func header(canCreate: Bool) -> some View {
-        PaperTaskBar(title: "New customer", cancelDisabled: busy,
-                     commit: ThorbisSheetHeaderAction(title: "Save customer", busy: busy, enabled: canCreate, identifier: "sheet-commit",
+        // Once the customer is saved without their property, the way out keeps them ("Close") and
+        // the commit tries only the property again.
+        PaperTaskBar(title: "New customer", cancelTitle: owed == nil ? "Cancel" : "Close", cancelDisabled: busy,
+                     commit: ThorbisSheetHeaderAction(title: owed == nil ? "Save customer" : "Try again", busy: busy, enabled: canCreate,
+                                                      identifier: "sheet-commit",
                                                       hint: canCreate ? nil : "Your role can't add customers. Ask your office.",
+                                                      accessibilityLabel: owed == nil ? nil : "Try adding the address as a property again",
                                                       action: { Task { await commit() } }),
                      onCancel: { dismiss() })
         // A title row is a bar: it stops growing at xLarge so the pills never break mid-word and
@@ -322,23 +333,109 @@ struct NewCustomerSheet: View {
         body.email = clean(email)
         body.address = clean(address)
         do {
-            let source = clean(String(referral.prefix(120)))
-            let customer: Customer
-            if let source {
-                // The same create, with "How they found us" beside the request's own fields.
-                customer = try await api.send("POST", "/v1/customers", body: NewCustomerIntake(request: body, referralSource: source))
+            let outcome: NewCustomerSave.Outcome
+            if let owed {
+                // The customer is saved; only their address is left to add as a property.
+                outcome = try await NewCustomerSave.add(owed, api: api)
             } else {
-                customer = try await api.createCustomer(body)
+                outcome = try await NewCustomerSave.run(body, referralSource: clean(String(referral.prefix(120))), api: api)
+                await store.refresh(api)
+                onCreated(outcome.customer)
             }
-            await store.refresh(api)
-            onCreated(customer)
+            owed = outcome.owed
+            if let notice = outcome.owed?.notice {
+                // The customer is kept; the sheet stays to say so.
+                error = notice
+                return
+            }
+            error = nil
             if thenBook {
                 focused = nil
-                bookFor = customer
+                bookFor = outcome.customer
             } else {
                 dismiss()
             }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Saving a customer typed on the phone (New customer, Book a job's new caller): the customer,
+/// then, when they gave an address, that address as their first property (a service location),
+/// as the web intake and the server import do. `customers.create` keeps the address on the account
+/// only, so the property is a second call. The customer is kept when only that call fails, and a
+/// retry adds only the property, so it never makes a second customer.
+enum NewCustomerSave {
+    /// A customer saved without their property yet: what the next press tries again.
+    struct Owed {
+        let customer: Customer
+        let property: FieldLocationCreate
+        /// The last try got no answer, so the property may already be there.
+        let uncertain: Bool
+        /// The server said this role can't add a property, so trying again won't help.
+        let refused: Bool
+
+        /// What the sheet says, in its own error line.
+        var notice: String {
+            refused
+                ? "\(customer.name) is saved, but your role can\u{2019}t add their address as a property. Ask your office to add it."
+                : "\(customer.name) is saved, but their address wasn\u{2019}t added as a property. Tap Try again, or add it on their record."
+        }
+    }
+
+    struct Outcome {
+        let customer: Customer
+        /// Set while the customer is saved but their address is not a property yet.
+        let owed: Owed?
+    }
+
+    /// `customers.addLocation`'s body for the typed address: "Home" for a residential account and
+    /// "Site" for a commercial one, as the web intake names them. Nil without an address.
+    static func property(address: String?, accountType: String?) -> FieldLocationCreate? {
+        guard let address = address?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty else { return nil }
+        return FieldLocationCreate(label: accountType == "commercial" ? "Site" : "Home", kind: "service", address: address)
+    }
+
+    /// `POST /v1/customers`, then `POST /v1/customers/{id}/locations` when the request carries an
+    /// address. Throws only while the customer is not saved, or when the work was cancelled.
+    @MainActor
+    static func run(_ request: NewCustomerRequest, referralSource: String? = nil, api: APIClient) async throws -> Outcome {
+        let customer: Customer
+        if let referralSource {
+            // The same create, with "How they found us" beside the request's own fields.
+            customer = try await api.send("POST", "/v1/customers", body: NewCustomerIntake(request: request, referralSource: referralSource))
+        } else {
+            customer = try await api.createCustomer(request)
+        }
+        guard let property = property(address: request.address, accountType: request.accountType) else {
+            return Outcome(customer: customer, owed: nil)
+        }
+        return try await add(Owed(customer: customer, property: property, uncertain: false, refused: false), api: api)
+    }
+
+    /// Adds an owed property. After a try that got no answer it reads the customer's locations
+    /// first and keeps the one already there: the route takes no idempotency key, so this is what
+    /// stops a lost answer from leaving two copies. Throws only when the work was cancelled.
+    @MainActor
+    static func add(_ owed: Owed, api: APIClient) async throws -> Outcome {
+        let customerID = owed.customer.id
+        do {
+            if owed.uncertain {
+                let places = try await api.allLocationsForRecovery(customerID, currentAuthority: { true })
+                if places.contains(where: { $0.customerId == customerID && $0.kind == owed.property.kind && $0.address == owed.property.address }) {
+                    return Outcome(customer: owed.customer, owed: nil)
+                }
+            }
+            _ = try await api.createFieldLocation(customerID, request: owed.property)
+            return Outcome(customer: owed.customer, owed: nil)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // A refusal, or a request that never left the phone, made nothing; anything else may have.
+            let madeNothing = RetryKey<String>.isDefinite(error) || (error as? Problem)?.neverSent == true
+            return Outcome(customer: owed.customer,
+                           owed: Owed(customer: owed.customer, property: owed.property, uncertain: owed.uncertain || !madeNothing,
+                                      refused: (error as? Problem)?.status == 403))
+        }
     }
 }
 

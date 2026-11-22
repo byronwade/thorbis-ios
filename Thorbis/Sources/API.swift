@@ -33,6 +33,9 @@ struct Customer: Codable, Identifiable, Hashable {
     let name: String
     let archived: Bool?
     let createdAt: String?
+    /// The customer record's own address (`customers.address`), as the list already sends it: where
+    /// a job with no site of its own is shown (JobFallbackAddress).
+    var address: String? = nil
 }
 
 /// `customers.create` input (createCustomerInputSchema); nil fields are omitted.

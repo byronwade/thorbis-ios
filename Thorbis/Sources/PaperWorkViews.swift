@@ -324,8 +324,10 @@ struct ScheduleView: View {
         }
         .task(id: "addr|\(jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)|\(session.isOffline)") {
             guard tab != "Map", session.can("customer.view", feature: "core_crm") else { return }
+            // Jobs without a site of their own show the customer's only address on file (BYR-1632).
             await addresses.load(jobs, api: api, organizationID: session.activeOrganization?.id,
-                                 identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+                                 identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)",
+                                 customerAddresses: store.customerAddresses)
         }
         #if DEBUG
         .onAppear {
@@ -396,7 +398,7 @@ struct ScheduleView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ScheduleHero(label: isActive ? "Now" : "Next up",
                              job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id),
-                             place: place, street: addresses.street(first),
+                             place: place, street: addresses.street(first), streetCaveat: addresses.caveat(first),
                              etaMinutes: place != nil && driving ? eta.minutes : nil,
                              onSiteSince: onSiteSince(first),
                              locationNotice: place?.coordinates != nil && driving && !session.isOffline && eta.locationOff && !locationNoticeDismissed
@@ -553,8 +555,9 @@ struct ScheduleView: View {
         }
     }
 
-    /// The lead job's own service location and a number to call. A failed read keeps the last
-    /// copy for this job, so the card still shows the address without signal.
+    /// The lead job's own service location (or, with none recorded, the customer's only address on
+    /// file) and a number to call. A failed read keeps the last copy for this job, so the card
+    /// still shows the address without signal.
     private func loadStop(_ job: Job) async {
         guard session.can("customer.view", feature: "core_crm"),
               let organizationID = session.activeOrganization?.id, let customerID = job.customerId else {
@@ -568,14 +571,11 @@ struct ScheduleView: View {
         if stop?.jobID != job.id { stop = cached }
         var next = cached ?? NextStopPlace(jobID: job.id, organizationID: organizationID, customerID: customerID, locationID: job.locationId)
         var reached = false
-        if let locationID = job.locationId, let places = try? await api.fieldLocations(customerID) {
+        // One read for the lead job, with or without a site; the customer's own address is the
+        // one already loaded with the customer list.
+        if let places = try? await api.fieldLocations(customerID) {
             reached = true
-            let place = places.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
-            next.address = place?.address
-            next.coordinates = place?.coordinates
-        } else if job.locationId == nil {
-            next.address = nil
-            next.coordinates = nil
+            next.setPlace(from: places, customerAddress: store.customerAddress(customerID))
         }
         if let contacts = try? await api.fieldContacts(customerID) {
             reached = true
@@ -607,6 +607,8 @@ private struct ScheduleHero: View {
     var place: NextStopPlace? = nil
     /// The job's street from the list's address book, when the stop itself is not loaded.
     var street: String? = nil
+    /// The address book's caveat for `street` (the customer's only address on file).
+    var streetCaveat: String? = nil
     var etaMinutes: Int? = nil
     /// The server's arrival time while on site: the card says "On site 42 min".
     var onSiteSince: Date? = nil
@@ -620,6 +622,8 @@ private struct ScheduleHero: View {
     private var status: String { pendingStatus ?? job.status }
     private var underWay: Bool { ScheduleLead.activeStatuses.contains(status) }
     private var where_: String? { place?.firstLine ?? street }
+    /// "From the customer's only address on file" when `where_` is not the job's own site.
+    private var caveat: String? { place?.firstLine != nil ? place?.caveat : (street != nil ? streetCaveat : nil) }
     /// "Danielle Marlowe · 412 Birchwood Ln".
     private var supporting: String { [customer, where_ ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ") }
 
@@ -673,6 +677,12 @@ private struct ScheduleHero: View {
                             .multilineTextAlignment(.leading)
                             .lineLimit(stacked ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let caveat {
+                        Text(caveat).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("next-stop-address-caveat")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -731,6 +741,7 @@ private struct ScheduleHero: View {
     private var accessibilitySummary: String {
         var parts = [labelLine, job.title, customer]
         if let where_ { parts.append(where_) }
+        if let caveat { parts.append(caveat) }
         if let trailing = trailing(now: .now) { parts.append(trailing) }
         return parts.filter { !$0.isEmpty }.joined(separator: ", ")
     }
@@ -1197,8 +1208,10 @@ struct JobsView: View {
         }
         .task(id: "addr|\(jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)|\(session.isOffline)") {
             guard session.can("customer.view", feature: "core_crm") else { return }
+            // Jobs without a site of their own show the customer's only address on file (BYR-1632).
             await addresses.load(jobs, api: api, organizationID: session.activeOrganization?.id,
-                                 identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+                                 identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)",
+                                 customerAddresses: store.customerAddresses)
         }
         #if DEBUG
         .onAppear {

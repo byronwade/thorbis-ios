@@ -166,7 +166,7 @@ extension APIClient {
 
     private func customerName(_ id: String) async -> Customer? {
         guard let record = try? await fieldCustomer(id) else { return nil }
-        return Customer(id: record.id, name: record.name, archived: nil, createdAt: nil)
+        return Customer(id: record.id, name: record.name, archived: nil, createdAt: nil, address: record.address)
     }
 }
 

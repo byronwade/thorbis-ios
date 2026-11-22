@@ -2381,8 +2381,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.screen.hasPrefix("next-stop") {
             listed = listed.map { $0.merging(["locationId": "00000000-0000-4000-8000-000000007001"]) { _, new in new } }
         }
-        // Today's and Jobs' rows lead with the street (design 2026-10-30); one visit has no site, so its row
-        // shows the fallback to the job title (BYR-1593).
+        // Today's and Jobs' rows lead with the street (design 2026-10-30); one visit has no site (BYR-1593),
+        // so the phone's Today and Jobs show its customer's only address on file; Search and the iPad keep its title.
         if ["my-day", "schedule", "schedule-week", "jobs", "jobs-filters"].contains(PaperPreview.screen) || PaperPreview.screen.hasPrefix("search") {
             listed = listed.map { row in
                 (row["id"] as? String)?.hasSuffix("2224") == true ? row

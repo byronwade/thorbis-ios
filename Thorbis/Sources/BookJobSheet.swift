@@ -138,6 +138,11 @@ struct NewJobSheet: View {
     @State private var savedJob: JobRecord?
     @State private var timeSaved = false
     @State private var techSaved = false
+    /// A new caller saved before their address became a property; Try again adds only that.
+    @State private var owedProperty: NewCustomerSave.Owed?
+    /// Customers made in this sheet. The property made from their address is never picked for the
+    /// job on its own: which field holds a job's site waits on BYR-1593.
+    @State private var createdCustomers: Set<String> = []
 
     /// Problems shown under their fields after Book job is pressed (design.thorbis.com Forms:
     /// validate on commit, the error takes help's place). Cleared as soon as the field changes.
@@ -242,6 +247,8 @@ struct NewJobSheet: View {
             .sheet(isPresented: $showFullCustomer) { SheetSurface {
                 NewCustomerSheet(initialName: newName, initialPhone: newPhone, initialAddress: newAddress) { customer in
                     knownNames[customer.id] = customer.name
+                    // Not in the list read when this sheet opened: made just now ("Use" an existing one is listed).
+                    if !records.contains(where: { $0.id == customer.id }) { createdCustomers.insert(customer.id) }
                     select(customer.id)
                 }
             } }
@@ -623,7 +630,7 @@ struct NewJobSheet: View {
     @ViewBuilder private var addressSection: some View {
         PaperFormField("Service address") {
             if draft.customerID.isEmpty {
-                // A new customer: the typed address is saved with them and becomes the job's place.
+                // A new customer: the typed address is saved with them, as their first property.
                 Text(newAddress.trimmingCharacters(in: .whitespaces).isEmpty
                      ? "Add an address above, or set it on the job later."
                      : "\(newAddress.trimmingCharacters(in: .whitespaces)) — saved with the new customer.")
@@ -961,8 +968,10 @@ struct NewJobSheet: View {
         locationsLoaded = true
         // A place handed in (New job here, Start a job for this unit) stays only when it is theirs.
         if let chosen = draft.locationID, !locations.contains(where: { $0.id == chosen }) { draft.locationID = nil }
-        // One place on file is the place; with several the CSR picks.
-        if draft.locationID == nil, locations.count == 1 { draft.locationID = locations[0].id }
+        // One place on file is the place; with several the CSR picks. The property this sheet just
+        // made for a new caller is not picked on its own (BYR-1593); their job shows it as the
+        // customer's only address on file.
+        if draft.locationID == nil, locations.count == 1, !createdCustomers.contains(customerID) { draft.locationID = locations[0].id }
     }
 
     /// The server's phone lookup for a typed number (7+ digits). Never blocks booking.
@@ -1004,7 +1013,9 @@ struct NewJobSheet: View {
         defer { busy = false }
         focus = nil
         do {
-            // 1. A new caller becomes a customer first (once; a retry reuses them).
+            // 1. A new caller becomes a customer first (once; a retry reuses them), and their address
+            //    their first property. The job is booked either way, without that property as its
+            //    site (BYR-1593); a property that didn't save is said at the end and tried again.
             if draft.customerID.isEmpty {
                 guard addingCustomer, newCustomerValid, canCreateCustomer else { return }
                 func clean(_ value: String) -> String? {
@@ -1013,17 +1024,16 @@ struct NewJobSheet: View {
                 }
                 let body = NewCustomerRequest(name: newName.trimmingCharacters(in: .whitespacesAndNewlines),
                                               phone: clean(newPhone), address: clean(newAddress), accountType: "residential")
-                let customer = try await api.createCustomer(body)
+                let outcome = try await NewCustomerSave.run(body, api: api)
                 guard stillHere() else { return }
+                let customer = outcome.customer
+                createdCustomers.insert(customer.id)
                 knownNames[customer.id] = customer.name
                 draft.customerID = customer.id
                 addingCustomer = false
-                // The address saved with them is their one place; use it when the server made one.
-                if body.address != nil, canReadCustomers, let places = try? await api.fieldLocations(customer.id) {
-                    locations = places.filter { $0.customerId == customer.id && $0.organizationId == organizationID }
-                    locationsLoaded = true
-                    if locations.count == 1 { draft.locationID = locations[0].id }
-                }
+                owedProperty = outcome.owed
+            } else if let owed = owedProperty, owed.customer.id == draft.customerID {
+                owedProperty = try await NewCustomerSave.add(owed, api: api).owed
                 guard stillHere() else { return }
             }
             // 2. The job (once; a failed time or tech retries on the same job).
@@ -1053,8 +1063,11 @@ struct NewJobSheet: View {
             }
             _ = await store.refresh(api)
             guard stillHere() else { return }
-            if !failed.isEmpty {
-                error = "The job was booked, but the \(failed.joined(separator: " and ")) didn't save. Tap Try again, or open the job to set it there."
+            let owedNotice = owedProperty.flatMap { $0.customer.id == job.customerId ? $0.notice : nil }
+            if !failed.isEmpty || owedNotice != nil {
+                let parts: [String?] = [failed.isEmpty ? nil : "The job was booked, but the \(failed.joined(separator: " and ")) didn't save. Tap Try again, or open the job to set it there.",
+                                        owedNotice]
+                error = parts.compactMap { $0 }.joined(separator: " ")
                 return
             }
             if session.can("job.view", feature: "jobs") { createdJobID = job.id } else { dismiss() }

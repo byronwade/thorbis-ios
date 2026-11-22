@@ -1526,9 +1526,25 @@ struct JobDetailView: View {
         }
     }
 
-    /// The job's name: its street when the job records a site, else its title (BYR-1593).
+    /// The job's name: its street when the job records a site; without one (BYR-1593), the
+    /// customer's only address on file, said with its caveat (`streetCaveat`); else its title.
     private func street(_ job: JobRecord) -> String? {
-        JobPropertyHistory.street(job: job, locations: customerLocations)
+        JobPropertyHistory.street(job: job, locations: customerLocations) ?? fallbackAddress(job)?.street
+    }
+
+    /// For a job with no site of its own: the customer's only address on file, from the locations
+    /// and the account this screen already read for this customer (nothing while either is unread).
+    private func fallbackAddress(_ job: JobRecord) -> JobFallbackAddress? {
+        guard job.locationId == nil, let context = customerContext(job), locationsContext == context else { return nil }
+        let account = contactsContext == context ? customerRecord : nil
+        let address = account.flatMap { $0.id == job.customerId && $0.organizationId == job.organizationId ? $0.address : nil }
+        return JobFallbackAddress.make(locationID: job.locationId, customerID: job.customerId, organizationID: job.organizationId,
+                                       locations: customerLocations, customerAddress: address)
+    }
+
+    /// Said under the header's street when it is the customer's address, not the job's own site.
+    private func streetCaveat(_ job: JobRecord) -> String? {
+        fallbackAddress(job)?.street == nil ? nil : JobFallbackAddress.caveat
     }
 
     private func displayTitle(_ job: JobRecord) -> String { street(job) ?? job.title }
@@ -1593,6 +1609,8 @@ struct JobDetailView: View {
         // starts at the steps.
         let barTitle = showsBarTitle(job)
         let subtitle = subtitleParts(job)
+        // The customer's only address on file stands in for a job with no site; its own line says so.
+        let caveat = subtitle.isEmpty ? nil : streetCaveat(job)
         return VStack(alignment: .leading, spacing: 0) {
             // Paper F2 to F4: out on the visit, the five steps lead the screen (Overview only;
             // Paper 23, 24 and 21B draw Money and Activity without them).
@@ -1610,8 +1628,8 @@ struct JobDetailView: View {
                              referenceIdentifier: "job-number",
                              title: job.title.isEmpty ? displayTitle(job) : job.title,
                              titleIdentifier: "job-title",
-                             subtitle: subtitle.isEmpty ? nil : headerLines(subtitle.joined(separator: " \u{00B7} ")),
-                             subtitleSpoken: subtitle.joined(separator: ", "),
+                             subtitle: subtitle.isEmpty ? nil : headerLines(subtitle.joined(separator: " \u{00B7} ")) + (caveat.map { "\n\($0)" } ?? ""),
+                             subtitleSpoken: (subtitle + (caveat.map { [$0] } ?? [])).joined(separator: ", "),
                              subtitleIdentifier: "job-subtitle") {
                     statusControl(job)
                 }
@@ -1766,7 +1784,8 @@ struct JobDetailView: View {
     }
 
     /// Paper 21's bar: Call, Text and Directions as card circles, 8 apart, after the commit.
-    /// Directions always require choosing an account location; no job site is inferred.
+    /// Directions go to the one location on file or ask which of several; with none, to the
+    /// customer's own address (JobFallbackAddress). No job site is inferred.
     private func reachCircles(_ job: JobRecord) -> some View {
         let phone = customerContext(job) == contactsContext ? customerPhone : nil
         let reach = JobReach(phone: phone, email: nil)
@@ -1810,6 +1829,14 @@ struct JobDetailView: View {
             .accessibilityLabel("Directions")
             .accessibilityHint("Choose a customer location")
             .accessibilityIdentifier("job-directions")
+        } else if let url = job.flatMap({ fallbackAddress($0) })?.directions {
+            // No location on file: the customer's own address, as the header says.
+            Button { openURL(url) } label: { barCircle("location") }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Directions")
+                .accessibilityValue(JobFallbackAddress.caveat)
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("job-directions")
         } else {
             barCircle("location", enabled: false)
                 .accessibilityElement(children: .ignore)
@@ -2363,7 +2390,7 @@ struct JobDetailView: View {
     }
 
     /// Directions as the bar's circle gives them: straight to Maps with one address on file, a
-    /// choice with several, nothing with none (no job site is inferred).
+    /// choice with several, the customer's own address with no location (no job site is inferred).
     @ViewBuilder private var openInMaps: some View {
         if customerLocations.count == 1, let only = customerLocations.first,
            let url = JobLocationPolicy.directions(for: only.id, in: customerLocations) {
@@ -2382,6 +2409,12 @@ struct JobDetailView: View {
             }
             .accessibilityHint("Choose a customer location")
             .accessibilityIdentifier("job-open-in-maps")
+        } else if customerLocations.isEmpty, let url = job.flatMap({ fallbackAddress($0) })?.directions {
+            Button { openURL(url) } label: { secondaryPill("Open in Maps") }
+                .buttonStyle(PressStyle())
+                .accessibilityValue(JobFallbackAddress.caveat)
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("job-open-in-maps")
         }
     }
 

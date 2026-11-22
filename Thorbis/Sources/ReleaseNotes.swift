@@ -24,6 +24,8 @@ enum ReleaseNotes {
                       detail: "The 6:30 digest switch shows for everyone allowed to see company totals, who are the ones who get it."),
                 .init(symbol: "iphone", title: "Customer view stays open",
                       detail: "Locking the phone or a dropped signal no longer ends Customer view or closes an open estimate or invoice."),
+                .init(symbol: "mappin.and.ellipse", title: "Jobs show the customer\u{2019}s address",
+                      detail: "A new customer\u{2019}s address is saved as their property, and a job with no property shows the address on file."),
             ],
             fixes: 10),
         ReleaseNote(
