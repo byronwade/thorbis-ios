@@ -480,12 +480,12 @@ struct ThorbisSheetField<Content: View>: View {
 
 // MARK: - Grouped rows
 
-/// One rounded panel step that holds a run of sheet rows (Linear's grouped rows, radius 14). v2:
-/// no lines between rows. Put an optional label above it with `ThorbisSheetLabel`.
+/// One sunk group that holds a run of sheet rows (radius 20, a 1px rim), with a hairline
+/// (`ThorbisSheetDivider`) where rows meet. Put an optional label above it with `ThorbisSheetLabel`.
 struct ThorbisSheetGroup<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
-        // On the sheet's panel a group is one step darker (the select's sink), radius 14.
+        // On the sheet's panel a group is one step darker (the select's sink), radius 20.
         VStack(alignment: .leading, spacing: 0) { content() }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
@@ -494,7 +494,7 @@ struct ThorbisSheetGroup<Content: View>: View {
     }
 }
 
-/// Where rows of a sheet group meet; draws nothing (v2).
+/// Where rows of a sheet group meet: a hairline inset to the row text (Paper v2), as `WellDivider`.
 struct ThorbisSheetDivider: View {
     var body: some View { WellDivider() }
 }

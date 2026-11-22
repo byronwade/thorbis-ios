@@ -24,7 +24,7 @@ Navigation choice; iPad keeps its sidebar. Golden rule 6 has the current navigat
 - Schedule's Next up band carries the old Arrive tab's On my way commit. Week groups by day. Paper's Map tab is replaced by Unscheduled until job records carry coordinates.
 - Job, customer, estimates, invoices and price book screens use the native navigation bar (system back and swipe-back) with Paper record headers below it.
 - Leading coloured rails (Next up underline, week bars, composer caret) are removed per design.thorbis.com D-018.
-- Every type-ramp step scales with its nearest Dynamic Type style; lanes use `@ScaledMetric` and rows stack at accessibility sizes. `Theme.brandText` (#5285FF dark, #2558E0 light) replaces brand blue as text and tint for 4.5:1 contrast.
+- Every type-ramp step scales with its nearest Dynamic Type style; lanes use `@ScaledMetric` and rows stack at accessibility sizes. `Theme.brandText` (then #5285FF dark, #2558E0 light; today #6494FF dark, #1F55E0 light) replaces brand blue as text and tint for 4.5:1 contrast.
 
 ## Field flows (end to end)
 

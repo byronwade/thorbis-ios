@@ -54,8 +54,8 @@ enum Theme {
     static let minimumSize: CGFloat = 12
     /// design.thorbis.com MF-02: four money sizes, nothing smaller. Hero is what the screen is
     /// about (balance due, the amount being collected, an estimate's total); total sits in cards
-    /// and Total / Paid rows; row is a list row's amount; line is a line item. Hero is 34 on a
-    /// phone and 40 on iPad (above the staff ramp, like customer mode); all scale with Dynamic Type.
+    /// and Total / Paid rows; row is a list row's amount; line is a line item. Hero is 30 on a
+    /// phone and 34 on iPad; all scale with Dynamic Type.
     enum MoneySize {
         case hero, total, row, line
     }
@@ -152,7 +152,7 @@ enum Theme {
     // text F15A5A→F46A6A, dark AI 9D7FD1→A688D8, light success text 157D3C→137333 (and the
     // invoiced word with it), light warning text B15209→A44A08.
     static let card = adaptive(light: 0xFFFFFF, dark: 0x232323)
-    /// The panel grouped rows sit on (radius 14). Same as `card`, named for what it is.
+    /// The panel grouped rows sit on (radius 20, `cardRadius`). Same as `card`, named for what it is.
     static let well = card
     /// Body: Paper `secondary-foreground`, the grey of supporting lines.
     static let subtle = adaptive(light: 0x555555, dark: 0xB4B4B4, highLight: 0x1A1A1A, highDark: 0xFFFFFF)
@@ -343,11 +343,9 @@ extension SectionHeader where Trailing == EmptyView {
     }
 }
 
-/// Lift (design.thorbis.com Depth): the commit is ink with inverse type, radius 10, a 1px rim, a
-/// short bevel (1px light from above, 1px drop) and it sinks while pressed (the drop goes, it settles
-/// 1px). Disabled fades the ink; a disabled commit should carry a reason (`PaperActionBar`).
-/// Paper v2 commit: a brand-blue pill, 50 tall, white 16 Semibold words. The danger commit is the
-/// same pill in the red fill. Disabled fades the fill; a disabled commit should carry a reason.
+/// Paper v2 commit: a brand-blue pill, 50 tall, white 16 Semibold words; pressed, the fill dims.
+/// The danger commit is the same pill in the red fill. Disabled fades the fill; a disabled commit
+/// should carry a reason (`PaperActionBar`).
 private struct InkCommit: ViewModifier {
     let enabled: Bool?
     let height: CGFloat

@@ -18,14 +18,19 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   `Theme.ai*` is Paper's purple, for AI help only. Place marks: `markOlive`, `markForest`,
   `markPumpkin`, `markBurnt`, `markAccent`. `python3 scripts/tests/contrast.py` reports 0
   failures (4.5:1 text, 3:1 marks, both themes, Increase Contrast).
-- **Type:** Inter 400 to 700 (`Theme.allowed()` maps heavy and black to bold). The staff ramp
-  (`Theme.onRamp`) is compact: body/row title 15, secondary 14, chrome 13 Medium, captions 12,
-  sheet titles 16–17, detail titles 24, root titles 34, money hero 30. Customer-facing views use
-  `Theme.customerFont` (the older ramp) to keep their 17pt / 56pt floors.
+- **Type:** Inter 400 to 700 (`Theme.allowed()` maps heavy and black to bold). Paper's sizes
+  (`Theme.onRamp`): captions 12, labels 13 (section labels Semibold), subtitles 14, body 15, rows
+  16, a centred sheet title 17 Semibold, sub-heads 20, a leading sheet title 22 Bold
+  (`PaperSheetTitle`), totals 24, record titles 28 / 30, and every screen title 34 Bold. Asked for
+  by name: `Theme.heading()` 28 Bold, `Theme.display()` 44 Bold (the one figure a screen is
+  about), `Theme.paymentAmountFont()` 52 Bold; the money hero (`Theme.moneyFont(.hero)`) is 30 on a
+  phone and 34 on iPad. Customer-facing views use `Theme.customerFont` (the older ramp) to keep
+  their 17pt / 56pt floors.
 - **Depth:** Rest (planar sheets and panels), Sink (`fieldWell()`, `ThorbisSelect`,
-  `ThorbisSheetGroup`: one step darker, inset, 1px rim), Lift (`.inkCommit()` / `.dangerCommit()`:
-  ink, radius 10, 1px rim, light from above, 1px drop, press sinks through `PressStyle`), Overlay
-  (`ThorbisMenu` popovers only). No fifth.
+  `ThorbisSheetGroup`: one step darker, inset, 1px rim), the commit (`.inkCommit()` /
+  `.dangerCommit()`: a brand-blue pill, or the same pill in `destructiveFill`, 50 tall, white 16
+  Semibold; pressed, the fill dims; disabled, it fades), Overlay (`ThorbisMenu` popovers and
+  sheet menus). No fifth.
 - **Separators (Paper v2):** `WellDivider` and `ThorbisSheetDivider` draw a hairline between rows
   inside one grouped card, inset to the row text. Never between cards or under a heading;
   `PaperCard` has no rim; no coloured side rails.
@@ -35,9 +40,12 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   coloured glyph without its word. A record's header carries one `RecordStatusBadge`: the word in
   the status's text colour on its surface.
 - **Modals:** `ThorbisModalSheet` — a clean system sheet on the panel (`thorbisSheetPresentation`,
-  no Liquid Glass), `ThorbisSheetHeader` (17pt Medium title + close circle), content grouped by
-  space with 20pt padding, fields as sunk wells (`ThorbisSheetField`: label, well, one slot for
-  help or the error), one ink commit in the pad. Never pre-disable the commit; when it must be
+  no Liquid Glass), `ThorbisSheetHeader` (by default a 22 Bold title on the left with one 15pt
+  muted line and a 44pt close circle on the right; with a header pill or a header commit, the close
+  moves left and the title is centred at 17 Semibold; `ThorbisSheetCloseStyle` picks Cancel under
+  the commit, the circle or the pill), content grouped by space with 20pt padding, fields as sunk
+  wells (`ThorbisSheetField`: label, well, one slot for help or the error), one blue commit in the
+  pad. Never pre-disable the commit; when it must be
   off, `commitDisabledReason` / `PaperActionBar(disabledReason:)` says why.
 - **Every sheet is on the panel:** a sheet that shows a whole screen (Settings, an invoice's lines,
   a NavigationStack) wraps its `.sheet` content in `SheetSurface { … }` (or calls
@@ -48,9 +56,11 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   reads right as a route and in a sheet. Never paint a screen `Theme.background` directly. System
   UI (share, Safari, Quick Look, Mail, Calendar, Contacts, camera and scanner covers) and customer
   mode covers stay as they are.
-- **Popovers:** `ThorbisMenu` is an anchored `.popover` with compact adaptation: overlay depth,
-  ~44pt rows, a leading mark, a check on the current value, destructive rows in their own group,
-  a 120ms fade. Status, the ••• overflow, selects and filters all use it.
+- **Popovers and sheet menus:** `ThorbisMenu` is an anchored `.popover` with compact adaptation:
+  the card tone, 56pt rows (a leading mark, the word at 16 Medium, a hairline between rows from the
+  word), a check on the current value, destructive rows last, a 120ms fade. Row menus, status,
+  selects and filters use it. A page's own ••• menu is a bottom sheet (`presentation: .sheet`,
+  `ThorbisMenuCard`, Paper 21K / F8): its choices in 20-radius cards on `Theme.fill`.
 - **Motion:** `Theme.selectionSpring` is now a 120ms ease-out (name kept); no bounce or stagger on
   routine work; haptics stay.
 - **In-between states (phase 4, still current):** empty states name the one action
@@ -114,7 +124,7 @@ carry Paper's own values; build screens from them before writing a one-off.
 
 | Need | Use | Where |
 |------|-----|-------|
-| Round icon button (36–40pt, 44pt hit) | `PaperCircleButton` | `../PaperComponents.swift` |
+| Round icon button (44pt in headers and sheets, 36 in a tight row; always a 44pt hit) | `PaperCircleButton` | `../PaperComponents.swift` |
 | Phone drawer, its menu circle and dot | `AppDrawer`, `DrawerMenuCircle`, `DrawerDot` | `../DrawerNavigation.swift` |
 | Rimmed square button beside a commit | `PaperSquareButton` | `../PaperComponents.swift` |
 | The screen's one primary action | `PrimaryButton` / `.inkCommit()` / `PaperActionBar` | `../Theme.swift`, `../PaperComponents.swift` |
@@ -176,10 +186,11 @@ element with `.rowSwipeAccessibility(actions)`. Job rows use `JobSwipeRow` (`../
 
 ## ThorbisMenu
 
-An anchored popover that grows from its trigger (overlay depth: the panel, radius 14, a real
-shadow). An optional 13pt caption, ~44pt rows with a leading mark in a fixed column (`status:`
-shows the status mark), a check on the current value, `.destructive` rows in their own group in the
-danger tone. A chosen row's action runs after the popover has gone, so it may present a sheet.
+An anchored popover that grows from its trigger, on the card tone (our panel replaces Liquid
+Glass). An optional 13pt caption, 56pt rows with a leading mark in a fixed column (`status:` shows the status mark), the word at 16 Medium, a hairline between rows
+from the word, a check on the current value, `.destructive` rows last in the danger tone. A page's
+own ••• menu passes `presentation: .sheet` and is a bottom sheet (`ThorbisMenuCard`). A chosen
+row's action runs after the menu has gone, so it may present a sheet.
 
 ```swift
 ThorbisMenu(items: [
@@ -196,8 +207,8 @@ ThorbisMenu(items: [
 Building blocks for a filter/display sheet: `ThorbisSheetScaffold` (grabber + optional title +
 close circle), `ThorbisSheetGroup` (a rounded well) with `ThorbisSheetRow` (value + chevron-updown,
 opens a `ThorbisMenu`), `ThorbisSheetToggleRow`, and `ThorbisChipGroup`. Put a
-`ThorbisSheetDivider()` where rows meet (it draws nothing in v2). `DisplayOptions` is a reusable grouping/ordering
-value model.
+`ThorbisSheetDivider()` where rows meet (a hairline inset to the row text, as `WellDivider`
+draws). `DisplayOptions` is a reusable grouping/ordering value model.
 
 ```swift
 .sheet(isPresented: $showDisplay) {
