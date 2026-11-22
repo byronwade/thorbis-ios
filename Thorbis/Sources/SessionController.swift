@@ -50,6 +50,15 @@ private struct FeaturesPayload: Decodable {
     let features: [String: FeatureDecision]
 }
 
+/// What a revalidation compares: when any part differs from what the session holds, reads the
+/// server refused under the old authority are asked again (`APIClient.forgetRefusedReads`).
+struct SessionAuthority: Equatable {
+    let capabilities: Set<String>
+    let features: [String: FeatureDecision]
+    let policyVersion: Int?
+    let generation: String?
+}
+
 private struct SessionValidationError: LocalizedError {
     let reason: String
     var errorDescription: String? { reason }
@@ -199,6 +208,11 @@ final class SessionController: ObservableObject {
             let exposure: FeaturesPayload = try await api.send("GET", "/v1/features", authed: false)
             guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
             guard exposure.organizationId == currentOrganization.id else { await restore(); return }
+            let held = SessionAuthority(capabilities: capabilities, features: features,
+                                        policyVersion: policyVersion, generation: authorityGeneration)
+            let fresh = SessionAuthority(capabilities: Set(catalog.capabilities), features: exposure.features,
+                                         policyVersion: binding.policyVersion, generation: binding.generation)
+            if held != fresh { api.forgetRefusedReads() }
             authorityRevision = UUID()
             capabilities = Set(catalog.capabilities)
             features = exposure.features

@@ -243,7 +243,7 @@ struct MemberOverridesView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var search = ""
-    @State private var key = UUID().uuidString
+    @State private var key = RetryKey<String>()
 
     enum Choice: String, CaseIterable { case role = "Role", allow = "Allow", never = "Never" }
 
@@ -350,15 +350,16 @@ struct MemberOverridesView: View {
         let grants = choices.filter { $0.value == .allow }.keys.sorted()
             .map { RoleGrant(capability: $0, scope: scopes[$0] ?? "organization") }
         let denies = choices.filter { $0.value == .never }.keys.sorted()
+        let change = (grants.map { "\($0.capability)@\($0.scope)" } + ["|"] + denies + ["|\(snapshot.expectedVersion)"]).joined(separator: ",")
         do {
             try await api.saveMemberOverride(member.member.memberId, grants: grants, denies: denies,
-                                             expectedVersion: snapshot.expectedVersion, idempotencyKey: key)
-            key = UUID().uuidString
+                                             expectedVersion: snapshot.expectedVersion, idempotencyKey: key.key(for: change))
+            key.settle(after: nil)
             await onChanged()
             dismiss()
         } catch is CancellationError {
         } catch {
-            key = UUID().uuidString
+            key.settle(after: error)
             self.error = error.isConnectivityFailure ? "Changing access needs a connection." : error.localizedDescription
         }
     }

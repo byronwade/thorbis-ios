@@ -394,6 +394,29 @@ final class RefusedReadsTests: XCTestCase {
         XCTAssertFalse(reads.isRefused("/v1/jobs/\(job)", scope: scope))
         XCTAssertFalse(reads.isRefused("/v1/organization/mobile-layout", scope: UUID()), "A new sign-in asks again")
     }
+
+    func testForgettingAsksAgainInTheSameSignIn() {
+        var reads = RefusedReads()
+        let scope = UUID()
+        reads.note("/v1/organization/mobile-layout", status: 404, scope: scope)
+        reads.note("/v1/customers/\(job)/history", status: 403, scope: scope)
+        reads.forgetAll()
+        XCTAssertFalse(reads.isRefused("/v1/organization/mobile-layout", scope: scope))
+        XCTAssertFalse(reads.isRefused("/v1/customers/\(job)/history", scope: scope))
+        reads.note("/v1/customers/\(job)/history", status: 403, scope: scope)
+        XCTAssertTrue(reads.isRefused("/v1/customers/\(job)/history", scope: scope), "A fresh refusal is remembered again")
+    }
+
+    func testAChangedGrantOrFeatureCountsAsNewAuthority() {
+        let on = FeatureDecision(enabled: true, released: true, entitled: true, stage: nil, reason: nil)
+        let off = FeatureDecision(enabled: false, released: true, entitled: true, stage: nil, reason: "not_entitled")
+        let held = SessionAuthority(capabilities: ["job.view"], features: ["jobs": on], policyVersion: 3, generation: "g1")
+        XCTAssertEqual(held, SessionAuthority(capabilities: ["job.view"], features: ["jobs": on], policyVersion: 3, generation: "g1"))
+        XCTAssertNotEqual(held, SessionAuthority(capabilities: ["job.view", "customer.view"], features: ["jobs": on], policyVersion: 3, generation: "g1"))
+        XCTAssertNotEqual(held, SessionAuthority(capabilities: ["job.view"], features: ["jobs": off], policyVersion: 3, generation: "g1"))
+        XCTAssertNotEqual(held, SessionAuthority(capabilities: ["job.view"], features: ["jobs": on], policyVersion: 4, generation: "g1"))
+        XCTAssertNotEqual(held, SessionAuthority(capabilities: ["job.view"], features: ["jobs": on], policyVersion: 3, generation: "g2"))
+    }
 }
 
 /// The job reads service-context first and only falls back where that route cannot answer.

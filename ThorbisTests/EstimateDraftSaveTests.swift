@@ -90,6 +90,24 @@ final class EstimateDraftSaveTests: XCTestCase {
         XCTAssertFalse(failure.offersLatest)
     }
 
+    func testADiscountOverTheRoleLimitSaysSoInsteadOfLostPermission() {
+        var refused = problem(403, detail: "not permitted: estimate.discount (out_of_scope)")
+        refused.category = "authorization"
+        let failure = EstimateSaveFailure.of(refused, wasDraft: true, sentRevision: 0)
+        XCTAssertEqual(failure, .discountOverLimit)
+        XCTAssertEqual(failure.message, "That discount is more than your role allows. Lower it, or ask your office.")
+        XCTAssertFalse(failure.offersLatest)
+    }
+
+    func testEstimatesSwitchedOffForTheWorkspaceSaySo() {
+        var off = problem(403, detail: "estimates is not enabled")
+        off.category = "feature_unavailable"
+        let failure = EstimateSaveFailure.of(off, wasDraft: false, sentRevision: 1)
+        XCTAssertEqual(failure, .featureOff)
+        XCTAssertEqual(failure.message, "Estimates aren\u{2019}t turned on for this workspace.")
+        XCTAssertFalse(failure.offersLatest)
+    }
+
     func testServerWithoutDraftEditsFailsHonestly() {
         // Today's server: a never-sent draft's revision 0 is invalid (400)…
         let neverSent = EstimateSaveFailure.of(problem(400, detail: "expectedRevisionNumber"), wasDraft: true, sentRevision: 0)

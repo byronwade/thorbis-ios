@@ -89,9 +89,11 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         Task { await register() }
     }
 
-    /// Owners and managers: the people the server sends a digest to (it decides; this only hides the switch).
+    /// The people the server sends a digest to: members who may see company-wide totals
+    /// (organization.performance.view, owners and managers by default). The server decides; this
+    /// only hides the switch from everyone else.
     static func receivesMorningDigest(_ session: SessionController) -> Bool {
-        session.can("invoice.create", feature: "invoicing") && session.can("job.assign", feature: "jobs")
+        session.can("organization.performance.view")
     }
 
     // MARK: Notification center

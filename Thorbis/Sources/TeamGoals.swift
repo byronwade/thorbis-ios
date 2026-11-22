@@ -161,6 +161,12 @@ struct PendingTeamGoalEdits {
     func clearAll() { defaults.removeObject(forKey: storageKey) }
 }
 
+/// The last Team goals screen loaded, shown offline. It belongs to the account that loaded it, so sign-out clears it.
+enum TeamGoalsCache {
+    static let key = "thorbis.teamGoals.lastLoaded.v1"
+    static func clear(_ defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key) }
+}
+
 @MainActor
 final class TeamGoalsModel: ObservableObject {
     @Published private(set) var screen: TeamGoalsSettings?
@@ -173,7 +179,7 @@ final class TeamGoalsModel: ObservableObject {
     private var confirmed: TeamGoalsSettings?
     private var flushing: Task<Void, Never>?
     private let pending: PendingTeamGoalEdits
-    private let cacheKey = "thorbis.teamGoals.lastLoaded.v1"
+    private let cacheKey = TeamGoalsCache.key
 
     init(pending: PendingTeamGoalEdits = .init()) { self.pending = pending }
 

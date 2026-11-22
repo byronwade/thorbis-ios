@@ -114,4 +114,22 @@ final class RouteBodyTests: XCTestCase {
         let body = try json(URLProtocolFixture.recorded.first?.body)
         XCTAssertEqual(body as? [String: String], ["email": "hayley@example.invalid", "role": "technician"])
     }
+
+    func testARetryOfTheSameChangeKeepsItsKeyUntilTheServerAnswers() {
+        var key = RetryKey<String>()
+        let first = key.key(for: "role-a")
+        key.settle(after: URLError(.timedOut))
+        XCTAssertEqual(key.key(for: "role-a"), first, "A lost answer is retried as the same request")
+        key.settle(after: Problem(title: "Unavailable", status: 503, detail: nil))
+        XCTAssertEqual(key.key(for: "role-a"), first)
+        key.settle(after: Problem(title: "Too many", status: 429, detail: nil))
+        XCTAssertEqual(key.key(for: "role-a"), first)
+        let other = key.key(for: "role-b")
+        XCTAssertNotEqual(other, first, "A different change is a different request")
+        key.settle(after: Problem(title: "Conflict", status: 409, detail: nil))
+        XCTAssertNotEqual(key.key(for: "role-b"), other, "A definite refusal retires the key")
+        let sent = key.key(for: "role-b")
+        key.settle(after: nil)
+        XCTAssertNotEqual(key.key(for: "role-b"), sent, "After a success the same change is a new request")
+    }
 }

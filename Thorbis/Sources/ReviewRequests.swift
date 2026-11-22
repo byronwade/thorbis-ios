@@ -76,6 +76,12 @@ struct PendingOrganizationFacts {
     func clearAll() { defaults.removeObject(forKey: storageKey) }
 }
 
+/// The last review settings loaded, shown offline. It belongs to the account that loaded it, so sign-out clears it.
+enum ReviewRequestsCache {
+    static let key = "thorbis.reviewRequests.lastLoaded.v1"
+    static func clear(_ defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key) }
+}
+
 @MainActor
 final class ReviewRequestsModel: ObservableObject {
     @Published var linkDraft = ""
@@ -93,7 +99,7 @@ final class ReviewRequestsModel: ObservableObject {
     private var flushing: Task<Void, Never>?
 
     private let pending: PendingOrganizationFacts
-    private let cacheKey = "thorbis.reviewRequests.lastLoaded.v1"
+    private let cacheKey = ReviewRequestsCache.key
 
     init(pending: PendingOrganizationFacts = .init()) { self.pending = pending }
 

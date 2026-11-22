@@ -13,6 +13,18 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-22-access-that-follows",
+            date: "2026-11-22",
+            highlights: [
+                .init(symbol: "lock.open", title: "New access shows up right away",
+                      detail: "When the office gives you more access, screens that were closed open next time, no restart."),
+                .init(symbol: "percent", title: "A clear word on too big a discount",
+                      detail: "Saving an estimate with more discount than your role allows says so, not that you lost access."),
+                .init(symbol: "sun.horizon", title: "Morning digest for the right people",
+                      detail: "The 6:30 digest switch shows for everyone allowed to see company totals, who are the ones who get it."),
+            ],
+            fixes: 1),
+        ReleaseNote(
             id: "2026-11-21-saves-that-stick",
             date: "2026-11-21",
             highlights: [

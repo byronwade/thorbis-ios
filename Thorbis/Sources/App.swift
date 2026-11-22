@@ -81,6 +81,10 @@ struct ThorbisApp: App {
             JobChecklistStore.clearAll()
             ChecklistDraftStore.clearAll()
             OfficeContact.clearAll()
+            PendingTeamGoalEdits().clearAll()
+            PendingOrganizationFacts().clearAll()
+            TeamGoalsCache.clear()
+            ReviewRequestsCache.clear()
             Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox, weak pendingMedia, weak api] actorID, organizationID in

@@ -365,6 +365,7 @@ struct ChangePasswordSheet: View {
             let _: APIClient.EmptyResponse = try await api.send("POST", "/api/auth/organization/set-active",
                                                                 body: Selection(organizationId: organizationID),
                                                                 authed: false)
+            api.forgetRefusedReads()
         } catch {
             await session.restore()
         }

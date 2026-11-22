@@ -263,6 +263,14 @@ final class MembershipEditingTests: XCTestCase {
         return controller
     }
 
+    func testTheMorningDigestSwitchFollowsTheGrantTheServerChecks() async {
+        let manager = await session(capabilities: ["job.view", "organization.performance.view"])
+        XCTAssertTrue(PushNotifications.receivesMorningDigest(manager))
+        let dispatcher = await session(capabilities: ["invoice.create", "job.assign"], on: ["invoicing", "jobs"])
+        XCTAssertFalse(PushNotifications.receivesMorningDigest(dispatcher),
+                       "The server sends no digest without organization.performance.view")
+    }
+
     func testOnlyPeopleWhoEditCompanySettingsChangePlans() async {
         let owner = await session(capabilities: ["customer.view", "customer.edit", "organization.settings.edit"])
         XCTAssertTrue(MembershipAccess.canEditPlans(owner))

@@ -109,6 +109,40 @@ struct RefusedReads {
         if self.scope != scope { self.scope = scope; keys = [] }
         keys.insert(key)
     }
+
+    /// The server's answer may have changed (a new grant, a feature switched on), so every
+    /// remembered refusal is asked again.
+    mutating func forgetAll() { keys = [] }
+}
+
+/// One idempotency key per change. Asking again for the same change after a lost answer, a
+/// timeout or a server failure sends the same key, so the server replays its first answer
+/// instead of applying the change twice. A different change, or any definite answer (a success
+/// or a refusal that is not a timeout or rate limit), starts a new key.
+struct RetryKey<Content: Hashable> {
+    private var content: Content?
+    private var value = UUID().uuidString
+
+    /// The key to send for this change.
+    mutating func key(for content: Content) -> String {
+        if self.content != content {
+            self.content = content
+            value = UUID().uuidString
+        }
+        return value
+    }
+
+    /// After the server answered: a success or a definite refusal retires the key.
+    mutating func settle(after error: Error?) {
+        if let error, !Self.isDefinite(error) { return }
+        content = nil
+        value = UUID().uuidString
+    }
+
+    static func isDefinite(_ error: Error) -> Bool {
+        guard !(error is CancellationError), let status = (error as? Problem)?.status else { return false }
+        return (400..<500).contains(status) && status != 408 && status != 429
+    }
 }
 
 struct Problem: Codable, Error, LocalizedError {
@@ -198,6 +232,10 @@ final class APIClient: ObservableObject {
     /// Reads this sign-in was refused, so a job screen does not ask again on every open.
     private var refusedReads = RefusedReads()
     var onUnauthorized: (() -> Void)?
+
+    /// Called when the session's authority changes within one sign-in, so a read refused under
+    /// the old capabilities or features is asked again.
+    func forgetRefusedReads() { refusedReads.forgetAll() }
 
     func invalidateRequests() {
         ScopedRecordFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
