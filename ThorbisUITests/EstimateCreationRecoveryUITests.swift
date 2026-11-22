@@ -49,8 +49,12 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let retry = app.buttons["Retry adding to job"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
         retry.tap()
+        // The refusal is shown only after the retry's fresh read and before any job read or link,
+        // so once it is up the counts are final. Waiting for it first keeps a stalled simulator's
+        // slow accessibility reads from running out the counts' own window; every check stays exact.
+        let refused = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch
+        XCTAssertTrue(refused.waitForExistence(timeout: 30), "The retry must read the saved estimate fresh and refuse it")
         waitForCounts(counts, "creates=1,links=0,estimateReads=1,jobReads=0")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["Estimate title"].isEnabled)
     }
 
