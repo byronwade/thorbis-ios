@@ -1437,6 +1437,27 @@ final class JobEstimateHandoffUITests: XCTestCase {
         ownerExit(app).tap()
         waitHittable(app.navigationBars["Choose company"])
     }
+    /// A foreground or reconnect check that finds the same authority leaves Customer view as it was:
+    /// the customer's selection stays and they can still review it (BYR-1833).
+    func testIdenticalSessionCheckKeepsCustomerViewAndSelection() {
+        let app = open()
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); selectEstimate(app, first)
+        toggleSampleControls(app)
+        let checks = app.staticTexts["handoff-sample-checked"]
+        XCTAssertTrue(checks.waitForExistence(timeout: 5))
+        let before = (checks.value as? String) ?? ""
+        app.buttons["Check sample session shortly"].tap()
+        let answered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before), object: checks)
+        XCTAssertEqual(XCTWaiter.wait(for: [answered], timeout: 15), .completed, "The sample check must be answered")
+        XCTAssertFalse(app.staticTexts["This workspace or your access changed. Your technician needs to unlock and reopen the job."].exists,
+                       "An identical check must not end Customer view")
+        XCTAssertTrue(first.exists)
+        XCTAssertTrue((first.value as? String)?.hasPrefix("Selected,") == true, "The customer's selection survives the check")
+        XCTAssertTrue(app.buttons["handoff-review-selected"].isEnabled)
+        capture(app, "Customer view after an identical session check")
+    }
     func testActualWorkspaceBranchRetirementKeepsProtectedOwner() {
         let app = open()
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()

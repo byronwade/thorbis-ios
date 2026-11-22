@@ -83,6 +83,7 @@ struct JobDetailView: View {
     @State private var activityFilterBeforePhotos = "All"
     #if DEBUG
     @State private var previewPaymentRevalidated = false
+    @State private var previewOverviewRechecked = false
     @State private var previewOverviewPaymentHold = false
     #endif
     @State private var showSchedule = false
@@ -461,9 +462,26 @@ struct JobDetailView: View {
                                 // document; an identical answer would keep it open.
                                 PaperPreviewProtocol.reviseSampleAuthority()
                                 await session.revalidate()
+                            } else if PaperPreview.isJobDocumentsPreview,
+                                      ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-recheck") {
+                                try? await Task.sleep(for: .seconds(5))
+                                guard !Task.isCancelled else { return }
+                                // An identical answer, as a foreground or reconnect check finds: the
+                                // opened document stays open.
+                                let before = session.verificationRevision
+                                await session.revalidate()
+                                previewOverviewRechecked = session.verificationRevision != before
                             }
                             #endif
                         }
+                        #if DEBUG
+                        .overlay(alignment: .topLeading) {
+                            if previewOverviewRechecked {
+                                Text("Sample check answered").font(Theme.font(11))
+                                    .accessibilityIdentifier("preview-overview-rechecked")
+                            }
+                        }
+                        #endif
                 }
             } else {
                 PaperEmptyState(symbol: "lock", title: "Document unavailable", message: "Return to the job and refresh to open this document.", problem: true)
@@ -673,7 +691,9 @@ struct JobDetailView: View {
             // Customer view reads this screen's estimates and invoices. A check that changed nothing
             // must not re-read them under the customer (that would take away Review and sign);
             // handing back re-reads both.
-            let customerHoldsDocuments = !authorityChanged && estimateHandoffPresenter.active != nil
+            let customerHoldsDocuments = !authorityChanged && (estimateHandoffPresenter.active.map {
+                $0.documents === documents && $0.isCurrentJob
+            } ?? false)
             if authorityChanged {
                 customerAuthorityID = customerAuthorityToken
                 locations = []

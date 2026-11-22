@@ -110,6 +110,23 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
     }
 
+    /// A foreground or reconnect check that finds the same authority leaves an invoice opened from
+    /// Money open (BYR-1833).
+    func testMoneyInvoiceStaysOpenWhenAnIdenticalCheckAnswers() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-overview-recheck"])
+        thorbisTapStableButton(app, "job-section-money")
+        let row = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        revealJobItem(row, in: app)
+        row.tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
+        // The check lands five seconds after the invoice opens; the marker says the server answered it.
+        XCTAssertTrue(app.staticTexts["preview-overview-rechecked"].waitForExistence(timeout: 20), "The sample check must be answered")
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].exists, "An identical check must keep the opened invoice")
+        XCTAssertFalse(app.staticTexts["Document unavailable"].exists)
+    }
+
     /// While the job's paper reloads under a new authority, the invoice card read under the old
     /// one can't open its document.
     func testMoneyInvoiceCannotOpenFromOldReadDuringAuthorityReload() {

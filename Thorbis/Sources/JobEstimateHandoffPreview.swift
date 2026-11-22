@@ -369,6 +369,8 @@ struct JobEstimateHandoffPreviewControls: View {
     var body: some View {
         DisclosureGroup("Sample testing controls") {
             Button("Change sample workspace shortly") { delayed { JobEstimateHandoffPreview.shared.changeWorkspace() } }
+            // A foreground or reconnect check that finds the same authority: nothing changes.
+            Button("Check sample session shortly") { delayed {} }
             Button("End sample session shortly") { delayed(restore: true) { JobEstimateHandoffPreview.shared.endSession() } }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-retire-api") {
                 Button("Retire sample API shortly") {
@@ -385,6 +387,7 @@ struct JobEstimateHandoffPreviewControls: View {
             Button("Allow sample unlock") { JobEstimateHandoffPreview.shared.allowUnlock() }
             Button("Refresh sample receipt") { proof = JobEstimateHandoffPreview.shared.receipt }
             Text("Sample approval receipt").accessibilityIdentifier("handoff-sample-receipt").accessibilityValue(proof)
+            Text("Sample session checks").accessibilityIdentifier("handoff-sample-checked").accessibilityValue(session.verificationRevision.uuidString)
             Text("Sample live session").accessibilityIdentifier("handoff-sample-session").accessibilityValue("\(session.generation.uuidString) | \(session.activeOrganization?.id ?? "none") | \(session.phase)")
         }.font(Theme.font(13)).padding(.horizontal, Theme.gutter)
     }
