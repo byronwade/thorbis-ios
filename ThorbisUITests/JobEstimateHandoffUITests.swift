@@ -97,6 +97,19 @@ func thorbisShowCustomerDoor(_ app: XCUIApplication) -> XCUIElement {
     return row
 }
 
+/// Customer view covers the staff job page: the page is still there underneath, and none of its
+/// controls can be reached. Reads the navigation bar's Job actions, which is on screen without
+/// scrolling. Scrolling the job page while Customer view is up would drag the customer's screen
+/// instead, which once stretched a test long enough for a session check to retire the handoff.
+@MainActor
+func thorbisAssertStaffPageCovered(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    let staff = app.buttons["Job actions"]
+    XCTAssertTrue(staff.waitForExistence(timeout: 10), "The staff job page stays under Customer view", file: file, line: line)
+    // A usable frame first: `isHittable` throws on iOS 26 when the activation point is invalid.
+    XCTAssertFalse(app.thorbisUsableFrame(of: staff) != nil && staff.isHittable,
+                   "Customer view covers the staff job page", file: file, line: line)
+}
+
 /// Scrolls the job page with short held drags until `element` sits clear of the bars, either way.
 @MainActor
 func thorbisRevealOnJobPage(_ element: XCUIElement, in app: XCUIApplication) {
@@ -956,7 +969,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(Set(approvals.compactMap { $0["estimateID"] as? String }).count, 2)
         XCTAssertEqual(Set(approvals.compactMap { $0["mediaID"] as? String }).count, 2, "Each estimate keeps its own signature asset")
         XCTAssertEqual(proof["ownerAuthenticationAttempts"] as? Int, 0)
-        XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
+        thorbisAssertStaffPageCovered(app)
         capture(app, "Two approvals from one signature before one technician handback")
         app.buttons["handoff-batch-done"].tap()
         XCTAssertTrue(app.staticTexts["handoff-results-summary"].waitForExistence(timeout: 10))
@@ -1238,7 +1251,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         reachSignTogether(app)
         ownerExit(app).tap()
         XCTAssertTrue(app.textFields["Your full name"].exists, "Staff screens stay locked until Technician: unlock succeeds")
-        XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
+        thorbisAssertStaffPageCovered(app)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1)
         toggleSampleControls(app); app.buttons["Allow sample unlock"].tap(); toggleSampleControls(app)
         ownerExit(app).tap(); waitForStaffDoor(app)
@@ -1315,7 +1328,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         ownerExit(app).tap()
         XCTAssertTrue(app.buttons["handoff-batch-retry"].exists)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1, "A visible protected child exit must invoke the real owner boundary, not no-op")
-        XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
+        thorbisAssertStaffPageCovered(app)
         thorbisStableButton(app, "handoff-batch-retry").tap()
         XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 20))
         let after = try receipt(app)
