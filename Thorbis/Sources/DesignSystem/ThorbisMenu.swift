@@ -351,6 +351,19 @@ extension View {
     static var isRegularWidth: Bool {
         keyWindow?.traitCollection.horizontalSizeClass == .regular
     }
+
+    /// Returns once nothing in the key window is being presented or dismissed (at most about a
+    /// second), so a sheet asked for right after a menu closes is not dropped mid-transition.
+    static func presentationSettled() async {
+        // Let a dismissal that was just requested begin before looking.
+        try? await Task.sleep(for: .milliseconds(16))
+        for _ in 0..<20 {
+            var top = keyWindow?.rootViewController
+            while let next = top?.presentedViewController { top = next }
+            guard let top, top.isBeingPresented || top.isBeingDismissed else { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
 }
 
 /// How tall a fitted popover may be. Portrait keeps the previous 460pt cap; a compact-height
