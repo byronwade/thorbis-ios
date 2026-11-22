@@ -238,13 +238,13 @@ struct MoneyHomeView: View {
                 guard let date = JobFiltering.date(payment.recordedAt) else { return false }
                 return date >= range.start
             }
-            let taken = inRange.filter { !$0.refunded }
+            let taken = inRange.filter { $0.net > 0 }
             let refunded = inRange.filter(\.refunded).reduce(0) { $0 + ($1.refundedAmount > 0 ? $1.refundedAmount : $1.amount) }
             Button { showPayments = true } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Collected \(period == "This week" ? "this week" : period == "Month" ? "this month" : "this quarter")")
                         .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    Text(wholeDollars(taken.reduce(0) { $0 + $1.amount }))
+                    Text(wholeDollars(CompanyPayment.collected(inRange)))
                         .font(Theme.display()).tracking(Theme.displayTracking())
                         .foregroundStyle(Theme.foreground)
                         .lineLimit(1).minimumScaleFactor(0.5)

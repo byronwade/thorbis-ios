@@ -138,6 +138,14 @@ final class TechnicianFlowTests: XCTestCase {
                        .collect(invoiceID: "dep", due: 10_000, currency: "USD"))
     }
 
+    func testAPaidDepositAloneIsNotThePaidStage() {
+        let deposit = invoice("dep", "paid", total: 10_000, paid: 10_000, origin: "deposit")
+        XCTAssertFalse(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [deposit]),
+                       "money taken ahead of the work is not the job's bill")
+        let bill = invoice("i", "paid", total: 48_000, paid: 48_000)
+        XCTAssertTrue(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [deposit, bill]))
+    }
+
     func testAnOwedInvoiceThisRoleCannotCollectGoesToWrapUp() {
         var can = TechJobAbilities.all
         can.collectPayment = false

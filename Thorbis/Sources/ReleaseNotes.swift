@@ -24,8 +24,10 @@ enum ReleaseNotes {
                       detail: "A deposit invoice is labeled Deposit on the job and for the customer, apart from the job\u{2019}s invoice."),
                 .init(symbol: "tag", title: "Edit the price book as a manager",
                       detail: "Anyone allowed to change the price book can open, edit and remove items, not only the owner."),
+                .init(symbol: "dollarsign.circle", title: "Collected counts part refunds",
+                      detail: "Money, Payments and Home count what a part-refunded payment still brings in, as the web does."),
             ],
-            fixes: 2),
+            fixes: 3),
         ReleaseNote(
             id: "2026-11-21-cleaner-pages",
             date: "2026-11-21",

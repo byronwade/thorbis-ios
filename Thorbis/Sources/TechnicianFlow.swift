@@ -155,7 +155,8 @@ enum TechJobFlow {
     static func paidStage(status: String, completedAt: String?, invoices: [InvoiceRecord]) -> Bool {
         if status != "completed", completedAt != nil { return false }
         let live = invoices.filter { $0.status != "void" && $0.status != "voided" }
-        guard let bill = live.first(where: { $0.origin == "job_completion" }) ?? live.first,
+        // A paid deposit is money ahead of the work, not the job's bill (see nextStep above).
+        guard let bill = live.first(where: { $0.origin == "job_completion" }) ?? live.first(where: { !$0.isDeposit }),
               bill.status != "draft", bill.amountPaid > 0, due(bill) == 0 else { return false }
         // Another invoice still in draft with lines on it (unbilled), or issued and owing (unpaid).
         return !live.contains { other in

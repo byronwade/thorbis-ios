@@ -612,7 +612,7 @@ struct OwnerHomeView: View {
             let covers = tape.complete
                 || tape.payments.contains { (JobFiltering.date($0.recordedAt) ?? .distantFuture) < midnight }
             collectedToday = covers
-                ? tape.payments.filter { !$0.refunded && Self.isToday($0.recordedAt) }.reduce(0) { $0 + $1.amount }
+                ? CompanyPayment.collected(tape.payments.filter { Self.isToday($0.recordedAt) })
                 : nil
         }
     }
