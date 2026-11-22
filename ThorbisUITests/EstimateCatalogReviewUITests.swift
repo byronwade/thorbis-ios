@@ -235,6 +235,28 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
     }
 
+    func testDescriptionCanvasEditsTheEstimateDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision"]
+        app.launch()
+        let line = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Compressor diagnostic")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 30))
+        line.tap()
+        let inline = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
+        XCTAssertTrue(inline.waitForExistence(timeout: 10))
+        let open = app.buttons["Edit full description"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        open.tap()
+        let canvas = app.textViews["line-description-canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        canvas.tap()
+        canvas.typeText(" extra detail")
+        app.buttons["line-description-canvas-done"].tap()
+        XCTAssertTrue(canvas.waitForNonExistence(timeout: 10))
+        XCTAssertTrue((inline.value as? String ?? "").contains("extra detail"))
+    }
+
     func testReviewKeepsCatalogItemInItsChosenOption() {
         continueAfterFailure = false
         let app = XCUIApplication()
