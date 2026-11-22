@@ -325,17 +325,6 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertNil(threads[2].initials)
     }
 
-    func testCompactAgeMatchesTheWeb() {
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        func at(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: now.addingTimeInterval(-seconds)) }
-        XCTAssertEqual(CommsAge.compact(at(20), now: now), "now")
-        XCTAssertEqual(CommsAge.compact(at(12 * 60), now: now), "12m")
-        XCTAssertEqual(CommsAge.compact(at(3 * 3600), now: now), "3h")
-        XCTAssertEqual(CommsAge.compact(at(4 * 86_400), now: now), "4d")
-        XCTAssertEqual(CommsAge.compact(at(90 * 86_400), now: now), "3mo")
-        XCTAssertEqual(CommsAge.compact(nil, now: now), "")
-    }
-
     // MARK: Gating
 
     func testWhoSeesWhichSections() {

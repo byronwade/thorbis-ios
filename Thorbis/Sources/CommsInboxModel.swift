@@ -371,21 +371,6 @@ enum CommsCallGrouping {
     }
 }
 
-/// web compactAge: "now", "12m", "3h", "4d", "2mo".
-enum CommsAge {
-    static func compact(_ raw: String?, now: Date = Date()) -> String {
-        guard let date = JobFiltering.date(raw) else { return "" }
-        let minutes = Int(now.timeIntervalSince(date) / 60)
-        if minutes < 1 { return "now" }
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h" }
-        let days = hours / 24
-        if days < 60 { return "\(days)d" }
-        return "\(days / 30)mo"
-    }
-}
-
 // MARK: - Read state for calls
 
 /// Which missed calls and voicemails were opened on this phone. The server keeps no read state for

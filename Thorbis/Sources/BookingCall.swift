@@ -148,17 +148,6 @@ final class BookingCallPlayer: ObservableObject {
     private var player: AVAudioPlayer?
     private var ticker: Task<Void, Never>?
 
-    /// "1x", "1.5x", "2x".
-    var rateLabel: String {
-        rate == 1.5 ? "1.5x" : "\(Int(rate))x"
-    }
-
-    /// Steps the speed 1 → 1.5 → 2 → 1; a playing recording changes at once.
-    func cycleRate() {
-        rate = rate == 1 ? 1.5 : (rate == 1.5 ? 2 : 1)
-        player?.rate = rate
-    }
-
     func toggle(api: APIClient, path: String) async {
         if let player {
             if player.isPlaying { pause() } else { play(player) }
