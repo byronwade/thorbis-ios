@@ -158,12 +158,18 @@ final class JobFallbackAddressTests: XCTestCase {
         await book.load([row], api: client, organizationID: organization, identity: "me", customerAddresses: [:])
         XCTAssertNil(book.street(row))
 
-        await book.load([row], api: client, organizationID: organization, identity: "me",
-                        customerAddresses: [customer: "731 Cassia Way, Springfield"])
+        // Live only: the client answers a repeated GET from its last ten seconds without asking, so a
+        // book that read the places again would otherwise still count one request.
+        await SavedCopies.$liveOnly.withValue(true) {
+            await book.load([row], api: client, organizationID: organization, identity: "me",
+                            customerAddresses: [customer: "731 Cassia Way, Springfield"])
+        }
         XCTAssertEqual(book.street(row), "731 Cassia Way")
         XCTAssertEqual(book.caveat(row), JobFallbackAddress.caveat)
 
-        await book.load([row], api: client, organizationID: organization, identity: "me", customerAddresses: [customer: "9 Fern Ct"])
+        await SavedCopies.$liveOnly.withValue(true) {
+            await book.load([row], api: client, organizationID: organization, identity: "me", customerAddresses: [customer: "9 Fern Ct"])
+        }
         XCTAssertEqual(book.street(row), "9 Fern Ct", "An address changed elsewhere is followed too")
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "The customer's places are read once")
     }

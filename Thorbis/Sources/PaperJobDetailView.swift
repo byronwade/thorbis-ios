@@ -1526,10 +1526,17 @@ struct JobDetailView: View {
         }
     }
 
-    /// The job's name: its street when the job records a site; without one (BYR-1593), the
-    /// customer's only address on file, said with its caveat (`streetCaveat`); else its title.
+    /// The job's name: its street when the job records a site, else its title (BYR-1593). Never the
+    /// customer's address: the Lock Screen card, Wrap up, "You're here" and the short header have
+    /// no line for its caveat.
     private func street(_ job: JobRecord) -> String? {
-        JobPropertyHistory.street(job: job, locations: customerLocations) ?? fallbackAddress(job)?.street
+        JobPropertyHistory.street(job: job, locations: customerLocations)
+    }
+
+    /// The street on the header's second line: the job's own site; without one (BYR-1593), the
+    /// customer's only address on file, said with its caveat (`streetCaveat`) on the line under it.
+    private func headerStreet(_ job: JobRecord) -> String? {
+        street(job) ?? fallbackAddress(job)?.street
     }
 
     /// For a job with no site of its own: the customer's only address on file, from the locations
@@ -1664,7 +1671,7 @@ struct JobDetailView: View {
     private func subtitleParts(_ job: JobRecord) -> [String] {
         var parts: [String] = []
         if let when = whenText(job) { parts.append(when.replacingOccurrences(of: " \u{00B7} ", with: ", ")) }
-        if let street = street(job), street != job.title { parts.append(street) }
+        if let street = headerStreet(job), street != job.title { parts.append(street) }
         return parts
     }
 
@@ -3028,13 +3035,12 @@ struct JobDetailView: View {
     /// record's own dates) follow them here.
     private func atAddressScreen(_ job: JobRecord) -> some View {
         // The job's own site only: the visits here are the customer's, not visits at their address.
-        JobAtAddressView(job: job, street: JobPropertyHistory.street(job: job, locations: customerLocations), visits: visits,
-                         visitsLoaded: visitsLoaded, locations: customerLocations) {
+        JobAtAddressView(job: job, street: street(job), visits: visits, visitsLoaded: visitsLoaded, locations: customerLocations) {
             if session.can("customer.view", feature: "core_crm") {
                 let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
                                            loaded: placesCurrent, failed: locationsFailed,
-                                           headerStreet: displayTitle(job), accountAddress: fallbackAddress(job)?.address,
+                                           headerStreet: headerStreet(job) ?? job.title, accountAddress: fallbackAddress(job)?.address,
                                            factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
             }
             CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)

@@ -2418,7 +2418,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         // The visit someone is on (Chen's water heater) has its site on every screen, so the iPad
         // sidebar's "On now" card leads with the same street on every place. The sample job keeps
-        // its per-screen site: its screens show the title when it has none.
+        // its per-screen site: with none, its screens lead with the title, and the job page's header
+        // says its customer's only address on file with the caveat (JobFallbackAddress).
         listed = listed.map { row in
             row["status"] as? String == "in_progress" && row["locationId"] == nil && row["id"] as? String != PaperPreview.jobID
                 ? row.merging(["locationId": PaperPreview.homeLocationID]) { _, new in new } : row
