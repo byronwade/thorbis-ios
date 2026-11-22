@@ -30,8 +30,13 @@ enum EstimateSaveFailure: Equatable {
     case noPermission
     /// A credit or discount bigger than the role may give (a 403 naming estimate.discount).
     case discountOverLimit
-    /// Estimates are switched off for this workspace (a 403 the server calls feature_unavailable).
+    /// Estimates are switched off for this workspace (a feature_unavailable 403 naming `estimates`).
     case featureOff
+    /// Good / better / best is switched off (a feature_unavailable 403 naming `estimate_option_signing`,
+    /// which the server checks only when the save carries options). Removing them lets the save through.
+    case optionsOff
+    /// Another feature the server checked for this save is switched off.
+    case otherFeatureOff
     /// A server that can't change a draft yet. The edits stay on screen.
     case draftsNotEditableYet
     /// Anything else, in the server's own words; `conflict` offers the latest estimate.
@@ -41,6 +46,8 @@ enum EstimateSaveFailure: Equatable {
     static let noPermissionMessage = "You no longer have permission to revise this estimate."
     static let discountOverLimitMessage = "That discount is more than your role allows. Lower it, or ask your office."
     static let featureOffMessage = "Estimates aren\u{2019}t turned on for this workspace."
+    static let optionsOffMessage = "Options aren\u{2019}t turned on for this workspace. Remove them to save."
+    static let otherFeatureOffMessage = "Part of this estimate isn\u{2019}t turned on for this workspace. Ask your office."
     static let draftsNotEditableMessage = "This draft can\u{2019}t be changed yet. Send it, then edit it."
 
     /// - Parameters:
@@ -52,7 +59,13 @@ enum EstimateSaveFailure: Equatable {
         case (409, "stale_draft"): return .stale
         case (409, "draft_token_required"): return .reloadAndRetry
         case (403, _):
-            if problem.category == "feature_unavailable" { return .featureOff }
+            if problem.category == "feature_unavailable" {
+                switch unavailableFeature(problem.detail) {
+                case "estimates"?: return .featureOff
+                case "estimate_option_signing"?: return .optionsOff
+                default: return .otherFeatureOff
+                }
+            }
             if (problem.detail ?? "").contains("estimate.discount") { return .discountOverLimit }
             return .noPermission
         default: break
@@ -69,12 +82,26 @@ enum EstimateSaveFailure: Equatable {
         return .other(message: problem.localizedDescription, conflict: problem.status == 409)
     }
 
+    /// The feature a feature_unavailable refusal names. The server words it one of two ways
+    /// (packages/features gate.ts): "<feature> is not released to this organization" or
+    /// "this organization is not entitled to <feature>".
+    static func unavailableFeature(_ detail: String?) -> String? {
+        guard let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        let notReleased = " is not released to this organization"
+        let notEntitled = "this organization is not entitled to "
+        if detail.hasSuffix(notReleased) { return String(detail.dropLast(notReleased.count)) }
+        if detail.hasPrefix(notEntitled) { return String(detail.dropFirst(notEntitled.count)) }
+        return nil
+    }
+
     var message: String {
         switch self {
         case .stale, .reloadAndRetry: Self.staleMessage
         case .noPermission: Self.noPermissionMessage
         case .discountOverLimit: Self.discountOverLimitMessage
         case .featureOff: Self.featureOffMessage
+        case .optionsOff: Self.optionsOffMessage
+        case .otherFeatureOff: Self.otherFeatureOffMessage
         case .draftsNotEditableYet: Self.draftsNotEditableMessage
         case .other(let message, _): message
         }

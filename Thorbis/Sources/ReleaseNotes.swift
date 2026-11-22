@@ -23,7 +23,7 @@ enum ReleaseNotes {
                 .init(symbol: "sun.horizon", title: "Morning digest for the right people",
                       detail: "The 6:30 digest switch shows for everyone allowed to see company totals, who are the ones who get it."),
             ],
-            fixes: 5),
+            fixes: 6),
         ReleaseNote(
             id: "2026-11-21-saves-that-stick",
             date: "2026-11-21",
