@@ -95,6 +95,13 @@ struct JobDetailView: View {
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
     private var estimatesLoaded: Bool { estimateRead != nil }
     private var estimatesFailed: Bool { estimateRead?.isComplete == false }
+    /// The job's estimates are still being read: Money draws their placeholder rows.
+    private var estimatesPending: Bool {
+        session.can("estimate.view", feature: "estimates") && !estimatesLoaded && documents.estimatePageError == nil
+    }
+    private var customerDoor: JobMoneyCustomerDoor {
+        JobMoneyCustomerDoor(estimateCount: jobEstimates.count, estimatesPending: estimatesPending)
+    }
     @State private var showNewEstimate = false
     @State private var committed = 0
     /// Set when the person opens a wrap-up row; the next drop in rows left plays a light tap.
@@ -4149,7 +4156,7 @@ struct JobDetailView: View {
             invoiceContent(job)
             // With no estimate to sit beside, Customer view keeps its own one-row card so the door
             // is on Money whatever the job holds (the Share circle opens the same view).
-            if jobEstimates.isEmpty { JobPanel { showToCustomerRow } }
+            if customerDoor == .ownCard { JobPanel { showToCustomerRow } }
         }
     }
 
@@ -4168,7 +4175,7 @@ struct JobDetailView: View {
                 JobPanelLabel(title: "Estimates", count: count > 1 ? "\(count)\(documents.canLoadMoreEstimates ? " loaded" : "")" : nil,
                               actionTitle: session.can("estimate.create", feature: "estimates") ? (preparingEstimate ? "Preparing…" : "Add estimate") : nil, actionSymbol: "plus",
                               actionIdentifier: "job-add-estimate", action: buildEstimate)
-                if !estimatesLoaded && documents.estimatePageError == nil {
+                if estimatesPending {
                     SkeletonRows(count: 2, leading: false, inset: 0)
                 } else if estimateRead?.isComplete == true && count == 0 {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates on this job",
@@ -4250,7 +4257,7 @@ struct JobDetailView: View {
             }
             // The estimates' customer door (it was More › Show estimates): after the estimates it
             // hands over, before "Add an estimate".
-            if !jobEstimates.isEmpty { showToCustomerRow }
+            if customerDoor == .inEstimatesCard { showToCustomerRow }
         }
     }
 
@@ -4258,7 +4265,7 @@ struct JobDetailView: View {
     /// locked Customer view (it was "Show estimates"); with none it opens that view's home (it was
     /// "Customer view", which stays in •••).
     private var showToCustomerRow: some View {
-        let start: CustomerViewStart = jobEstimates.isEmpty ? .home : .estimates
+        let start = customerDoor.start
         return customerDoorRow(title: "Show to customer", symbol: "iphone",
                                spokenHint: "Hands the phone to the customer",
                                identifier: "job-money-customer-view") { openCustomerView(start) }
@@ -5703,6 +5710,23 @@ struct JobDetailView: View {
             }
         }
     }
+}
+
+/// Where Money puts its one "Show to customer" row: in the estimates card once the job has
+/// estimates, in a card of its own when it has none, and nowhere while they are still being read.
+/// Drawn during the read, the own card opened Customer view at home and then gave way to the
+/// estimates card's row as they arrived.
+enum JobMoneyCustomerDoor: Equatable {
+    case hidden
+    case inEstimatesCard
+    case ownCard
+
+    init(estimateCount: Int, estimatesPending: Bool) {
+        if estimateCount > 0 { self = .inEstimatesCard } else { self = estimatesPending ? .hidden : .ownCard }
+    }
+
+    /// Where Customer view opens from the row: the estimates to hand over, or its home.
+    var start: CustomerViewStart { self == .inEstimatesCard ? .estimates : .home }
 }
 
 /// Keep each invoice scannable while leaving its line quantities and amounts a tap away.

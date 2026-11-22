@@ -71,7 +71,8 @@ func thorbisCustomerViewDoor(_ app: XCUIApplication) -> XCUIElement {
 func thorbisShowCustomerDoor(_ app: XCUIApplication) -> XCUIElement {
     // Owner 2026-11-21: Money's two customer rows are one, "Show to customer" (field mode's menu too).
     let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show to customer")).firstMatch
-    if row.exists && row.isHittable { return row }
+    // A usable frame first: `isHittable` throws on iOS 26 when the activation point is invalid.
+    if app.thorbisUsableFrame(of: row) != nil, row.isHittable { return row }
     guard app.buttons["Job actions"].waitForExistence(timeout: 30) else { return row }
     // Job details has its sections; field mode has none and keeps the row in More.
     guard app.buttons["job-section-money"].exists || app.buttons["job-section-chooser"].exists else {
