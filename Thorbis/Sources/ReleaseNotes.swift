@@ -22,6 +22,8 @@ enum ReleaseNotes {
                       detail: "Saving an estimate with more discount than your role allows says so, not that you lost access."),
                 .init(symbol: "sun.horizon", title: "Morning digest for the right people",
                       detail: "The 6:30 digest switch shows for everyone allowed to see company totals, who are the ones who get it."),
+                .init(symbol: "iphone", title: "Customer view stays open",
+                      detail: "Locking the phone or a dropped signal no longer ends Customer view or closes an open estimate or invoice."),
             ],
             fixes: 9),
         ReleaseNote(

@@ -444,6 +444,9 @@ struct PlacesList: View {
     private struct FavoritesReload: Equatable {
         let scope: ScopedRecordFavorites.Scope?
         let entries: [ScopedRecordFavorites.Entry]
+        /// Titles are read again after every answered session check: which jobs a person can open is
+        /// checked per record, so a job they lost stops showing on the next foreground.
+        let verification: UUID
     }
     private var favoriteScope: ScopedRecordFavorites.Scope? { ScopedRecordFavorites.currentScope(session: session, api: api) }
     private func canOpenFavorite(_ kind: ScopedRecordFavorites.Kind) -> Bool {
@@ -502,7 +505,7 @@ struct PlacesList: View {
             if let place, place.placeSection != .work { workspaceExpansion[place.placeSection] = true }
         }
         .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
-        .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
+        .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries, verification: session.verificationRevision)) {
             let expected = favoriteScope
             recordFavorites.bind(expected)
             guard expected != nil else { return }

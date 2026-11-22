@@ -28,6 +28,8 @@ enum AddMaterialsMode: String, CaseIterable, Identifiable {
 private struct MaterialsLoadScope: Equatable {
     let context: PriceBookCatalogContext
     let apiGeneration: UUID
+    /// Re-runs the (60 s windowed) refresh after every answered check; never part of the context.
+    let verification: UUID
 }
 
 /// Entry point. Present as a sheet from the builder's add-item area, with the same values the
@@ -118,7 +120,8 @@ struct AddMaterialsSheet: View {
         .paperPageGround()
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .task(id: MaterialsLoadScope(context: context, apiGeneration: api.requestGeneration)) {
+        .task(id: MaterialsLoadScope(context: context, apiGeneration: api.requestGeneration,
+                                     verification: session.verificationRevision)) {
             await refresh(false)
         }
         .onChange(of: tab) { _, value in

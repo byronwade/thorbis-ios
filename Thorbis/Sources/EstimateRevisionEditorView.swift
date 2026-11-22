@@ -147,7 +147,8 @@ struct EstimateRevisionEditorView: View {
                 }
             } }
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
-            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)) { await refreshCatalog() }
+            .task(id: PriceBookCatalogLoad(context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority),
+                                           verification: session.verificationRevision)) { await refreshCatalog() }
             .task(id: estimate.customerId) { memberPricing = try? await api.memberPricing(estimate.customerId) }
             .task(id: storesLineGroups) { editor.storesLineGroups = storesLineGroups }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }

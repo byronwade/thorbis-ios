@@ -383,6 +383,14 @@ struct PriceBookAuthority: Hashable {
     let revision: UUID
 }
 
+/// What re-runs a screen's price book refresh: its catalog context changing, or any session check
+/// the server answered (foreground, reconnect). The check never joins the context, so the catalog,
+/// its adoption rules and every add guard see only the authority.
+struct PriceBookCatalogLoad: Equatable {
+    let context: PriceBookCatalogContext
+    let verification: UUID
+}
+
 struct PriceBookCatalogContext: Hashable {
     let organizationID: String?
     let sessionGeneration: UUID

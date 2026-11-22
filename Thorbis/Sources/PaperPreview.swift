@@ -853,6 +853,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var answeredListPaths: Set<String> = []
         var jobReopened = false
         var estimateOnInvoice: String?
+        /// How many times the sample server has renewed authority (a new generation, same access).
+        var authorityRevisions = 0
+        /// The sample server answers one more feature decision, at the same policy version and generation.
+        var featuresRevised = false
     }
     private static let scenario = Scenario()
     /// The sample estimate line the invoice-revisions preview adds to the sample invoice.
@@ -908,8 +912,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0; scenario.jobReopened = false; scenario.estimateOnInvoice = nil }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0; scenario.jobReopened = false; scenario.estimateOnInvoice = nil; scenario.authorityRevisions = 0; scenario.featuresRevised = false }
     }
+    /// The next catalog answers a new authority generation with the same capabilities: a real
+    /// authority change for a revalidation, unlike an identical answer, which keeps open work.
+    static func reviseSampleAuthority() { scenario.lock.withLock { scenario.authorityRevisions += 1 } }
+    /// The next features read adds a decision nothing on screen reads: a real authority change at the
+    /// same policy version and generation, the kind a catalog adopts without dropping its pages.
+    static func reviseSampleFeatures() { scenario.lock.withLock { scenario.featuresRevised = true } }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
     static func beginSavedWorkOffline() -> Bool {
@@ -1717,7 +1727,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
-            if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
+            // The description preview revokes it on the present-estimate screen too (expireDocumentSessionForTesting).
+            if PaperPreview.isJobDocumentsPreview || PaperPreview.screen == "present-estimate", scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.invoiceEditRevoked }) { capabilities.removeAll { $0 == "invoice.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.completionViewRevoked }) { capabilities.removeAll { $0 == "invoice.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
@@ -1744,7 +1755,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-sidebar-job-view-only") {
                 capabilities = ["job.view"]
             }
-            return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
+            let revisions = scenario.lock.withLock { scenario.authorityRevisions }
+            let generation = revisions == 0 ? "paper-preview" : "paper-preview-r\(revisions)"
+            return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": generation, "authorityExpiresAt": expiry],
                     "capabilities": capabilities.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } },
                     "resources": [], "views": []] as [String: Any]
         case "/v1/features":
@@ -1759,6 +1772,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
             if PaperPreview.isInvoiceRevisionsPreview { enabledFeatures += ["job_reopen", "invoice_revisions"] }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-checklists") { enabledFeatures.append("job_checklists") }
+            // A same-version authority change: one more decision nothing on screen reads.
+            if scenario.lock.withLock({ scenario.featuresRevised }) { enabledFeatures.append("preview_revised_feature") }
             let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.

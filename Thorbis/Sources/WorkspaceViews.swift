@@ -348,6 +348,11 @@ struct WorkspacePriceBookView: View {
                 }
                 .onChange(of: search) { _, _ in collapsedGroups.removeAll() }
                 .onChange(of: localScope) { _, _ in localDetail = nil }
+                // A list that failed (offline, a server error) reads again after an answered check;
+                // a loaded list stays as it is.
+                .onChange(of: session.verificationRevision) { _, _ in
+                    if hasCurrentOwner, items.isEmpty, error != nil { Task { await refresh() } }
+                }
                 .safeAreaInset(edge: .bottom) {
                     if canEdit {
                         // Paper 34: the brand pill, 50 tall, 16 from the edges.
@@ -369,9 +374,14 @@ struct WorkspacePriceBookView: View {
                                     guard !Task.isCancelled else { return }
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-switch") {
                                         PaperPreviewProtocol.switchSavedWorkWorkspace()
-                                    } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
+                                    } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
+                                        // Renewed authority: the server answers a new authority generation,
+                                        // the same capabilities. An identical answer would leave the list as it is.
+                                        PaperPreviewProtocol.reviseSampleAuthority()
+                                    } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-recheck") {
                                         PaperPreviewProtocol.revokePriceBookView()
                                     }
+                                    // `-recheck`: the server answers exactly what the session holds.
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-refresh-failure") {
                                         PaperPreviewProtocol.failPriceBookQuery()
                                     }

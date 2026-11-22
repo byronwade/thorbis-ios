@@ -1117,13 +1117,16 @@ private struct SearchScreen: View {
     private struct FavoritesReload: Equatable {
         let scope: ScopedRecordFavorites.Scope?
         let entries: [ScopedRecordFavorites.Entry]
+        /// Titles are read again after every answered session check: which jobs a person can open is
+        /// checked per record, so a job they lost stops showing on the next foreground.
+        let verification: UUID
     }
 
     @ViewBuilder private var emptyQuery: some View {
         let groups = emptyGroups
         // Reads the starred records' names once Search shows, as the menu used to.
         Color.clear.frame(height: 0).accessibilityHidden(true)
-            .task(id: FavoritesReload(scope: favoriteScope, entries: favorites.entries)) {
+            .task(id: FavoritesReload(scope: favoriteScope, entries: favorites.entries, verification: session.verificationRevision)) {
                 let expected = favoriteScope
                 favorites.bind(expected)
                 guard expected != nil else { return }

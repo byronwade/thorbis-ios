@@ -97,7 +97,7 @@ struct InvoiceLineEditorView: View {
         .safeAreaInset(edge: .top, spacing: 0) { editorTopBar }
         .keyboardDoneButton()
         .trackKeyboard($keyboardUp)
-        .task(id: catalogContext) { await refreshCatalog() }
+        .task(id: PriceBookCatalogLoad(context: catalogContext, verification: session.verificationRevision)) { await refreshCatalog() }
         .onChange(of: catalogContext) { previous, current in
             if !previous.preservesInvoicePickerState(comparedTo: current) {
                 addedLineSelection = nil

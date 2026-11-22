@@ -1248,7 +1248,9 @@ struct BusinessSetupView: View {
         .fullScreenCover(isPresented: $guided, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
             NavigationStack { SetupWizardView() }
         }
-        .task(id: [session.authorityRevision, api.requestGeneration]) { await model.refresh(api: api, session: session) }
+        // Read again after every answered check too, so a step finished elsewhere (Stripe, the web) or one
+        // that could not be checked offline updates when the app comes back.
+        .task(id: [session.authorityRevision, session.verificationRevision, api.requestGeneration]) { await model.refresh(api: api, session: session) }
         .task { if !presented { await profile.load(api: api) } }
     }
 

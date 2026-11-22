@@ -271,8 +271,9 @@ struct JobDetailView: View {
 
     private var liveActivityKey: String {
         guard let job else { return "" }
+        // The answered-check tick keeps today's re-sync on foreground (the 16-hour end, a card iOS ended).
         return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "",
-                session.generation.uuidString, session.authorityRevision.uuidString,
+                session.generation.uuidString, session.authorityRevision.uuidString, session.verificationRevision.uuidString,
                 String(session.can("job.view", feature: "jobs")),
                 // The card's street and access labels arrive with the job's locations.
                 street(job) ?? "", liveActivityAccess(job) ?? ""].joined(separator: "|")
@@ -456,6 +457,9 @@ struct JobDetailView: View {
                                       ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-revalidate") {
                                 try? await Task.sleep(for: .seconds(5))
                                 guard !Task.isCancelled else { return }
+                                // A renewed authority (new generation, same access) retires the opened
+                                // document; an identical answer would keep it open.
+                                PaperPreviewProtocol.reviseSampleAuthority()
                                 await session.revalidate()
                             }
                             #endif
@@ -654,7 +658,9 @@ struct JobDetailView: View {
                 }
             }
         } }
-        .task(id: customerAuthorityToken) {
+        // Re-reads after a changed authority and after every answered session check (foreground,
+        // reconnect), so a job paid or updated elsewhere shows it; only a changed authority clears.
+        .task(id: "\(customerAuthorityToken)|\(session.verificationRevision.uuidString)") {
             #if DEBUG
             if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload"),
@@ -663,7 +669,12 @@ struct JobDetailView: View {
                 guard !Task.isCancelled else { return }
             }
             #endif
-            if customerAuthorityID != customerAuthorityToken {
+            let authorityChanged = customerAuthorityID != customerAuthorityToken
+            // Customer view reads this screen's estimates and invoices. A check that changed nothing
+            // must not re-read them under the customer (that would take away Review and sign);
+            // handing back re-reads both.
+            let customerHoldsDocuments = !authorityChanged && estimateHandoffPresenter.active != nil
+            if authorityChanged {
                 customerAuthorityID = customerAuthorityToken
                 locations = []
                 locationsContext = nil
@@ -690,7 +701,9 @@ struct JobDetailView: View {
                 loadedInvoiceModelID = nil
                 paymentRoute = nil
             }
-            if let known = job {
+            if customerHoldsDocuments {
+                await load()
+            } else if let known = job {
                 // The job is already on screen from what the phone knows, so its live copy and its
                 // paper (the next step needs it) are asked for together, not one after another.
                 async let live: Void = load()
@@ -911,12 +924,13 @@ struct JobDetailView: View {
                     if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revalidate") {
                         Button(previewPaymentRevalidated ? "Preview revalidated" : "Preview revalidate") {
                             Task {
-                                let previous = session.authorityRevision
+                                // Marks a check the server answered, whether or not the authority changed.
+                                let previous = session.verificationRevision
                                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revoke") {
                                     PaperPreviewProtocol.revokePaymentPermission()
                                 }
                                 await session.revalidate()
-                                previewPaymentRevalidated = session.authorityRevision != previous
+                                previewPaymentRevalidated = session.verificationRevision != previous
                             }
                         }
                         .accessibilityIdentifier(previewPaymentRevalidated ? "preview-payment-revalidated" : "preview-payment-revalidate")
@@ -4418,7 +4432,8 @@ struct JobDetailView: View {
             }
             if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload") {
-                Button("Preview revalidate") { Task { await session.revalidate() } }
+                // A renewed authority: the cards go stale until the reload re-reads them.
+                Button("Preview revalidate") { Task { PaperPreviewProtocol.reviseSampleAuthority(); await session.revalidate() } }
                     .accessibilityIdentifier("job-overview-revalidate")
             }
             #endif

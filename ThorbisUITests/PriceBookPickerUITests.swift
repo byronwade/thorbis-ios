@@ -85,7 +85,7 @@ final class PriceBookPickerUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
-                               "--paper-preview-catalog-pages", "--paper-preview-picker-revalidation"]
+                               "--paper-preview-catalog-pages", "--paper-preview-picker-revalidation", "--paper-preview-picker-feature-change"]
         app.launch()
         let before = lineCount(app)
         openPicker(in: app, addItem: "invoice-add-item")
@@ -131,7 +131,7 @@ final class PriceBookPickerUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
-                               "--paper-preview-catalog-many", "--paper-preview-picker-revalidation"]
+                               "--paper-preview-catalog-many", "--paper-preview-picker-revalidation", "--paper-preview-picker-feature-change"]
         app.launch()
         openPicker(in: app, addItem: "invoice-add-item")
         let search = app.textFields["invoice-catalog-search"]

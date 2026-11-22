@@ -80,7 +80,7 @@ struct MediaThumbnail: View {
               organization == record.organizationId,
               let policy = session.policyVersion else { return nil }
         return MediaThumbnailScope(actorID: actor, organizationID: organization, generation: session.generation,
-                                   authorityRevision: session.authorityRevision, policyVersion: policy, jobID: record.jobId, authorizationEpoch: authorizationEpoch)
+                                   authorityRevision: session.recheckRevision, policyVersion: policy, jobID: record.jobId, authorizationEpoch: authorizationEpoch)
     }
 
     var body: some View {

@@ -50,8 +50,11 @@ private struct FeaturesPayload: Decodable {
     let features: [String: FeatureDecision]
 }
 
-/// What a revalidation compares: when any part differs from what the session holds, reads the
-/// server refused under the old authority are asked again (`APIClient.forgetRefusedReads`).
+/// What a revalidation compares. When any part (or the API origin) differs from what the session
+/// holds, `authorityRevision` changes before the new authority is published, retiring work captured
+/// under the old one, and reads the server refused under the old authority are asked again
+/// (`APIClient.forgetRefusedReads`). An identical answer changes neither; only
+/// `verificationRevision` ticks.
 struct SessionAuthority: Equatable {
     let capabilities: Set<String>
     let features: [String: FeatureDecision]
@@ -100,11 +103,29 @@ final class SessionController: ObservableObject {
                                   generation: authorityGeneration, revision: authorityRevision)
     }
 
-    /// Changes before publishing new authority, even when the server policy version is unchanged.
-    /// Visible media must reauthorize when this value changes.
+    /// Changes before new authority is published: on sign-in, restore, a workspace switch and offline
+    /// adoption, and when a revalidation finds different capabilities, features, policy version,
+    /// authority generation or API origin (even at the same policy version). An identical revalidation
+    /// keeps it, so open work survives a foreground or reconnect check. Work captured under it must
+    /// stop or reauthorize when it changes. Visible per-job records (media, files) key on
+    /// `recheckRevision`; reloads that should follow every answered check use `verificationRevision`.
     @Published private(set) var authorityRevision = UUID() {
-        didSet { ScopedRecordFavorites.shared.retireSession(generation: generation, authority: oldValue) }
+        didSet {
+            recheckRevision = UUID()
+            ScopedRecordFavorites.shared.retireSession(generation: generation, authority: oldValue)
+        }
     }
+    /// Changes with `authorityRevision` and, before new authority is published, on every revalidation
+    /// the server answers, even an identical one. Which jobs a person is assigned to is not part of the
+    /// compared authority, so surfaces that show per-job records the server authorizes one by one
+    /// (visible media and files, a customer's record lists) key on this to re-check access on every
+    /// foreground and reconnect, as they always have.
+    @Published private(set) var recheckRevision = UUID()
+    /// Ticks after every check the server answered: each successful `revalidate()` (scene active,
+    /// reconnect, offline backoff, saved-copy fallback) and each authority load. It means only "the
+    /// server confirmed this session again", never "access changed". Reload data on it (`.task(id:)`,
+    /// freshness windows); never capture it to guard or retire in-flight work: that is `authorityRevision`.
+    @Published private(set) var verificationRevision = UUID()
     private(set) var generation = UUID() {
         didSet { ScopedRecordFavorites.shared.retireSession(generation: oldValue, authority: authorityRevision) }
     }
@@ -212,8 +233,16 @@ final class SessionController: ObservableObject {
                                         policyVersion: policyVersion, generation: authorityGeneration)
             let fresh = SessionAuthority(capabilities: Set(catalog.capabilities), features: exposure.features,
                                          policyVersion: binding.policyVersion, generation: binding.generation)
-            if held != fresh { api.forgetRefusedReads() }
-            authorityRevision = UUID()
+            // An identical answer keeps the revision, so a foreground or reconnect check leaves open
+            // work (a customer's approval, an open document, a held create) as it was.
+            if held != fresh || authorityOrigin != api.normalizedOrigin {
+                api.forgetRefusedReads()
+                // Changed before the new authority is published, so work captured under the old one retires.
+                authorityRevision = UUID()
+            } else {
+                // Per-job records (media, a customer's lists) are re-checked on every answered check.
+                recheckRevision = UUID()
+            }
             capabilities = Set(catalog.capabilities)
             features = exposure.features
             sessionDeadline = sessionExpiry
@@ -226,6 +255,8 @@ final class SessionController: ObservableObject {
             expiryTask?.cancel()
             scheduleExpiry(generation: sessionGeneration, deadline: min(sessionExpiry, authorityExpiry ?? sessionExpiry))
             saveSnapshot()
+            // Last, so a subscriber sees the whole verified state it announces.
+            verificationRevision = UUID()
         } catch is CancellationError {
         } catch {
             guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
@@ -571,6 +602,7 @@ final class SessionController: ObservableObject {
             onVerifiedIdentity?(actor.id, organization.id)
             scheduleExpiry(generation: requestGeneration,
                            deadline: min(sessionExpiry, authorityExpiry ?? sessionExpiry))
+            verificationRevision = UUID()
         } catch {
             fail(error, generation: requestGeneration)
         }

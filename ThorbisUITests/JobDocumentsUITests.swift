@@ -95,7 +95,8 @@ final class JobDocumentsUITests: XCTestCase {
         }
     }
 
-    /// An invoice opened from its card on Money retires when the person's authority is revalidated.
+    /// An invoice opened from its card on Money retires when a revalidation finds changed authority
+    /// (the sample server renews its authority generation); an identical check would keep it open.
     func testMoneyInvoiceRetiresWhenAuthorityIsRevalidated() {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-overview-revalidate"])
