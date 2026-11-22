@@ -31,6 +31,8 @@ jobs:
         run: python3 scripts/ui_test_shards.py --shards 6 --check
       - name: Test the guard and the shard planner
         run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards
+      - name: Check every text colour against the grounds it sits on
+        run: python3 scripts/tests/contrast.py
 
   # One job used to build, run 1,500 unit tests and then 450 UI tests in a row. The UI tests
   # alone need more than two hours on one runner, so that job hit its time limit on every run
