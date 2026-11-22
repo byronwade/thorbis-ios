@@ -373,7 +373,7 @@ struct JobEstimateHandoffPreviewControls: View {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-retire-api") {
                 Button("Retire sample API shortly") {
                     Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(20))
+                        await Self.waitBeforeChange(seconds: 20)
                         api.invalidateRequests()
                     }
                 }
@@ -391,9 +391,24 @@ struct JobEstimateHandoffPreviewControls: View {
     private func delayed(restore: Bool = false, _ change: @escaping @MainActor () -> Void) {
         Task { @MainActor in
             let delay: Int64 = ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-slow-invalidation") ? 20 : 4
-            try? await Task.sleep(for: .seconds(delay)); change()
+            await Self.waitBeforeChange(seconds: delay); change()
             if restore { await session.restore() } else { await session.revalidate() }
         }
+    }
+    /// How long a "shortly" control waits before it changes the session or the API. With
+    /// `--paper-preview-handoff-long-description` the tests check that an open Description closes,
+    /// so it counts from the open Description (`PaperPreview.descriptionOpened`), as
+    /// CustomerJobDocumentBook does: on a slow simulator the taps to reach it cannot use up the delay.
+    @MainActor private static func waitBeforeChange(seconds: Int64) async {
+        guard ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-long-description") else {
+            try? await Task.sleep(for: .seconds(seconds))
+            return
+        }
+        while !PaperPreview.descriptionOpened {
+            try? await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled { return }
+        }
+        try? await Task.sleep(for: .seconds(10))
     }
 }
 #endif
