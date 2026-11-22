@@ -178,6 +178,67 @@ final class OfflineSessionTests: XCTestCase {
         XCTAssertNil(snapshots.snapshot)
     }
 
+    func testRemovalThenAFailedCompanyListDoesNotReopenTheOldCompany() async {
+        let failures: [(String, URLProtocolFixture.Reply)] = [
+            ("no signal", URLProtocolFixture.offline),
+            ("timeout", URLProtocolFixture.timedOut),
+            ("outage", .init(503, #"{"title":"Unavailable","status":503}"#)),
+            ("rate limit", .init(429, #"{"title":"Too many requests","status":429}"#)),
+        ]
+        for (name, failure) in failures {
+            let snapshots = MemorySessionSnapshotStore()
+            let online = make(signIn, snapshots: snapshots)
+            await online.restore()
+            XCTAssertNotNil(snapshots.snapshot, name)
+
+            let removed = make([.init(200, removedSession), failure], snapshots: snapshots)
+            await removed.restore()
+            XCTAssertNotEqual(removed.phase, .ready, "\(name): the server just said this session has no company open")
+            XCTAssertNotEqual(removed.activeOrganization?.id, org, name)
+            XCTAssertNil(snapshots.snapshot, "\(name): membership could not be confirmed, so the copy is forgotten")
+
+            let offline = make([URLProtocolFixture.offline], snapshots: snapshots)
+            await offline.restore()
+            XCTAssertNotEqual(offline.phase, .ready, "\(name): a later launch without signal must not reopen it either")
+            XCTAssertNil(offline.activeOrganization, name)
+        }
+    }
+
+    func testForegroundCheckAfterRemovalWithAWeakSignalDoesNotReopenTheOldCompany() async {
+        let snapshots = MemorySessionSnapshotStore()
+        // Foreground: get-session has no active company, so revalidate restores; the restore's own
+        // get-session answers the same, and the company list then has no signal.
+        let controller = make(signIn + [.init(200, removedSession), .init(200, removedSession), URLProtocolFixture.offline],
+                              snapshots: snapshots)
+        var identities: [String?] = []
+        controller.onVerifiedIdentity = { _, organization in identities.append(organization) }
+        await controller.restore()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertNotNil(snapshots.snapshot)
+        identities = []
+
+        await controller.revalidate()
+
+        XCTAssertNotEqual(controller.phase, .ready)
+        XCTAssertNotEqual(controller.activeOrganization?.id, org)
+        XCTAssertFalse(controller.can("job.view", feature: "jobs"))
+        XCTAssertNil(snapshots.snapshot)
+        XCTAssertFalse(identities.contains(org), "The store, saved copies and outbox are not rebound to the removed company")
+    }
+
+    func testASessionThatStillNamesTheCompanyOpensOfflineWhenTheCompanyListHasNoSignal() async {
+        let snapshots = MemorySessionSnapshotStore()
+        let online = make(signIn, snapshots: snapshots)
+        await online.restore()
+
+        let weak = make([.init(200, session), URLProtocolFixture.offline], snapshots: snapshots)
+        await weak.restore()
+        XCTAssertEqual(weak.phase, .ready, "The server still names this company: no signal is not proof of removal")
+        XCTAssertTrue(weak.isOffline)
+        XCTAssertEqual(weak.activeOrganization?.id, org)
+        XCTAssertNotNil(snapshots.snapshot)
+    }
+
     func testAnotherAccountWithNoCompanyForgetsTheOfflineSnapshot() async {
         let snapshots = MemorySessionSnapshotStore()
         let online = make(signIn, snapshots: snapshots)

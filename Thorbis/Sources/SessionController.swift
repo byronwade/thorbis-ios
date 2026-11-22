@@ -453,7 +453,20 @@ final class SessionController: ObservableObject {
             if let knownOrganizations {
                 memberships = knownOrganizations
             } else {
-                memberships = try await api.send("GET", "/api/auth/organization/list", authed: false)
+                do {
+                    memberships = try await api.send("GET", "/api/auth/organization/list", authed: false)
+                } catch {
+                    // The server has just said whose session this is and which company it has open.
+                    // When that is not the offline copy's account and company, and the list cannot be
+                    // read to show the person still belongs there, the copy is forgotten. Otherwise
+                    // `fail` below, or the next launch without signal, would reopen a company the
+                    // person was removed from (removal nulls the active company).
+                    if generation == requestGeneration, let held = snapshots.load(),
+                       held.user.id != payload.user.id || held.organization.id != payload.session.activeOrganizationId {
+                        snapshots.clear()
+                    }
+                    throw error
+                }
                 guard generation == requestGeneration else { return }
             }
             guard Set(memberships.map(\.id)).count == memberships.count,
