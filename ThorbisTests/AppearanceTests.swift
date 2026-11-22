@@ -55,7 +55,8 @@ final class AppearanceTests: XCTestCase {
         XCTAssertEqual(Theme.minimumSize, 12)
     }
 
-    // Paper's electric blue (#2F6BFF, drawn one step greener as #2F6AFF so white type holds 4.5:1).
+    // Paper's electric blue (#2F6BFF, drawn one step darker as #2F6AFF, green 6B to 6A, so white
+    // type holds 4.5:1).
     // The web keeps its own accent (#3A6AE0); neither client is repainted to the other's blue.
     func testBrandIsPaperBlue() {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0

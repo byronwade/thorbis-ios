@@ -193,8 +193,8 @@ enum Theme {
     /// mic). The commit itself is the brand pill (`.inkCommit()`).
     static let ink = foreground
     static let onInk = adaptive(light: 0xFFFFFF, dark: 0x1A1A1A, highLight: 0xFFFFFF, highDark: 0x000000)
-    /// Paper's electric blue (#2F6BFF, drawn one step greener as #2F6AFF so white type on it holds
-    /// 4.5:1): selected, focus, switches, the one live thing. Never a wash.
+    /// Paper's electric blue (#2F6BFF, drawn one step darker as #2F6AFF, green 6B to 6A, so white
+    /// type on it holds 4.5:1): selected, focus, switches, the one live thing. Never a wash.
     static let brand = Color(hex: 0x2F6AFF)
     /// Brand used as text or a link (Paper `brand-text`).
     static let brandText = adaptive(light: 0x1F55E0, dark: 0x6494FF, highLight: 0x1A44B7, highDark: 0xBDD8FF)
