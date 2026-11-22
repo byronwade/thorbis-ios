@@ -561,10 +561,6 @@ private struct CustomerInvoiceBookPage: View {
 }
 
 private func customerPaymentDate(_ raw: String) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let fractional = formatter.date(from: raw)
-    formatter.formatOptions = [.withInternetDateTime]
-    guard let date = fractional ?? formatter.date(from: raw) else { return "Date unavailable" }
+    guard let date = JobFiltering.date(raw) else { return "Date unavailable" }
     return date.stampLabel()
 }

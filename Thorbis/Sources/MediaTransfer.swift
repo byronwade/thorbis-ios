@@ -341,11 +341,7 @@ final class MediaTransfer {
     }
 
     fileprivate static func validatedExpiry(_ raw: String) throws -> Date {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let fractional = formatter.date(from: raw)
-        formatter.formatOptions = [.withInternetDateTime]
-        guard let expiry = fractional ?? formatter.date(from: raw), expiry > Date() else {
+        guard let expiry = JobFiltering.date(raw), expiry > Date() else {
             throw Problem(title: "Expired storage URL", status: nil, detail: "Request a fresh media URL.")
         }
         return expiry

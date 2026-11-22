@@ -187,11 +187,9 @@ struct ScorecardView: View {
     /// TG-14: a cached card names its own dates and when it was saved, so yesterday's
     /// Today never reads as today's.
     private func cachedLabel(_ card: Scorecard, savedAt: Date) -> String {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let day = Date.FormatStyle().weekday(.abbreviated).month(.abbreviated).day()
         var range = ""
-        if let from = iso.date(from: card.from), let to = iso.date(from: card.to) {
+        if let from = JobFiltering.date(card.from), let to = JobFiltering.date(card.to) {
             let last = to.addingTimeInterval(-1)
             range = Calendar.current.isDate(from, inSameDayAs: last)
                 ? from.formatted(day)

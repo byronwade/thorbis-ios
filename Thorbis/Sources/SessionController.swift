@@ -590,11 +590,5 @@ final class SessionController: ObservableObject {
     }
     #endif
 
-    private static func date(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
-    }
+    private static func date(_ value: String) -> Date? { JobFiltering.date(value) }
 }
