@@ -30,7 +30,8 @@ checks = {
     # No segmented control puts muted words on the chosen segment: all five draw it with
     # foreground and the others with subtle, so selectedSegment is checked for foreground only.
     "muted": grounds + ["surface", "warningSurface"],
-    "subtle": grounds + ["surface", "warningSurface"],
+    # The unchosen segments of every segmented control sit on the track.
+    "subtle": grounds + ["surface", "warningSurface", "segmentTrack"],
     "brandText": grounds[:2] + ["brandSurface"],
     "success": grounds[:2] + ["successSurface"],
     "warning": grounds[:2] + ["warningSurface"],
