@@ -1,5 +1,7 @@
 # Native financial action contracts
 
+> Snapshot, 26-28 October 2026. Not maintained. Current API gaps: [GAPS.md](../GAPS.md). Current screen coverage: [paper-screen-index.md](../design/paper-screen-index.md).
+
 Canonical route permissions and features are in `Thorbis-TanStack/services/api/src/routes/manifest.ts` (also generated into `services/api/openapi.json`). The route handlers in `services/api/src/app.ts` and domain schemas/commands cited below resolve request details omitted from OpenAPI. JSON success responses below are domain records unless stated otherwise; examples are shapes, not live data.
 
 | Action | Capability / feature | Request body | Successful response |

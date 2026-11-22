@@ -30,8 +30,8 @@ Scope:
 - Rows marked "superseded by …N" have a newer Navigation screen. Build to the N screen.
 - The Coverage artboard in the Navigation file compares Paper with the React Native app and the web, not with iOS. Its "no route yet" notes, such as call detail and bottom tabs, are not iOS evidence. Swift has the call thread (`CommsCallThreadView`) and a left drawer.
 - "API exists" means one of three things: the iOS client already calls the route, the route is in `Thorbis-TanStack/services/api/openapi.json`, or Better Auth has it built in (organization invitations, password reset and change, update user). A screen that needs no server, such as an OS permission prompt or a static page, counts as New.
-- The OpenAPI file in that checkout is older than the server iOS talks to. It has no calls, equipment or memberships, for example. So any New or Needs API row outside the known-missing list is not verified against the current server.
-- Routes known to be missing always win: pipeline and leads, marketing, workflows, banking, bills, payroll runs, vendors and purchase orders, call and message threads, customer-wide media, equipment and fleet sync, time clock, truck stock, receipts and training. Two-step sign-in is also missing, because the auth config has no `twoFactor` plugin.
+- Check API rows against `Thorbis-TanStack` main: `services/api/src/routes/manifest.ts` (the source) and `services/api/openapi.json` (generated from it). A route that exists only on an open web PR counts as Needs API and is listed in [GAPS.md](../GAPS.md).
+- Routes known to be missing always win: pipeline and leads, marketing, workflows, banking, bills, payroll runs, vendors and purchase orders, message threads, customer-wide media, fleet sync, time clock, truck stock, receipts and training. Two-step sign-in is also missing, because the auth config has no `twoFactor` plugin.
 - `Theme.swift` already carries Paper's tokens: dark `#1F1F1F`, brand `#2F6BFF`, and the light set. Screen layouts and words have not been compared with Paper one by one yet, so every existing screen is Update and none is Match.
 
 Status legend:
