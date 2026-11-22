@@ -8,8 +8,6 @@ extension PaperGlyph {
     static let placeHalfRing = PaperGlyph(box: 14, [.circle(7, 7, 6, 1.4), .fill("M7 3.2 A3.8 3.8 0 0 1 7 10.8 Z")])
     /// Paper 41's clock on a meta pill.
     static let placeClock = PaperGlyph(box: 14, [.circle(7, 7, 6, 1.4), .stroke("M7 3.8V7L9 8.5", 1.4)])
-    /// Paper 27A's caution mark on the warning strip.
-    static let placeCaution = PaperGlyph(box: 16, [.circle(8, 8, 6.2, 1.5), .stroke("M8 4.8V8.6M8 11V11.1", 1.6)])
     /// Paper 27B's spark on the suggestion card.
     static let placeSpark = PaperGlyph(box: 18, [.stroke("M9 2L10.4 6.6L15 8L10.4 9.4L9 14L7.6 9.4L3 8L7.6 6.6L9 2Z", 1.5)])
 }

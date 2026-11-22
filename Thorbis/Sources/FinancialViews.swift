@@ -1959,8 +1959,6 @@ extension DocumentSearchField where Filter == EmptyView {
 }
 
 extension PaperGlyph {
-    /// Paper 20E/20F's 18pt magnifier: a 5.5 circle and its handle, 1.6 strokes.
-    static let documentSearch = PaperGlyph.searchField
 }
 
 /// Paper 20E/20F's document row on a card: the customer and the amount in 16 Semibold, the

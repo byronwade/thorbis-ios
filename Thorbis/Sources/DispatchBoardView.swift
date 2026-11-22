@@ -645,8 +645,6 @@ extension PaperGlyph {
     /// The person inside Paper 53's dashed ring.
     static let noTechPerson = PaperGlyph(box: 20, [.circle(10, 8, 2.2, 1.3),
                                                    .stroke("M6.2 14C6.8 12.5 8.2 11.7 10 11.7C11.8 11.7 13.2 12.5 13.8 14", 1.3)])
-    /// Paper 53's toast arrow (undo).
-    static let undoArrow = PaperGlyph(box: 20, [.stroke("M7.5 5L4 8.5L7.5 12M4.5 8.5H12C14.2 8.5 16 10.3 16 12.5C16 14.7 14.2 16.5 12 16.5H9.5", 1.7)])
 }
 
 /// `DispatchBoardView`'s day, kept between redraws. Held in `@State` as a reference so reading it

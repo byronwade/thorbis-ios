@@ -243,12 +243,6 @@ enum Theme {
     static let statusInvoicedText = adaptive(light: 0x157D3C, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
     static let statusInvoicedSurface = adaptive(light: 0xDCF5E4, dark: 0x122B1C)
 
-    /// The toast: a dark capsule in both themes. In dark it sits a step above the panel so it
-    /// still reads as raised; `toastText` and `toastMuted` hold 4.5:1 on it.
-    static let toastFill = adaptive(light: 0x1A1A1A, dark: 0x333333, highLight: 0x000000, highDark: 0x3A3A3A)
-    static let toastText = adaptive(light: 0xFAF9F6, dark: 0xEDEDED, highLight: 0xFFFFFF, highDark: 0xFFFFFF)
-    static let toastMuted = adaptive(light: 0xB4B4B4, dark: 0xB4B4B4, highLight: 0xE0E0E0, highDark: 0xD4D4D4)
-
     /// Place marks (design.thorbis.com Color): olive, forest, pumpkin, burnt, and the accent mixed
     /// down. Quiet colour on chrome: the mark is outlined at rest and filled when it is the place;
     /// the word beside it stays cream or body. Dark lifts lightness so each mark holds 3:1.
@@ -274,7 +268,6 @@ enum Theme {
                            blue: CGFloat(value & 0xFF) / 255, alpha: 1)
         })
     }
-    static let mono = monoFont(12, weight: .medium)
 }
 
 extension Color {

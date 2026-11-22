@@ -14,7 +14,6 @@ extension PaperGlyph {
     static let alertClock = PaperGlyph(box: 20, [.circle(10, 10, 7, 1.6), .stroke("M10 6V10L12.5 11.5", 1.6)])
     static let alertDocument = PaperGlyph(box: 20, [.stroke("M5 3H12L15.5 6.5V17H5V3Z", 1.6),
                                                     .stroke("M12 3V6.5H15.5M7.5 10.5H12.5M7.5 13.5H12.5", 1.6)])
-    static let alertSlipping = PaperGlyph(box: 20, [.stroke("M3 6L8 11L11 8L17 14M17 14V10M17 14H13", 1.6)])
     static let alertCalendar = PaperGlyph(box: 20, [.rect(3, 4.5, 14, 12.5, rx: 2, 1.6), .stroke("M3 8.5H17M7 3V6M13 3V6", 1.6)])
     static let alertSync = PaperGlyph(box: 20, [.stroke("M4 10a6 6 0 0 1 10.2-4.2L16 7.5M16 4v3.5h-3.5M16 10a6 6 0 0 1-10.2 4.2L4 12.5M4 16v-3.5h3.5", 1.6)])
     /// Paper's 16pt row chevron.

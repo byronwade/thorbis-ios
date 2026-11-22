@@ -3,10 +3,6 @@ import SwiftUI
 /// Paper's own marks for the estimate-to-paid flow (35 Create estimate, 39 Collect payment, 40 Edit
 /// invoice), copied from the artboards' SVG data.
 extension PaperGlyph {
-    /// 35/40: the 20pt share tray in the header circle.
-    static let shareTray = PaperGlyph(box: 20, [.stroke("M10 3V12M6.5 6L10 2.5L13.5 6M4.5 10.5V15.5C4.5 16.1 4.9 16.5 5.5 16.5H14.5C15.1 16.5 15.5 16.1 15.5 15.5V10.5", 1.7)])
-    /// 35/40: three 1.6 dots in the header circle.
-    static let moreLarge = PaperGlyph(box: 20, [.circle(4.5, 10, 1.6), .circle(10, 10, 1.6), .circle(15.5, 10, 1.6)])
     /// 35: Draft, a ring with its right half filled.
     static let statusHalf = PaperGlyph(box: 14, [.circle(7, 7, 6, 1.4), .fill("M7 3.2 A3.8 3.8 0 0 1 7 10.8 Z")])
     /// 35/40: the 14pt clock in a heading pill.
@@ -33,8 +29,6 @@ extension PaperGlyph {
                                               .stroke("M10.5 12.8l-1.4 1.4a3 3 0 0 1-4.3-4.3L6.2 8.5", 1.5)])
     static let payCheck = PaperGlyph(box: 19, [.rect(2, 4.5, 15, 10, rx: 1.5, 1.5), .stroke("M5 8h5M5 11h3.2", 1.5), .circle(13.6, 9.5, 1.4, 1.3)])
     static let payCash = PaperGlyph(box: 19, [.rect(2, 5, 15, 9, rx: 1.5, 1.5), .circle(9.5, 9.5, 2, 1.4), .stroke("M4.6 7.4h.01M14.4 11.6h.01", 1.6)])
-    /// 39: the 12pt up-and-down chevrons beside a value that opens a choice.
-    static let upDown = PaperGlyph(box: 14, [.stroke("M4.2 5.6L7 2.8l2.8 2.8", 1.5), .stroke("M4.2 8.4L7 11.2l2.8-2.8", 1.5)])
     /// 38: the cart in the bar under the options.
     static let cart = PaperGlyph(box: 24, [.stroke("M3.5 5H5.5L7.5 15.5H17.5L19.5 8H6.5", 1.8), .circle(9, 19, 1.4), .circle(16.5, 19, 1.4)])
 }

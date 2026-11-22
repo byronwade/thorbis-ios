@@ -26,8 +26,6 @@ enum WidgetInk {
     /// The ground of a brand action pill (Paper brand at 16 to 24%, `Theme.brandSurface`); its
     /// label is `accent`.
     static let brandSurface = adaptive(light: 0xE3ECFF, dark: 0x182642)
-    /// The success mark (`Theme.statusDone`); `success` is the word.
-    static let successMark = adaptive(light: 0x159E48, dark: 0x22C55E)
     /// Kept for older callers: the muted line colour.
     static let muted = body
 

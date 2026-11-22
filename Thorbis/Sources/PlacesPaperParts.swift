@@ -4,8 +4,6 @@ import SwiftUI
 // stock, Training, Vendors, Pipeline, Marketing), drawn with Paper's values.
 
 extension PaperGlyph {
-    /// Paper 27 "Synced": two arrows round a circle.
-    static let placeSync = PaperGlyph(box: 12, [.stroke("M10.4 5.2A4.5 4.5 0 0 0 2.4 3.4M1.6 6.8a4.5 4.5 0 0 0 8 1.8M1.6 2.2v2.4h2.4M10.4 9.8V7.4H8", 1.3)])
     /// Paper 27 "Add missed punch": a light plus in a 14 box.
     static let placePlus = PaperGlyph(box: 14, [.stroke("M7 2.5V11.5M2.5 7H11.5", 1.5)])
     /// Paper 42: the small + beside a group's label.

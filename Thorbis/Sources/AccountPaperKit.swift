@@ -12,8 +12,6 @@ extension PaperGlyph {
     static let acctChevronLarge = PaperGlyph.chevronRight
     static let rowArrowOut = PaperGlyph(box: 14, [.stroke("M4.2 9.8L9.8 4.2M5.1 4.2h4.7v4.7", 1.5)])
     static let setBell = PaperGlyph(box: 17, [.stroke("M8.5 2a4.2 4.2 0 00-4.2 4.2c0 3.4-1.3 4.6-1.3 4.6h11s-1.3-1.2-1.3-4.6A4.2 4.2 0 008.5 2zM7.2 13.3a1.4 1.4 0 002.6 0", 1.4)])
-    static let setBubble = PaperGlyph(box: 17, [.stroke("M8.5 2.5c3.5 0 6.2 2.4 6.2 5.4 0 3-2.7 5.4-6.2 5.4-.7 0-1.3-.1-1.9-.3l-3.4 1.5.9-2.9c-1.1-1-1.8-2.3-1.8-3.7 0-3 2.7-5.4 6.2-5.4z", 1.4)])
-    static let setCalendar = PaperGlyph(box: 17, [.rect(2, 3.5, 13, 11.5, rx: 2, 1.4), .stroke("M2 7h13M5.7 1.8v3M11.3 1.8v3", 1.4)])
     static let setPencil = PaperGlyph(box: 16, [.stroke("M11.3 2.1l2.6 2.6L5.6 13H3v-2.6l8.3-8.3z", 1.4), .stroke("M9.5 4l2.5 2.5", 1.4)])
     static let setHelp = PaperGlyph(box: 17, [.circle(8.5, 8.5, 6.5, 1.4), .stroke("M6.6 6.4a2 2 0 013.9.6c0 1.3-1.9 1.6-1.9 2.7M8.5 12.2h.01", 1.4)])
     static let setSignOut = PaperGlyph(box: 16, [.stroke("M6 2H3.5A1.5 1.5 0 002 3.5v9A1.5 1.5 0 003.5 14H6M11 11l3-3-3-3M14 8H6", 1.4)])
@@ -23,7 +21,6 @@ extension PaperGlyph {
 
     // 67 Account and data, 69 Privacy and permissions.
     static let acctKey = PaperGlyph(box: 17, [.circle(5.5, 8.5, 3.2, 1.4), .stroke("M8.7 8.5h6M12 8.5v2.6M14.7 8.5v1.8", 1.4)])
-    static let acctShield = PaperGlyph(box: 17, [.stroke("M8.5 1.8l5.5 2v4c0 3.2-2.3 6-5.5 7.2C5.3 13.8 3 11 3 7.8v-4l5.5-2z", 1.4)])
     static let acctPerson = PaperGlyph(box: 17, [.circle(8.5, 8.5, 6.5, 1.4), .circle(8.5, 7, 2.1, 1.4),
                                                 .stroke("M4.6 13.4c.8-1.6 2.2-2.4 3.9-2.4s3.1.8 3.9 2.4", 1.4)])
     static let acctTrash = PaperGlyph(box: 15, [.stroke("M2.5 4h10M5.8 4V2.8h3.4V4M4 4l.6 8.2a1.2 1.2 0 001.2 1.1h3.4a1.2 1.2 0 001.2-1.1L11 4M6.3 6.5v4M8.7 6.5v4", 1.3)])
@@ -41,7 +38,6 @@ extension PaperGlyph {
     static let bizCard = PaperGlyph(box: 20, [.rect(3, 5, 14, 10, rx: 2, 1.6), .stroke("M3 8.5H17", 1.6)])
     static let bizPeople = PaperGlyph(box: 20, [.circle(8, 7.5, 2.6, 1.6), .stroke("M3 16c.6-2.8 2.6-4.2 5-4.2s4.4 1.4 5 4.2", 1.6),
                                                .stroke("M13 5.2a2.6 2.6 0 0 1 0 4.8M15 12.2c1.2.6 2 1.8 2.3 3.8", 1.6)])
-    static let bizStar = PaperGlyph(box: 20, [.stroke("M10 3.2l2.1 4.3 4.7.7-3.4 3.3.8 4.7L10 14l-4.2 2.2.8-4.7L3.2 8.2l4.7-.7z", 1.6)])
     static let bizImport = PaperGlyph(box: 20, [.stroke("M10 3.5V12M6.5 8.8L10 12.3l3.5-3.5M4 15.5h12", 1.6)])
     static let bizTarget = PaperGlyph(box: 20, [.circle(10, 10, 6.5, 1.6), .circle(10, 10, 2.5, 1.6)])
 }

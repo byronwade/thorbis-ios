@@ -27,7 +27,9 @@ grounds = ["background", "card", "fill", "field"]
 checks = {
     "foreground": grounds + ["surface", "selectedSegment", "brandSurface", "warningSurface", "successSurface", "destructiveSurface"],
     # The job's "Before you go in" banner sets its notes and caveat on the warning surface.
-    "muted": grounds + ["surface", "selectedSegment", "warningSurface"],
+    # No segmented control puts muted words on the chosen segment: all five draw it with
+    # foreground and the others with subtle, so selectedSegment is checked for foreground only.
+    "muted": grounds + ["surface", "warningSurface"],
     "subtle": grounds + ["surface", "warningSurface"],
     "brandText": grounds[:2] + ["brandSurface"],
     "success": grounds[:2] + ["successSurface"],
@@ -100,13 +102,5 @@ for mode in ["light", "dark"]:
     ok = abs(lum(tokens["field"][mode]) - lum(tokens["card"][mode])) > 0.004
     fails += not ok
     print(f"  {mode:5} field {tokens['field'][mode]} vs card {tokens['card'][mode]}{'' if ok else ' FAIL'}")
-# The dark toast capsule (ThorbisToast) and its words.
-print("== toast")
-for mode in ["light", "dark", "highLight", "highDark"]:
-    for text in ["toastText", "toastMuted"]:
-        r = ratio(tokens[text][mode], tokens["toastFill"][mode])
-        ok = r >= 4.5
-        fails += not ok
-        print(f"  {mode:9} {text:10} toastFill {r:.2f}{'' if ok else ' FAIL'}")
 print("FAILURES:", fails)
 sys.exit(1 if fails else 0)
