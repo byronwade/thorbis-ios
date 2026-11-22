@@ -5722,7 +5722,8 @@ struct JobDetailView: View {
             await loadCloseout()
         } catch is CancellationError {} catch {
             if error.isConnectivityFailure {
-                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
+                // The send may have reached the server before the connection dropped.
+                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0, attempted: true)
                 note = ""
             } else {
                 self.error = error.localizedDescription

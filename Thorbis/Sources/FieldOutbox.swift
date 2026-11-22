@@ -114,7 +114,7 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     /// What the person saw when they made it, for Review ("Confirmed: Area cleaned up").
     var label: String? = nil
     /// Set before a send that may have reached the server without an answer; the next send of
-    /// a follow-up then checks the server first, since that route cannot dedupe on its own.
+    /// a follow-up or a note then checks the server first, since those routes cannot dedupe on their own.
     var attempted: Bool? = nil
 
     /// The record whose changes land in order (OF-06): the job, or the invoice for a payment
@@ -402,6 +402,12 @@ final class FieldOutbox: ObservableObject {
             entry.restOnly = true
             entry.attempted = attempted ? true : nil
         }
+        // A note queued after an online send failed may already be on the server. Replay it through
+        // REST, which looks for it first, so it is never posted twice.
+        if case .note = action, attempted {
+            entry.restOnly = true
+            entry.attempted = true
+        }
         entries.append(entry)
         // Money and ink only count as saved once they are on disk; the caller keeps its own copy otherwise.
         if !persist(), entry.isDurableOnly {
@@ -642,18 +648,30 @@ final class FieldOutbox: ObservableObject {
 
     private enum RESTResult { case sent, refused, stop }
 
+    /// The server keeps a queued arrival estimate only when it is applied within five minutes of
+    /// when it was captured (services/api OFFLINE_ETA_FRESHNESS_MS). REST replays follow the same rule.
+    static let offlineETAFreshness: TimeInterval = 5 * 60
+
+    /// The REST request a queued job step replays as: a stale estimate is dropped and the arrival
+    /// keeps how it was recorded (on the spot, or by the geofence).
+    static func replayRequest(for payload: OutboxEntry.ProgressPayload, capturedAt: Date, now: Date = Date()) -> FieldProgressRequest {
+        switch payload.to {
+        case "en_route":
+            .enRoute(etaMinutes: abs(now.timeIntervalSince(capturedAt)) <= offlineETAFreshness ? payload.etaMinutes : nil)
+        case "arrived":
+            .arrived(method: payload.arrival.flatMap { FieldProgressRequest.ArrivalMethod(rawValue: $0.method) } ?? .manual)
+        case "in_progress": .start
+        case "dispatched": .dispatched
+        default: .scheduled
+        }
+    }
+
     private func sendREST(_ entry: OutboxEntry, api: APIClient, current: @MainActor () -> Bool) async -> RESTResult {
         guard current() else { return .stop }
         do {
             switch entry.action {
             case .progress(let payload):
-                let request: FieldProgressRequest = switch payload.to {
-                case "en_route": .enRoute(etaMinutes: payload.etaMinutes)
-                case "arrived": .arrived(method: .manual)
-                case "in_progress": .start
-                case "dispatched": .dispatched
-                default: .scheduled
-                }
+                let request = Self.replayRequest(for: payload, capturedAt: entry.createdAt)
                 _ = try await api.progressFieldJob(payload.jobId, request: request)
             case .note(let payload):
                 // A send that timed out may still have reached the server. Before sending the same

@@ -230,6 +230,38 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertEqual(box.entries, expected); XCTAssertEqual(outbox().entries, expected)
     }
 
+    private func replayBody(_ payload: OutboxEntry.ProgressPayload, age: TimeInterval) throws -> [String: Any] {
+        let now = Date()
+        let request = FieldOutbox.replayRequest(for: payload, capturedAt: now.addingTimeInterval(-age), now: now)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+    }
+
+    func testAStaleArrivalEstimateIsNotReplayed() throws {
+        let payload = OutboxEntry.ProgressPayload(jobId: jobA, to: "en_route", etaMinutes: 15)
+        XCTAssertEqual(try replayBody(payload, age: 60)["etaMinutes"] as? Int, 15)
+        // The server drops an estimate applied more than five minutes after it was captured.
+        XCTAssertNil(try replayBody(payload, age: 6 * 60)["etaMinutes"])
+        XCTAssertEqual(try replayBody(payload, age: 6 * 60)["to"] as? String, "en_route")
+    }
+
+    func testAGeofenceArrivalReplaysAsAGeofenceArrival() throws {
+        let geofence = OutboxEntry.ProgressPayload(jobId: jobA, to: "arrived", arrival: .init(method: "geofence"))
+        XCTAssertEqual((try replayBody(geofence, age: 0)["arrival"] as? [String: Any])?["method"] as? String, "geofence")
+        let manual = OutboxEntry.ProgressPayload(jobId: jobA, to: "arrived", arrival: .init(method: "manual"))
+        XCTAssertEqual((try replayBody(manual, age: 0)["arrival"] as? [String: Any])?["method"] as? String, "manual")
+    }
+
+    func testANoteQueuedAfterAFailedSendIsLookedForBeforeItIsSentAgain() async throws {
+        let box = outbox()
+        box.enqueue(.note(.init(jobId: jobA, body: "First")), policyVersion: 1, attempted: true)
+        let saved = #"{"id":"019f0000-0000-7000-8000-0000000000c1","organizationId":"\#(org)","jobId":"\#(jobA)","authorUserId":"\#(actor)","body":"First","createdAt":"\#(ISO8601DateFormatter().string(from: Date()))"}"#
+        // Even with the command endpoint on, the retry reads the job's notes, finds it, and sends nothing more.
+        await box.drain(api: api([.init(200, #"{"items":[\#(saved)]}"#)]), useCommandEndpoint: true)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET"])
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/jobs/\(jobA)/notes")
+        XCTAssertTrue(box.entries.isEmpty)
+    }
+
     func testRetriedNoteAlreadyOnServerIsNotPostedTwice() async throws {
         let box = outbox()
         box.enqueue(.note(.init(jobId: jobA, body: "First")), policyVersion: 1)
