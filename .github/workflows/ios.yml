@@ -120,30 +120,67 @@ jobs:
       - name: Unpack the build and warm the simulator
         # xcodebuild used to boot the simulator cold and install the app as the first test began.
         # Three failures landed in a shard's first two minutes that way: a first launch that timed
-        # out in Xcode, and two taps the app received and never acted on while the system was still
-        # starting services and rendering the app's widgets (BYR-1835). This step does that work
-        # before any test: boot, install the app once, then wait (at most about three minutes)
-        # until half the machine's CPU is idle. The load average is no use for this: on these
-        # three-core runners it reads near 200 for minutes after a simulator boots.
+        # out in Xcode, and two taps the app received and never acted on (BYR-1835). So this step
+        # boots the simulator and installs the app before any test.
+        #
+        # That did not end it. On run 45065336489, with the boot and install already done here,
+        # one shard's first test failed 60 s into its launch ("Timed out while acquiring background
+        # assertion") and the first launch took 11 to 21 s on the other shards, against a usual 2
+        # to 4 s. So this step also launches the app and stops it, over and over, until a launch
+        # returns within 8 s and three minutes have passed since boot, for at most about 240 s.
+        # Three minutes is what the one all-green run (45056462837) had before its first test; a
+        # quick launch alone does not predict the next one. `simctl launch` stands in for the
+        # test's launch; it is not known to take the assertion XCTest timed out on.
+        #
+        # Two waits tried here before gave no signal. On all six shards of run 45065336489 the
+        # load average read 160 to 680 when the step ended, and the wait for half the CPU to be
+        # idle ran all 30 polls, its last sample 0%. This step waits on neither; it prints each
+        # launch and the busiest processes, so the next slow start can be read from the log.
         run: |
           mkdir -p "${{ runner.temp }}/ThorbisBuild"
           tar -C "${{ runner.temp }}/ThorbisBuild" -xf "${{ runner.temp }}/ThorbisTestBuild.tar"
           simulator_id=$(scripts/ci-simulator-id.sh)
           xcrun simctl bootstatus "$simulator_id" -b
+          booted=$SECONDS
           app=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 2 -name 'Thorbis.app' | head -n 1)
-          if [[ -n "$app" ]]; then
-            xcrun simctl install "$simulator_id" "$app" || echo "::warning::The app could not be installed ahead of the tests"
-          else
+          if [[ -z "$app" ]]; then
             echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
+            exit 0
           fi
-          idle=0
-          for _ in $(seq 1 30); do
-            # The second sample is the current one; the first covers the time since boot.
-            idle=$({ top -l 2 -n 0 2>/dev/null || true; } | awk '/CPU usage/ { value = $7 } END { sub("%", "", value); print value + 0 }')
-            if awk -v idle="$idle" 'BEGIN { exit !(idle >= 50) }'; then break; fi
-            sleep 4
+          if ! xcrun simctl install "$simulator_id" "$app"; then
+            echo "::warning::The app could not be installed ahead of the tests"
+            exit 0
+          fi
+          # Nothing else bounds a simctl call that hangs, so each one runs under its own alarm.
+          bounded() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+          launch_log="${{ runner.temp }}/warm-launch.log"
+          ready=no
+          begun=$SECONDS
+          attempt=0
+          while (( SECONDS - begun < 240 )); do
+            # A launch reported as failed can still leave a copy running, and launching a running
+            # copy only brings it forward. End it first, so every attempt is a real start.
+            if bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1; then sleep 3; fi
+            attempt=$((attempt + 1))
+            started=$SECONDS
+            # The design preview: sample data, read only, no network. The UI tests launch it the same way.
+            if bounded 90 xcrun simctl launch "$simulator_id" com.thorbis.field --paper-preview >"$launch_log" 2>&1; then
+              took=$((SECONDS - started))
+              echo "Warm launch $attempt took ${took}s, $((SECONDS - booted))s after boot ($(tr '\n' ' ' <"$launch_log"))"
+              # Left running for ten seconds before it is stopped.
+              sleep 10
+              bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+              if (( took <= 8 && SECONDS - booted >= 180 )); then ready=yes; break; fi
+            else
+              echo "Warm launch $attempt did not start after $((SECONDS - started))s: $(tr '\n' ' ' <"$launch_log")"
+            fi
+            ps -Ao pcpu,comm -r | head -n 6 || true
+            sleep 3
           done
-          echo "CPU idle before the first test: ${idle}% (load $(sysctl -n vm.loadavg))"
+          bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+          echo "Ready for a quick launch: $ready after $((SECONDS - begun))s (load $(sysctl -n vm.loadavg))"
+          echo "Busiest processes:"
+          ps -Ao pcpu,comm -r | head -n 6 || true
       - name: Run this shard's UI tests
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
