@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Archive Thorbis and upload it to App Store Connect for TestFlight, the way
-# builds 1-16 were uploaded (docs/release/build-1.md).
+# Archive Thorbis and upload it to App Store Connect for TestFlight. Record each
+# upload in docs/release/build-<n>.md.
 #
 # Run on a Mac with Xcode signed in to the Apple account for team T677262U5B.
 # BUILD_NUMBER is the next whole number after the latest build in App Store
 # Connect; builds are sequential.
 #
-#   BUILD_NUMBER=17 scripts/testflight.sh             # test, archive, upload
-#   BUILD_NUMBER=17 scripts/testflight.sh --no-upload # test, archive, export .ipa only
+#   BUILD_NUMBER=<n> scripts/testflight.sh             # test, archive, upload
+#   BUILD_NUMBER=<n> scripts/testflight.sh --no-upload # test, archive, export .ipa only
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

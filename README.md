@@ -30,8 +30,8 @@ On a Mac signed in to Xcode with team T677262U5B, pick the next build number aft
 in App Store Connect and run:
 
 ```sh
-BUILD_NUMBER=17 scripts/testflight.sh             # test, archive, upload
-BUILD_NUMBER=17 scripts/testflight.sh --no-upload # stop after exporting the .ipa
+BUILD_NUMBER=<n> scripts/testflight.sh             # test, archive, upload
+BUILD_NUMBER=<n> scripts/testflight.sh --no-upload # stop after exporting the .ipa
 ```
 
 Record each upload in `docs/release/build-<n>.md`.
