@@ -93,8 +93,9 @@ for mode in ["light", "dark"]:
             fails += not ok
             row.append(f"{g} {r:.2f}{'' if ok else ' FAIL'}")
         print(f"  {mode:5} {n:12} " + " | ".join(row))
-# White type on a fill: the blue commit and pills (brand), a destructive commit or badge.
-for fill in ["brand", "destructiveFill"]:
+# White type on a fill: the blue commit and pills (brand), a destructive commit or badge, and a
+# photo's After pill (successFill).
+for fill in ["brand", "destructiveFill", "successFill"]:
     print(f"== white on {fill}")
     for mode in ["light", "dark"]:
         r = ratio("FFFFFF", tokens[fill][mode])

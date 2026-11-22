@@ -209,6 +209,9 @@ enum Theme {
     static let destructive = adaptive(light: 0xC81E1E, dark: 0xF46A6A, highLight: 0xA10015, highDark: 0xFFB1AC)
     /// Red as a fill under white type or a white glyph (a badge, a destructive commit): 4.5:1 or better.
     static let destructiveFill = adaptive(light: 0xDC2626, dark: 0xC81E1E)
+    /// Green as a fill under white type (a photo's After pill): 4.5:1 or better. One tone in both
+    /// themes, because the pill sits on the picture, not the page.
+    static let successFill = adaptive(light: 0x157D3C, dark: 0x157D3C)
     /// The chosen segment's raised pill. In dark it sits lighter than the panel so the choice shows.
     /// Paper: ink at 16% over the card track (#434343 dark, #DADADA light), with a short shadow.
     /// Segmented tabs (Today | Week | Map): a quiet track with the chosen segment raised on it,
