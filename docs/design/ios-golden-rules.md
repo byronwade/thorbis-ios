@@ -49,16 +49,17 @@ The port plan is [paper-v2-port-plan.md](paper-v2-port-plan.md).
 
 ## Design direction (v2, 31 October 2026)
 
-**Linear grammar on design.thorbis.com tokens; the drawer is an owner-approved
-exception.** The owner asked for "linear.app mobile app and design.thorbis.com".
+**Linear grammar on design.thorbis.com tokens.** The owner asked for "linear.app mobile app and design.thorbis.com".
 Linear's mobile app sets the layout grammar (quiet titles, circles, text tabs,
 grouped sections by space, property chips, a composer, anchored popovers).
 design.thorbis.com (`docs` copy: the site's text) is the law for tokens, depth,
 controls, forms, words, places and states. "Linear grammar. Not Linear dress":
 no Linear purple, no issue row, no status rings as decoration. The site says
-"iOS is a tab bar and a stack"; the owner overrides that one rule for this app
-and keeps the side drawer (rule 6). Everything below that predates v2 yields to
-these points where they disagree:
+"iOS is a tab bar and a stack". From 31 October to 18 November 2026 the owner
+overrode that one rule with a side drawer; since 18 November the iPhone defaults
+to Paper 18A's bottom bar again, with the drawer behind More and as a Settings
+choice (rule 6). Everything below that predates v2 yields to these points where
+they disagree:
 
 - **Tokens** (`Theme.swift`): dark is the first drawing — canvas oklch 14.5%,
   panel 20.5%, cream type, a cool grey body, a dimmer marker. Light is the warm
@@ -135,10 +136,20 @@ source evidence; verify platform/API/version claims before relying on them.
    Jobs/Today is the field-work home direction; Current/Arrive, Inbox and Search
    are meaningful destinations. Preserve existing routes while deliberately
    aligning navigation; the sample tab diagram is not a completed migration.
-   *Redesign, 31 October 2026 (drawer, simplified after build 125):* the iPhone
-   navigates with a side drawer in the style of the Claude and ChatGPT iOS apps;
-   the floating tab bar and the More screen are gone. Roots lead their header with
-   a round menu circle at top left (their own circles — filter, + — stay right).
+   *Current (Paper 18A, shipped 18 November 2026):* iPhone defaults to the Paper
+   18A bottom bar (`PhoneTabBar`): a Search circle, a pill of four icon-only places
+   for the role (technician and office: Schedule, Jobs, Customers, Inbox; owner:
+   Home, Schedule, Jobs, Money), then More, which opens the drawer, and the
+   account circle. Settings › Menu and start screen › Navigation offers the side
+   drawer alone; iPad keeps its sidebar. Roots keep `DrawerMenuCircle` only in
+   sidebar mode. DEBUG previews and UI tests run the drawer unless launched with
+   `--paper-preview-nav bottom` (`TabBarUITests` covers the bar). The drawer
+   described below is the one More and the sidebar choice open.
+   *Redesign, 31 October 2026 (drawer, simplified after build 125; superseded as
+   the default on 18 November):* the iPhone navigated with a side drawer in the
+   style of the Claude and ChatGPT iOS apps; the floating tab bar and the More
+   screen went. In sidebar mode, roots lead their header with a round menu circle
+   at top left (their own circles — filter, + — stay right).
    *Cream sheet, 1 November 2026 (C-Job, build 140):* pushed screens (job,
    customer, estimate, invoice, …) show the round Back circle alone at top left, with
    no menu circle beside it; the drawer opens from the place's root. An edge swipe
@@ -148,8 +159,8 @@ source evidence; verify platform/API/version claims before relying on them.
    the person comes back. The drawer is about 80% of the screen and pushes the
    place right as a slightly dimmed card with the device's corner radius, a soft
    shadow and a hairline edge in dark mode, on a gentle spring (Reduce Motion
-   fades). *v2:* the drawer is an owner-approved exception to "iOS is a tab bar
-   and a stack"; it wears the v2 tokens — the panel tone, a modest 17pt Medium
+   fades). *v2:* the drawer was an owner-approved exception to "iOS is a tab bar
+   and a stack" until the bottom bar returned as the default; it wears the v2 tokens — the panel tone, a modest 17pt Medium
    business name, Medium place words in body grey that lift to cream for the
    place showing, and place marks in soft hues, outlined at rest and filled for
    the place showing (no wash on the row). Keep it calm — it lists only: the business name (one

@@ -4,7 +4,7 @@ One custom control system, Linear-mobile style.
 
 ## v2 rules (31 October 2026) — Linear grammar on design.thorbis.com tokens
 
-**Linear grammar on design.thorbis.com tokens; the drawer is an owner-approved exception.**
+**Linear grammar on design.thorbis.com tokens; iPhone navigates with the Paper 18A bottom bar.**
 Linear's mobile app sets the layout grammar; design.thorbis.com is the law for tokens, depth,
 controls, forms, words, places and states ("Linear grammar. Not Linear dress"). The full rules are
 at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
@@ -56,9 +56,12 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
 - **In-between states (phase 4, still current):** empty states name the one action
   (`PaperEmptyState`), loading is `SkeletonList` / `SkeletonRows`, banners are calm strips,
   toasts are `ThorbisToast` and only confirm what the screen already shows.
-- **Navigation (phone):** a side drawer (`AppDrawer`, `../DrawerNavigation.swift`) after the Claude
-  and ChatGPT iOS apps, opened from each place's root screen. Roots show `DrawerMenuCircle` top
-  left — `PaperHeader` draws it when the shell sets `\.paperDrawer` (roots only); roots without a
+- **Navigation (phone):** iPhone defaults to the Paper 18A bottom bar (`PhoneTabBar`,
+  `../PhoneTabBar.swift`, since 18 November 2026): a Search circle, a pill of four icon-only places
+  for the role (`PhoneTabs`), then More, which opens the drawer, and the account circle. Settings ›
+  Menu and start screen › Navigation offers the side drawer alone (`AppDrawer`,
+  `../DrawerNavigation.swift`, after the Claude and ChatGPT iOS apps); iPad keeps its sidebar.
+  Roots keep `DrawerMenuCircle` top left only in sidebar mode — `PaperHeader` draws it when the shell sets `\.paperDrawer` (roots only); roots without a
   Paper header or with a visible bar get it in the bar (`DrawerCircleInBar`). Pushed screens keep
   `ThorbisBackButton` alone (`.thorbisBackButton()` / `thorbisDestination`), as C-Job shows. Edge swipe opens the drawer on roots; on pushed screens it is Back.
   Which places it lists comes from `DrawerSections.make` (`../CreamSheet.swift`): exactly Paper's
@@ -77,8 +80,9 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   The iPad sidebar uses the same `PlacesList` (On this iPad). New also stays in the root header's
   blue + (`PaperHeader(showsCreate: true)`). UI tests:
   `drawer-menu`, then `drawer-<id>` rows (`openDrawer()` / `openFromDrawer(_:)`, which scrolls to
-  low rows, and `openSavedWorkFromDrawer()` in `ThorbisUITests`). iPad keeps its
-  sidebar. **No stock SwiftUI controls** in app screens:
+  low rows, and `openSavedWorkFromDrawer()` in `ThorbisUITests`). DEBUG previews and UI tests run
+  the drawer unless launched with `--paper-preview-nav bottom`; `TabBarUITests` covers the bar.
+  **No stock SwiftUI controls** in app screens:
 no `Menu {}`, `Picker`, `confirmationDialog`, `.buttonStyle(.bordered*)`, or `.borderedProminent`.
 Everything is built from `Theme` tokens (see `../Theme.swift`) so it looks the same everywhere,
 in light and dark, and scales with Dynamic Type.
