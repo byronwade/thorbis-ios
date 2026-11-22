@@ -64,7 +64,7 @@ extension APIClient {
     func noticeDeliveries(after cursor: String? = nil) async throws -> NoticeDeliveryPage {
         let limit = [URLQueryItem(name: "limit", value: "50")]
         guard let cursor else { return try await send("GET", "/v1/notice-deliveries", queryItems: limit) }
-        guard let safe = cursor.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_.~"))) else {
+        guard let safe = try? Self.pathSegment(cursor) else {
             throw Problem(title: "Invalid page", status: nil, detail: "The next page could not be requested.")
         }
         return try await send("GET", "/v1/notice-deliveries/continue/\(safe)", queryItems: limit)

@@ -63,7 +63,7 @@ extension APIClient {
             let idempotencyKey: String
             let reason: String
         }
-        let encodedID = member.member.memberId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? member.member.memberId
+        let encodedID = try Self.pathSegment(member.member.memberId)
         let _: EmptyResponse = try await send("POST", "/v1/organization/role-members/\(encodedID)/role",
                                               body: Body(desiredRoleId: role.role.id, expectedVersion: member.authority.currentAssignmentVersion ?? 0,
                                                          expectedRoleRevision: role.role.currentRevision, idempotencyKey: idempotencyKey,

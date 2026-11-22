@@ -62,9 +62,7 @@ extension APIClient {
     }
 
     func cancelInvitation(_ id: String) async throws -> TeamInvitation {
-        guard let safe = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_"))) else {
-            throw Problem(title: "Invalid invitation ID", status: nil, detail: id)
-        }
+        let safe = try Self.pathSegment(id, invalid: "Invalid invitation ID")
         return try await send("POST", "/v1/organization/invitations/\(safe)/cancel")
     }
 }

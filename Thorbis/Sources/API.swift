@@ -185,9 +185,6 @@ extension Problem {
     }
 }
 
-struct MeAccount: Codable { let id: String; let name: String?; let email: String? }
-struct Me: Codable { let account: MeAccount }
-struct MeEnvelope: Codable { let me: Me? }
 
 /// Thin client over the canonical Thorbis API (services/api, OpenAPI 3.1, RFC 9457 errors).
 @MainActor
@@ -357,24 +354,28 @@ final class APIClient: ObservableObject {
     }
 
     func jobs() async throws -> [Job] { try await allPages("/v1/jobs") }
-    func job(_ id: String) async throws -> Job { try await send("GET", "/v1/jobs/\(id)") }
-    func customers() async throws -> [Customer] { try await allPages("/v1/customers") }
-    func customer(_ id: String) async throws -> Customer { try await send("GET", "/v1/customers/\(id)") }
-    func progress(_ id: String, to: String) async throws {
-        struct Arrival: Encodable { let method: String }
-        struct Body: Encodable { let to: String; let arrival: Arrival? }
-        let _: EmptyResponse = try await send("POST", "/v1/jobs/\(id)/progress",
-                                              body: Body(to: to, arrival: to == "arrived" ? Arrival(method: "manual") : nil))
+    func job(_ id: String) async throws -> Job {
+        guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: id) }
+        return try await send("GET", "/v1/jobs/\(id)")
     }
+
+    /// One path segment taken from a record id, cursor or type. It is refused unless every
+    /// character is unreserved (letters, digits, `-._~`) and it is not `.` or `..`, so it can
+    /// never add a segment or climb one. It is returned unchanged: URLComponents encodes the
+    /// path, and encoding here as well would send `%25` for every `%`.
+    nonisolated static func pathSegment(_ raw: String, invalid title: String = "Invalid record ID") throws -> String {
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard !raw.isEmpty, raw != ".", raw != "..",
+              raw.unicodeScalars.allSatisfy({ unreserved.contains($0) })
+        else { throw Problem(title: title, status: nil, detail: raw) }
+        return raw
+    }
+    func customers() async throws -> [Customer] { try await allPages("/v1/customers") }
     func createCustomer(name: String) async throws -> Customer {
         try await createCustomer(NewCustomerRequest(name: name))
     }
     func createCustomer(_ request: NewCustomerRequest) async throws -> Customer {
         try await send("POST", "/v1/customers", body: request)
-    }
-    func createJob(customerId: String, title: String) async throws -> Job {
-        struct Body: Encodable { let customerId: String; let title: String }
-        return try await send("POST", "/v1/jobs", body: Body(customerId: customerId, title: title))
     }
 
     struct EmptyResponse: Decodable { init(from decoder: Decoder) throws {} }

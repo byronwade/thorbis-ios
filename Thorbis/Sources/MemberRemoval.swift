@@ -11,7 +11,7 @@ struct MemberRemoval: Decodable, Equatable {
 extension APIClient {
     func removeMember(_ member: RoleMember, reason: String) async throws -> MemberRemoval {
         struct Body: Encodable { let reason: String }
-        let encodedID = member.member.memberId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? member.member.memberId
+        let encodedID = try Self.pathSegment(member.member.memberId)
         return try await send("POST", "/v1/organization/role-members/\(encodedID)/remove", body: Body(reason: reason))
     }
 }

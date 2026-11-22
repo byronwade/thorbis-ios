@@ -16,8 +16,9 @@ extension APIClient {
     /// One page of a record's activity, newest first; `nextCursor` loads earlier entries.
     func recordActivity(_ type: String, id: String, cursor: String? = nil) async throws -> (items: [RecordActivityItem], nextCursor: String?) {
         struct Page: Decodable { let items: [RecordActivityItem]; let nextCursor: String? }
-        let key = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-        let page: Page = try await send("GET", "/v1/activity/\(type)/\(key)",
+        let kind = try Self.pathSegment(type)
+        let key = try Self.pathSegment(id)
+        let page: Page = try await send("GET", "/v1/activity/\(kind)/\(key)",
                                         queryItems: [URLQueryItem(name: "limit", value: "50")], cursor: cursor)
         return (page.items, page.nextCursor)
     }
