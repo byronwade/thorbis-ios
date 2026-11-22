@@ -1098,7 +1098,8 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [firstApproved], timeout: 20), .completed)
         // The second estimate's checks are now waiting on a slow read: the technician takes the device back.
         ownerExit(app).tap(); waitForStaffDoor(app)
-        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Let the slow read land")], timeout: 10)
+        // The fixture holds that read 20 s after the first approval; wait long enough for it to land.
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Let the slow read land")], timeout: 20)
         thorbisShowCustomerDoor(app).tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         let proof = try receipt(app)

@@ -176,13 +176,13 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; value.append(buffer, count: count) }
         return value
     }
-    /// `--paper-preview-handoff-slow-after-first-approval`: once one approval is recorded, the next read waits 8 s
-    /// (time to leave the screen mid-run).
+    /// `--paper-preview-handoff-slow-after-first-approval`: once one approval is recorded, the next read waits 20 s
+    /// (time to leave the screen mid-run, even on a slow simulator).
     func response(_ request: URLRequest) -> Response? {
         guard var value = answer(request) else { return nil }
         lock.withLock {
             if flags.contains("--paper-preview-handoff-slow-after-first-approval"), !slowed, !approved.isEmpty,
-               request.httpMethod ?? "GET" == "GET", request.url?.path == "/v1/jobs/\(PaperPreview.jobID)" { slowed = true; value.delay = 8 }
+               request.httpMethod ?? "GET" == "GET", request.url?.path == "/v1/jobs/\(PaperPreview.jobID)" { slowed = true; value.delay = 20 }
             // `--paper-preview-handoff-slow-first-approval-post`: the first approval is recorded, its answer waits 8 s.
             if flags.contains("--paper-preview-handoff-slow-first-approval-post"), !slowedPost, request.httpMethod == "POST",
                request.url?.path.hasSuffix("/approve") == true { slowedPost = true; value.delay = 8 }
