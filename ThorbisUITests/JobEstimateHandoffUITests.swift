@@ -914,9 +914,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
     func testLongReviewDescriptionRemainsReadableAtLargestText() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls",
                         "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
+        // Largest text, two windows: one existence check took 9 s on CI, as for the other
+        // largest-text tests here.
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); selectEstimate(app, first)
         thorbisStableButton(app, "handoff-review-selected").tap()
         XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
         let more = app.buttons["Show more, Estimate 1, EST-8101, item 1"]
