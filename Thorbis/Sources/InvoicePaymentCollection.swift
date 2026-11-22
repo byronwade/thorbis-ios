@@ -557,7 +557,7 @@ struct InvoicePaymentsSection: View {
     private func paymentRow(_ payment: FieldPaymentRecord) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(FieldPaymentMethod(rawValue: payment.method)?.displayName ?? payment.method.capitalized)
+                Text(FieldPaymentMethod(rawValue: payment.method)?.displayName ?? payment.method.statusLabel)
                     .font(Theme.font(16, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 Text(paymentDate(payment.recordedAt))
@@ -783,7 +783,7 @@ private struct InvoicePaymentDetailSheet: View {
     }
 
     private var methodName: String {
-        FieldPaymentMethod(rawValue: refundModel.payment.method)?.displayName ?? refundModel.payment.method.capitalized
+        FieldPaymentMethod(rawValue: refundModel.payment.method)?.displayName ?? refundModel.payment.method.statusLabel
     }
 
     /// "INV-2192 · Nov 3, 2026, 4:18 p.m.": the invoice when this screen was told it, and when.
@@ -997,7 +997,7 @@ private struct InvoicePaymentRefundForm: View {
 
     /// "INV-8790 · Card · paid $210.00": Paper 39I's line under the title.
     private var paidLine: String {
-        let method = FieldPaymentMethod(rawValue: model.payment.method)?.displayName ?? model.payment.method.capitalized
+        let method = FieldPaymentMethod(rawValue: model.payment.method)?.displayName ?? model.payment.method.statusLabel
         let paid = "\(method) \u{00B7} paid \(amountText)"
         guard let invoiceReference else { return paid }
         return "\(invoiceReference) \u{00B7} \(paid)"

@@ -16,7 +16,7 @@ final class DocumentStatusTests: XCTestCase {
     func testInvoiceStatusesReadFromTheRecordOnly() {
         XCTAssertEqual(DocumentStatus(invoice: invoice("draft")), DocumentStatus(tone: .unscheduled, word: "Draft"))
         XCTAssertEqual(DocumentStatus(invoice: invoice("issued")), DocumentStatus(tone: .scheduled, word: "Unpaid"))
-        XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 10_000)), DocumentStatus(tone: .inProgress, word: "Part paid"))
+        XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 10_000)), DocumentStatus(tone: .inProgress, word: "Partly paid"))
         XCTAssertEqual(DocumentStatus(invoice: invoice("paid", paid: 48_000)), DocumentStatus(tone: .invoiced, word: "Paid"))
         XCTAssertEqual(DocumentStatus(invoice: invoice("void")), DocumentStatus(tone: .cancelled, word: "Void"))
         // Overdue only when the server says so: the record has no due date to work it out from.

@@ -530,7 +530,7 @@ private struct CustomerInvoiceBookPage: View {
             ForEach(model.payments.sorted { $0.recordedAt > $1.recordedAt }) { payment in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(payment.method == "ach" ? "Bank transfer" : FieldPaymentMethod(rawValue: payment.method)?.displayName ?? "Payment")
+                        Text(FieldPaymentMethod(rawValue: payment.method)?.displayName ?? (payment.method.isEmpty ? "Payment" : payment.method.statusLabel))
                         Spacer(minLength: 8)
                         Text(money(payment.amount.amount, currency: payment.amount.currency)).font(Theme.customerFont(type.body)).monospacedDigit()
                     }

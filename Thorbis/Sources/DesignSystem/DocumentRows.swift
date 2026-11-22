@@ -40,11 +40,11 @@ struct DocumentStatus: Equatable {
                 // Paid in full, waiting for the server to mark it paid.
                 self.init(tone: .invoiced, word: "Paid")
             } else if amountPaid > 0 {
-                self.init(tone: .inProgress, word: "Part paid")
+                self.init(tone: .inProgress, word: "Partly paid")
             } else {
                 self.init(tone: .scheduled, word: "Unpaid")
             }
-        case "partial", "partially_paid": self.init(tone: .inProgress, word: "Part paid")
+        case "partial", "partially_paid": self.init(tone: .inProgress, word: "Partly paid")
         case "paid": self.init(tone: .invoiced, word: "Paid")
         case "overdue": self.init(tone: .attention, word: "Overdue")
         case "void", "voided": self.init(tone: .cancelled, word: "Void")

@@ -17,11 +17,21 @@ struct CompanyPayment: Identifiable, Hashable {
     static func collected(_ payments: [CompanyPayment]) -> Int { payments.reduce(0) { $0 + $1.net } }
     var isCard: Bool { method.contains("card") || method.contains("tap") }
     var isCash: Bool { method == "cash" }
+    /// The method as the shared money word table names it (contracts/design/money-and-flow.md in
+    /// the web repo): "Card", "Bank transfer (ACH)", never a raw value.
     var methodLabel: String {
         switch method {
         case "tap_to_pay": "Tap to Pay"
         case "": "Payment"
-        default: method.replacingOccurrences(of: "_", with: " ").capitalized
+        default: FieldPaymentMethod(rawValue: method)?.displayName ?? method.statusLabel
+        }
+    }
+    /// The method inside a sentence: "card", "bank transfer (ACH)", "Tap to Pay".
+    var methodPhrase: String {
+        switch method {
+        case "tap_to_pay": "Tap to Pay"
+        case "ach": "bank transfer (ACH)"
+        default: methodLabel.lowercased()
         }
     }
 }
@@ -390,7 +400,7 @@ struct CompanyPaymentsView: View {
         // Paper 54A: "INV-8819 · Refund to Visa ending 7302". The record carries the method, not
         // the card or who took it, so a full refund reads "Refund to card".
         if wentBack(payment) {
-            let to = payment.method.isEmpty ? "Refund" : "Refund to \(payment.methodLabel.lowercased())"
+            let to = payment.method.isEmpty ? "Refund" : "Refund to \(payment.methodPhrase)"
             return [reference(payment), to].compactMap { $0 }.joined(separator: " \u{00B7} ")
         }
         let refund: String? = payment.refunded
