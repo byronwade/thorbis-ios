@@ -24,6 +24,10 @@ final class JobMediaQueueUITests: XCTestCase {
         let rows = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", title, "photo-filter-menu"))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), file: file, line: line)
         (rows.allElementsBoundByIndex.last ?? rows.firstMatch).tap()
+        // The menu runs a row's action once its popover has gone, a moment after the tap. Return
+        // once the Show control reads the choice, so the caller reads the filtered page, not the
+        // page as it was while the popover closed.
+        assertShown(title, in: app, file: file, line: line)
     }
 
     /// The Show control reads the chosen stage ("Show, Before").
