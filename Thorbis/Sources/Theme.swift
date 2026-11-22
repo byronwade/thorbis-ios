@@ -143,9 +143,10 @@ enum Theme {
     // a chip or a circle (Paper `muted`); `field` is the sunk well under a text field (Paper
     // `surface`, a step below the card); `sidebar` is the drawer and the iPad sidebar. Text holds
     // 4.5:1 and marks 3:1 in both themes and in Increase Contrast (`scripts/tests/contrast.py`).
-    // Seven Paper values sat just under that floor and are one shade off Paper (1-4%, not visible):
+    // Eight Paper values sat just under that floor and are one shade off Paper (1-4%, not visible):
     // light muted 6B6B6B→686868, AI 7C5BC2→7757BA, success text 15803D→157D3C, warning text B45309→B15209, the
-    // in-progress mark D97706→D07206 and the done mark 16A34A→159E48; dark brand text 5285FF→5587FF.
+    // in-progress mark D97706→D07206 and the done mark 16A34A→159E48; dark brand text 5285FF→5587FF;
+    // and brand 2F6BFF→2F6AFF, so the white words on every blue commit and pill hold 4.5:1.
     static let card = adaptive(light: 0xFFFFFF, dark: 0x232323)
     /// The panel grouped rows sit on (radius 14). Same as `card`, named for what it is.
     static let well = card
@@ -189,8 +190,9 @@ enum Theme {
     /// MA-08: a commit is ink (the type colour) with inverse type, a 1px rim and a short bevel.
     static let ink = foreground
     static let onInk = adaptive(light: 0xFFFFFF, dark: 0x1A1A1A, highLight: 0xFFFFFF, highDark: 0x000000)
-    /// Paper's electric blue #2F6BFF: selected, focus, switches, the one live thing. Never a wash.
-    static let brand = Color(hex: 0x2F6BFF)
+    /// Paper's electric blue (#2F6BFF, drawn one step greener as #2F6AFF so white type on it holds
+    /// 4.5:1): selected, focus, switches, the one live thing. Never a wash.
+    static let brand = Color(hex: 0x2F6AFF)
     /// Brand used as text or a link (Paper `brand-text`).
     static let brandText = adaptive(light: 0x1F55E0, dark: 0x5587FF, highLight: 0x1A44B7, highDark: 0xBDD8FF)
     static let brandSurface = adaptive(light: 0xE3ECFF, dark: 0x182642)

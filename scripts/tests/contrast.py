@@ -11,6 +11,9 @@ tokens = {}
 for m in re.finditer(r"static let (\w+) = adaptive\(light: 0x(\w+), dark: 0x(\w+)(?:, highLight: 0x(\w+), highDark: 0x(\w+))?\)", src):
     name, l, d, hl, hd = m.groups()
     tokens[name] = {"light": l, "dark": d, "highLight": hl or l, "highDark": hd or d}
+# Brand is one fixed hex in both themes (`Color(hex:)`, not `adaptive`).
+brand = re.search(r"static let brand = Color\(hex: 0x(\w+)\)", src).group(1)
+tokens["brand"] = {m: brand for m in ["light", "dark", "highLight", "highDark"]}
 for m in re.finditer(r"static let (\w+) = (\w+)\n", src):
     if m.group(2) in tokens: tokens[m.group(1)] = tokens[m.group(2)]
 
@@ -57,7 +60,6 @@ for mode in ["light", "dark", "highLight", "highDark"]:
         print(f"  {text:22} " + " | ".join(row))
 # Non-text (WCAG 1.4.11): each status glyph hue against the grounds it is drawn on: the screen,
 # the well, and its own chip surface (unscheduled and cancelled chips sit on `fill`). 3:1, counted.
-tokens["statusDispatched"] = {m: "2F6BFF" for m in ["light", "dark", "highLight", "highDark"]}  # = brand, Color(hex:)
 glyphs = {
     "statusUnscheduled": "fill",
     "statusScheduled": "statusScheduledSurface",
@@ -89,13 +91,14 @@ for mode in ["light", "dark"]:
             fails += not ok
             row.append(f"{g} {r:.2f}{'' if ok else ' FAIL'}")
         print(f"  {mode:5} {n:12} " + " | ".join(row))
-# White type on a destructive commit or badge.
-print("== white on destructiveFill")
-for mode in ["light", "dark"]:
-    r = ratio("FFFFFF", tokens["destructiveFill"][mode])
-    ok = r >= 4.5
-    fails += not ok
-    print(f"  {mode:5} {r:.2f}{'' if ok else ' FAIL'}")
+# White type on a fill: the blue commit and pills (brand), a destructive commit or badge.
+for fill in ["brand", "destructiveFill"]:
+    print(f"== white on {fill}")
+    for mode in ["light", "dark"]:
+        r = ratio("FFFFFF", tokens[fill][mode])
+        ok = r >= 4.5
+        fails += not ok
+        print(f"  {mode:5} {r:.2f}{'' if ok else ' FAIL'}")
 # Paper v2: a field is ink at 9% over the card, so it always reads apart from the card it sits on
 # (darker in light, lighter in dark). It must never be the card's own tone.
 print("== field reads apart from the card")

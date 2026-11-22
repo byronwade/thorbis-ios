@@ -13,7 +13,8 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   `#232323`, sidebar `#141414`, type `#EDEDED`. Light: canvas `#FAF9F6`, card `#FFFFFF`, sidebar
   `#F3F2EE`, type `#1A1A1A`. `Theme.field` is the sunk well under a field or select; `Theme.fill`
   is a chip or circle; `Theme.sidebar` / `sidebarAccent` are the drawer and its chosen place. One
-  electric blue, `#2F6BFF` (`Theme.brand`), for selected, focus, switches and the one live thing.
+  electric blue, `#2F6AFF` (`Theme.brand`; Paper's `#2F6BFF`, one shade off so white type on it
+  holds 4.5:1), for selected, focus, switches and the one live thing. The web keeps its own accent.
   `Theme.ai*` is Paper's purple, for AI help only. Place marks: `markOlive`, `markForest`,
   `markPumpkin`, `markBurnt`, `markAccent`. `python3 scripts/tests/contrast.py` reports 0
   failures (4.5:1 text, 3:1 marks, both themes, Increase Contrast).

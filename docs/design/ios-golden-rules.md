@@ -15,11 +15,13 @@ The port plan is [paper-v2-port-plan.md](paper-v2-port-plan.md).
 
 - **Tokens** (`Theme.swift`) are Paper's. Light: canvas `#FAF9F6`, card `#FFFFFF`,
   sidebar `#F3F2EE`, type `#1A1A1A`. Dark: canvas `#1F1F1F`, card `#232323`,
-  sidebar `#141414`, type `#EDEDED`. Brand `#2F6BFF` (`Theme.brand`), for selected,
-  focus, switches and the one live thing. Status words use Paper's `-text` colours and
-  marks use the plain hue. `Theme.ai*` is Paper's purple for AI help only. Seven Paper
-  values are one shade off (1–4%) so that `scripts/tests/contrast.py` still passes
-  with 0 failures; `Theme.swift` lists them.
+  sidebar `#141414`, type `#EDEDED`. Brand `#2F6AFF` (`Theme.brand`; Paper's `#2F6BFF`,
+  one shade off so white type on the commit holds 4.5:1), for selected, focus, switches
+  and the one live thing. This is the iOS blue; the web keeps its own accent
+  (`#3A6AE0`), and neither client is repainted to the other's. Status words use Paper's
+  `-text` colours and marks use the plain hue. `Theme.ai*` is Paper's purple for AI help
+  only. Eight Paper values are one shade off (1–4%) so that `scripts/tests/contrast.py`
+  still passes with 0 failures; `Theme.swift` lists them.
 - **Canvas:** every screen sits on Paper's `sidebar` tone (`Theme.background` =
   `#F3F2EE` / `#141414`) with grouped cards (`Theme.card`, radius 20) on top; Paper's own
   `background` (`#FAF9F6` / `#1F1F1F`) only frames the drawer in its mock-ups.

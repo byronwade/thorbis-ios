@@ -21,8 +21,8 @@ enum WidgetInk {
     static let warning = adaptive(light: 0xB15209, dark: 0xFBBF24)
     /// Paper `secondary-foreground` (`Theme.subtle`): the line under a title.
     static let subtle = adaptive(light: 0x555555, dark: 0xB4B4B4)
-    /// Paper `brand` (`Theme.brand`).
-    static let brand = Color(hex6: 0x2F6BFF)
+    /// Paper `brand` (`Theme.brand`, one shade off Paper's #2F6BFF so white type on it holds 4.5:1).
+    static let brand = Color(hex6: 0x2F6AFF)
     /// The ground of a brand action pill (Paper brand at 16 to 24%, `Theme.brandSurface`); its
     /// label is `accent`.
     static let brandSurface = adaptive(light: 0xE3ECFF, dark: 0x182642)

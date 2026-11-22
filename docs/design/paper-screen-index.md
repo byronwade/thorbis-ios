@@ -32,7 +32,7 @@ Scope:
 - "API exists" means one of three things: the iOS client already calls the route, the route is in `Thorbis-TanStack/services/api/openapi.json`, or Better Auth has it built in (organization invitations, password reset and change, update user). A screen that needs no server, such as an OS permission prompt or a static page, counts as New.
 - Check API rows against `Thorbis-TanStack` main: `services/api/src/routes/manifest.ts` (the source) and `services/api/openapi.json` (generated from it). A route that exists only on an open web PR counts as Needs API and is listed in [GAPS.md](../GAPS.md).
 - Routes known to be missing always win: pipeline and leads, marketing, workflows, banking, bills, payroll runs, vendors and purchase orders, message threads, customer-wide media, fleet sync, time clock, truck stock, receipts and training. Two-step sign-in is also missing, because the auth config has no `twoFactor` plugin.
-- `Theme.swift` already carries Paper's tokens: dark `#1F1F1F`, brand `#2F6BFF`, and the light set. Screen layouts and words have not been compared with Paper one by one yet, so every existing screen is Update and none is Match.
+- `Theme.swift` already carries Paper's tokens: dark `#1F1F1F`, brand `#2F6BFF` (drawn one shade off as `#2F6AFF`), and the light set. Screen layouts and words have not been compared with Paper one by one yet, so every existing screen is Update and none is Match.
 
 Status legend:
 - **Match**: the code already has the screen. Its layout may still need Paper styling.
