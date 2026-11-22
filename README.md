@@ -41,4 +41,6 @@ Record each upload in `docs/release/build-<n>.md`.
 `.github/workflows/ios.yml` runs on every pull request. It builds the app once, runs the unit
 tests, and then runs the UI tests from that build in parallel shards
 (`scripts/ui_test_shards.py --shards 6 --list` shows the split). `UI tests` is the one check that
-says every shard passed.
+says every shard passed. The planner counts tests a class inherits or declares in an extension, and
+stops with an error for any `func test…` it cannot place in a class it names, so a test never
+drops out of the split unnoticed.
