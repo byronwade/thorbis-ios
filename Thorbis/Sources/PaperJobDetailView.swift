@@ -457,7 +457,7 @@ struct JobDetailView: View {
                                       ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-revalidate") {
                                 try? await Task.sleep(for: .seconds(5))
                                 guard !Task.isCancelled else { return }
-                                // A renewed authority (new generation, same access) retires the opened
+                                // A revised authority (a real change, same access) retires the opened
                                 // document; an identical answer would keep it open.
                                 PaperPreviewProtocol.reviseSampleAuthority()
                                 await session.revalidate()
@@ -4432,7 +4432,7 @@ struct JobDetailView: View {
             }
             if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload") {
-                // A renewed authority: the cards go stale until the reload re-reads them.
+                // A revised authority: the cards go stale until the reload re-reads them.
                 Button("Preview revalidate") { Task { PaperPreviewProtocol.reviseSampleAuthority(); await session.revalidate() } }
                     .accessibilityIdentifier("job-overview-revalidate")
             }

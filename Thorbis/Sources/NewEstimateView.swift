@@ -163,7 +163,7 @@ struct NewEstimateView: View {
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
                                     Task {
-                                        // The server renews authority while the create is held: a real change.
+                                        // The server revises authority while the create is held: a real change.
                                         PaperPreviewProtocol.reviseSampleAuthority()
                                         await session.revalidate()
                                         EstimateRecoveryPreview.shared.release()

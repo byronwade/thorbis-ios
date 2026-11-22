@@ -201,7 +201,7 @@ struct PriceBookCartPicker: View {
                         // `-feature-change`: the server answers a same-version authority change, which the
                         // catalog adopts; without it the answer is identical and nothing moves.
                         if ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-feature-change") {
-                            PaperPreviewProtocol.reviseSampleFeatures()
+                            PaperPreviewProtocol.reviseSampleAuthority()
                         }
                         await session.revalidate(); previewRevalidated = true
                     }

@@ -22,6 +22,9 @@ final class OfflineSessionTests: XCTestCase {
         let controller = make(signIn + [URLProtocolFixture.offline])
         await controller.restore()
         let generation = controller.generation
+        let authority = controller.authorityRevision
+        let verification = controller.verificationRevision
+        let recheck = controller.recheckRevision
 
         await controller.revalidate()
 
@@ -29,6 +32,10 @@ final class OfflineSessionTests: XCTestCase {
         XCTAssertTrue(controller.isOffline)
         XCTAssertEqual(controller.generation, generation, "Navigation and loaded work survive a foreground check")
         XCTAssertTrue(controller.can("job.edit", feature: "jobs"))
+        // The server did not answer, so nothing was confirmed or changed.
+        XCTAssertEqual(controller.authorityRevision, authority)
+        XCTAssertEqual(controller.verificationRevision, verification)
+        XCTAssertEqual(controller.recheckRevision, recheck)
     }
 
     func testForegroundCheckWithSameIdentityRefreshesAuthorityInPlace() async {

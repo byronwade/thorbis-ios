@@ -375,8 +375,8 @@ struct WorkspacePriceBookView: View {
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-switch") {
                                         PaperPreviewProtocol.switchSavedWorkWorkspace()
                                     } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
-                                        // Renewed authority: the server answers a new authority generation,
-                                        // the same capabilities. An identical answer would leave the list as it is.
+                                        // Renewed authority: a real change with the same access. An identical
+                                        // answer would leave the list as it is.
                                         PaperPreviewProtocol.reviseSampleAuthority()
                                     } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-recheck") {
                                         PaperPreviewProtocol.revokePriceBookView()

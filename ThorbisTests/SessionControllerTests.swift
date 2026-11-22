@@ -109,6 +109,21 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertNotEqual(session.recheckRevision, recheckedAgain)
     }
 
+    /// A feature decision that changes at the same policy version and generation is still a change.
+    func testSameVersionFeatureChangeStillChangesAuthorityRevision() async {
+        let released = features.replacingOccurrences(of: #""price_book":{"enabled":false"#, with: #""price_book":{"enabled":true"#)
+        XCTAssertNotEqual(released, features)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, released)
+        ])
+        await session.restore()
+        let authority = session.authorityRevision
+        await session.revalidate()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotEqual(session.authorityRevision, authority, "A changed feature decision retires work captured under the old one")
+    }
+
     func testCustomerRecordsScopeRejectsStaleCompletionAfterSameVersionRevokeAndRegrant() async {
         let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
