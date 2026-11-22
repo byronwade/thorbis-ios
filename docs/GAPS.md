@@ -37,4 +37,4 @@ The web repository lists every route this app calls in `contracts/mobile/ios-end
 | `POST /v1/jobs/{id}/reopen` | #1612 (BYR-1611) | Reopen is hidden: the `job_reopen` feature is off. |
 | `POST /v1/invoices/{id}/approved-estimates`, `GET /v1/invoices/{id}/revisions` | #1614 (BYR-1611) | Changing an issued invoice is hidden: the `invoice_revisions` feature is off. |
 
-Draft line edits (#1615) and customer notes (#1611) use routes that exist on main with an older contract; they are described in their sections above.
+Draft line edits (#1615) use a route that exists on main with an older contract. Customer notes (#1611) have no route on main yet, so the app keeps them on the phone. Both are described in their sections above.
