@@ -16,7 +16,7 @@ menus or disclosures for secondary actions while keeping common work direct.
 
 *Superseded.* These bullets record that branch. Its `TabView` gave way to a side drawer on
 31 October 2026, and on 18 November 2026 the iPhone took Paper 18A's bottom bar (`PhoneTabBar`)
-as its default, with the drawer behind More and as the Settings › Menu and start screen ›
+as its default, with the drawer behind Menu and as the Settings › Menu and start screen ›
 Navigation choice; iPad keeps its sidebar. Golden rule 6 has the current navigation.
 
 - iPhone navigation was a native `TabView` with Paper's technician dock: Schedule, Jobs, Customers, More and a system Search tab. iOS 26 draws it as Paper's floating pill; the deployment target is iOS 18 for the search tab role. The overlay menu and the Done-sheets for Schedule and Customers are gone. Inbox, Estimates, Invoices, Price book, Revenue, drafts and on-device records live in More.

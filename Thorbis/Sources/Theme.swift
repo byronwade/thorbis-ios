@@ -189,7 +189,8 @@ enum Theme {
     })
     /// The hairline between rows inside one grouped card. Same colour as the rim.
     static let hairline = border
-    /// MA-08: a commit is ink (the type colour) with inverse type, a 1px rim and a short bevel.
+    /// The type colour as a ground under inverse type (a step badge, today's date, the listening
+    /// mic). The commit itself is the brand pill (`.inkCommit()`).
     static let ink = foreground
     static let onInk = adaptive(light: 0xFFFFFF, dark: 0x1A1A1A, highLight: 0xFFFFFF, highDark: 0x000000)
     /// Paper's electric blue (#2F6BFF, drawn one step greener as #2F6AFF so white type on it holds

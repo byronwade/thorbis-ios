@@ -58,7 +58,7 @@ controls, forms, words, places and states. "Linear grammar. Not Linear dress":
 no Linear purple, no issue row, no status rings as decoration. The site says
 "iOS is a tab bar and a stack". From 31 October to 18 November 2026 the owner
 overrode that one rule with a side drawer; since 18 November the iPhone defaults
-to Paper 18A's bottom bar again, with the drawer behind More and as a Settings
+to Paper 18A's bottom bar again, with the drawer behind Menu and as a Settings
 choice (rule 6). Everything below that predates v2 yields to these points where
 they disagree:
 
@@ -156,12 +156,12 @@ record of that pass; do not build to them.
    *Current (Paper 18A, shipped 18 November 2026):* iPhone defaults to the Paper
    18A bottom bar (`PhoneTabBar`): a Search circle, a pill of four icon-only places
    for the role (technician and office: Schedule, Jobs, Customers, Inbox; owner:
-   Home, Schedule, Jobs, Money), then More, which opens the drawer, and the
+   Home, Schedule, Jobs, Money), then Menu (three lines), which opens the drawer, and the
    account circle. Settings › Menu and start screen › Navigation offers the side
    drawer alone; iPad keeps its sidebar. Roots keep `DrawerMenuCircle` only in
    sidebar mode. DEBUG previews and UI tests run the drawer unless launched with
    `--paper-preview-nav bottom` (`TabBarUITests` covers the bar). The drawer
-   described below is the one More and the sidebar choice open.
+   described below is the one Menu and the sidebar choice open.
    *Redesign, 31 October 2026 (drawer, simplified after build 125; superseded as
    the default on 18 November):* the iPhone navigated with a side drawer in the
    style of the Claude and ChatGPT iOS apps; the floating tab bar and the More

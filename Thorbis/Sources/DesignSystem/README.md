@@ -68,7 +68,7 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   toasts are `ThorbisToast` and only confirm what the screen already shows.
 - **Navigation (phone):** iPhone defaults to the Paper 18A bottom bar (`PhoneTabBar`,
   `../PhoneTabBar.swift`, since 18 November 2026): a Search circle, a pill of four icon-only places
-  for the role (`PhoneTabs`), then More, which opens the drawer, and the account circle. Settings ›
+  for the role (`PhoneTabs`), then Menu (three lines), which opens the drawer, and the account circle. Settings ›
   Menu and start screen › Navigation offers the side drawer alone (`AppDrawer`,
   `../DrawerNavigation.swift`, after the Claude and ChatGPT iOS apps); iPad keeps its sidebar.
   Roots keep `DrawerMenuCircle` top left only in sidebar mode — `PaperHeader` draws it when the shell sets `\.paperDrawer` (roots only); roots without a

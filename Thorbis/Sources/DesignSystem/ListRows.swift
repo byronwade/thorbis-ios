@@ -1,8 +1,8 @@
 import SwiftUI
 
 // The customer row (Book a job's customer picker) and the search row's leading glyph. Each is
-// content only; the screen wraps it in its own button or link. Job, customer and inbox rows on
-// the list rooms are `JobRoomRow` and its neighbours in `ListRoomRows.swift`.
+// content only; the screen wraps it in its own button or link. Job rows on the list rooms are
+// `JobRoomRow` (`ListRoomRows.swift`); the Customers list and the Inbox draw their own rows.
 
 /// A customer in the book: their initials on a tinted circle, the name in semibold, where and how
 /// to reach them, and the open job's status (glyph and word) or "Archived" on the right.

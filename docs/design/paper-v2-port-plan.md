@@ -22,7 +22,7 @@ how the Swift code changes to match them.
 ## 1. Navigation — bottom bar, drawer and sidebar
 
 Bottom tabs (Paper 18A) shipped as the iPhone default on 2026-11-18 (`PhoneTabBar`: four places
-for the role, then More, which opens the drawer). Settings › Menu and start screen › Navigation
+for the role, then Menu (three lines), which opens the drawer). Settings › Menu and start screen › Navigation
 offers the side drawer alone, and iPad keeps its sidebar. When this plan was written the code had
 the drawer only. What changes below is the **contents** of the drawer and sidebar.
 
