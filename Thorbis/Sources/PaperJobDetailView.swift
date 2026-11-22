@@ -2583,37 +2583,6 @@ struct JobDetailView: View {
         }
     }
 
-    /// Money's one bar, in the order the paper needs it: a draft invoice to send, then what's owed,
-    /// then the estimates to show the customer, then the first estimate to build.
-    @ViewBuilder private var moneyAction: some View {
-        if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") {
-            PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
-        } else if moneyBarCollects, let model = invoicePaymentModel {
-            PaperInvoiceCollectionFooter(model: model,
-                invoiceReference: invoices.count > 1 ? selectedInvoice.map { jobInvoiceReference($0.id) } : nil) {
-                    if let id = selectedInvoice?.id { presentPayment(for: id) }
-                }
-        } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
-            PaperActionBar(title: "Show customer", symbol: "iphone") { openCustomerView(.estimates) }
-                .accessibilityIdentifier("job-customer-view-bar")
-        } else if canBuildEstimate {
-            PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
-        }
-    }
-
-    private var moneyBarCollects: Bool {
-        guard session.can("invoice.payment.create", feature: "payments"), let invoice = selectedInvoice,
-              invoice.status != "draft", invoicePaymentModel != nil else { return false }
-        return loadedInvoiceModelID == invoice.id
-    }
-
-    /// Whether Money's bar is already Customer view, so the estimates list doesn't repeat it.
-    private var moneyBarIsCustomerView: Bool {
-        guard !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") else { return false }
-        if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") { return false }
-        return !moneyBarCollects
-    }
-
     /// Paper 21 Job details: one card per section, 20 apart, in the order a tech needs them at the
     /// door. On site the toolkit and what's left before wrapping up lead (Paper's field-mode card);
     /// then what to know at this address, the job's description and customer, the people on the
