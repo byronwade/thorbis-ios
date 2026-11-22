@@ -214,8 +214,6 @@ private struct JobStatusMenuGroup: View {
     let onSelect: (ThorbisMenuItem) -> Void
     @ScaledMetric(relativeTo: .body) private var markColumn: CGFloat = 28
 
-    private var firstID: UUID? { rows.first?.id }
-
     /// Paper 21T: a step already passed. A green tick, its name and when it happened; not a button.
     private func doneRow(_ step: JobStatusDoneStep) -> some View {
         HStack(spacing: 14) {
@@ -245,8 +243,10 @@ private struct JobStatusMenuGroup: View {
             ForEach(doneSteps) { step in
                 doneRow(step)
             }
-            ForEach(rows) { item in
-                Button { onSelect(item) } label: { row(item, divided: !steps && item.id != firstID) }
+            // Keyed by position: the items get new ids on every render, which would replace a row
+            // under the finger and drop its tap (see ThorbisMenuPanel's rows).
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, item in
+                Button { onSelect(item) } label: { row(item, divided: !steps && index > 0) }
                     .buttonStyle(MenuRowPressStyle(radius: steps ? 14 : 0))
                     .disabled(item.isDisabled)
                     .opacity(item.isDisabled ? 0.4 : 1)

@@ -25,7 +25,7 @@ enum ReleaseNotes {
                 .init(symbol: "iphone", title: "Customer view stays open",
                       detail: "Locking the phone or a dropped signal no longer ends Customer view or closes an open estimate or invoice."),
             ],
-            fixes: 9),
+            fixes: 10),
         ReleaseNote(
             id: "2026-11-21-saves-that-stick",
             date: "2026-11-21",

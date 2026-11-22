@@ -507,10 +507,13 @@ struct ThorbisMenuRows: View {
     }
 
     private func group(_ rows: [ThorbisMenuItem]) -> some View {
-        let firstID = rows.first?.id
-        return VStack(spacing: 0) {
-            ForEach(rows) { item in
-                Button { onSelect(item) } label: { row(item, divided: item.id != firstID) }
+        // Rows are keyed by position, not by `item.id`. A page builds its items again, with new ids,
+        // every time it renders, and a row keyed by them was replaced under the finger: a tap that
+        // landed while anything on the page updated (a reload, a background session check) was
+        // dropped and the menu stayed open. Positions do not change while a menu is open.
+        VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, item in
+                Button { onSelect(item) } label: { row(item, divided: index > 0) }
                     .buttonStyle(MenuRowPressStyle(pressChanged: pressChanged))
                     .disabled(item.isDisabled)
                     .opacity(item.isDisabled ? 0.4 : 1)
