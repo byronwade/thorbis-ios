@@ -200,13 +200,15 @@ source evidence; verify platform/API/version claims before relying on them.
    creating an equal-button dashboard. Reserve cards for bounded objects such as
    media or a financial summary. Status is always a word, with color/symbols as
    reinforcement. Keep list scope, filters, position and saved views on return.
-   *v2 (31 October 2026):* grouped sections are the norm — a 13pt Medium section
-   header with its count above rows on one panel (`Theme.well`, radius 14), with
-   no line between rows and no box around the group (`Well`, `WellList`,
-   `SectionHeader`; `WellDivider` now draws nothing). Rows lead with the street and
-   carry the status as a word with its small mark (`StatusLabel`). Avatars
-   (`InitialsAvatar`, in place-mark hues) and pill chips (`PropertyChip`, a 1px rim)
-   are allowed.
+   *Paper v2 (16 November 2026, current):* grouped sections are the norm — a 13pt
+   Semibold section label with its count at the trailing edge (`SectionHeader`)
+   above rows on one card (`Well`, `Theme.well`, radius 20), with a hairline
+   (`WellDivider`) between rows inside the card, inset to the row text, never
+   between cards or under a heading. Rows lead with the street and carry the
+   status as a word with its small mark (`StatusLabel`); a record's header carries
+   one `RecordStatusBadge`. Avatars (`InitialsAvatar`) are allowed. *Superseded:*
+   the 31 October v2 note (radius 14, no line between rows, property chips with a
+   1px rim).
 
 ## Visual and interaction system
 

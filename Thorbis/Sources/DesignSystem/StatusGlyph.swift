@@ -249,66 +249,6 @@ private struct RingSlice: Shape {
     }
 }
 
-/// A property in Linear's chip row: a tinted capsule with an optional glyph or avatar and a word.
-/// With an action it is a button (PressStyle); without one it is a plain label.
-struct PropertyChip<Leading: View>: View {
-    let text: String
-    var tint: Color = Theme.fill
-    var textColor: Color = Theme.foreground
-    var action: (() -> Void)? = nil
-    @ViewBuilder var leading: Leading
-
-    var body: some View {
-        if let action {
-            Button(action: action) { label }.buttonStyle(PressStyle())
-        } else {
-            label
-        }
-    }
-
-    private var label: some View {
-        HStack(spacing: 6) {
-            leading
-            Text(text)
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(textColor)
-                .lineLimit(1)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .frame(minHeight: Theme.chipHeight)
-        .background(tint, in: Capsule())
-        // v2: a chip is a pill with a 1px rim that follows the curve.
-        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-        .contentShape(Capsule())
-    }
-}
-
-extension PropertyChip where Leading == AnyView {
-    /// A chip with an SF Symbol (or nothing) before the word.
-    init(_ text: String, symbol: String? = nil, tint: Color = Theme.fill, textColor: Color = Theme.foreground,
-         action: (() -> Void)? = nil) {
-        self.init(text: text, tint: tint, textColor: textColor, action: action) {
-            AnyView(Group {
-                if let symbol {
-                    Image(systemName: symbol).font(.system(size: 12, weight: .medium)).accessibilityHidden(true)
-                        .foregroundStyle(textColor)
-                }
-            })
-        }
-    }
-
-    /// A job's status as a chip: the word, with its small mark in the status hue (v2: the pill stays
-    /// neutral; colour sits with the word).
-    init(jobStatus status: String, hasTime: Bool = true, pending: Bool = false, action: (() -> Void)? = nil) {
-        let tone = StatusTone(jobStatus: status, hasTime: hasTime)
-        self.init(text: pending ? "\(status.statusLabel) · waiting to sync" : status.statusLabel,
-                  tint: Theme.fill, textColor: Theme.foreground, action: action) {
-            AnyView(StatusMark(tone: tone, pending: pending))
-        }
-    }
-}
-
 /// A person as an initials circle on a tinted fill (redesign: avatars are allowed). The hue is
 /// picked from the name so a person keeps one colour; white initials hold 4.5:1 on every hue.
 struct InitialsAvatar: View {
@@ -356,9 +296,8 @@ struct PlaceMark: View {
     }
 }
 
-/// A grouped panel (v2): rows sit on one panel (radius 14). Tone, type and space separate rows;
-/// there is no line between them and no box around the group. Use `Well { ... }` for hand-built
-/// content (with `WellDivider` where rows used to take a hairline), or `WellList` for a collection.
+/// A grouped card (Paper v2): rows sit on one panel (radius 20), with a hairline (`WellDivider`)
+/// between rows inside it, inset to the row text; never a line between cards or a box around them.
 struct Well<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -378,22 +317,5 @@ struct WellDivider: View {
     var body: some View {
         Rectangle().fill(Theme.hairline).frame(height: 1 / max(displayScale, 1))
             .padding(.leading, leading).accessibilityHidden(true)
-    }
-}
-
-/// A collection on one panel, a hairline between rows.
-struct WellList<Data: RandomAccessCollection, Row: View>: View where Data.Element: Identifiable {
-    let data: Data
-    var dividerInset: CGFloat = PaperCardMetrics.inset
-    @ViewBuilder var row: (Data.Element) -> Row
-
-    var body: some View {
-        let items = Array(data)
-        Well {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                row(item)
-                if index < items.count - 1 { WellDivider(leading: dividerInset) }
-            }
-        }
     }
 }

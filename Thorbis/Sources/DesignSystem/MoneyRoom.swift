@@ -5,122 +5,8 @@ import SwiftUI
 // New pieces only; the older DocumentRows API stays as it was.
 
 extension Theme {
-    /// The one large figure on a money screen: Paper's 34 Bold, tabular.
-    /// Scales with Dynamic Type from `.largeTitle`.
-    static let moneyHeroFont = Font.custom("Inter-Regular", size: 34, relativeTo: .largeTitle)
-        .weight(.bold).monospacedDigit()
     /// A tabular amount in a row or a line: Paper's 16 Medium, beside a 16 Medium row title.
     static func rowAmountFont(_ size: CGFloat = 16) -> Font { monoFont(size, weight: .medium) }
-}
-
-/// "Invoice 2209" (Paper's 34 Bold screen title) with its status word beside it, then the figure
-/// the screen is about: a 13 Semibold label ("Balance due") over the 34 Bold amount.
-struct EvidenceHeader: View {
-    /// The question: "Invoice 2209", "Estimate 4F2A".
-    let title: String
-    let status: DocumentStatus
-    /// A quieter line under the title (an estimate's own name).
-    var subtitle: String? = nil
-    let figureLabel: String
-    let cents: Int?
-    let currency: String
-    var statusIdentifier: String? = nil
-    /// The title's identifier (the room hides the navigation bar title, so tests find it here).
-    var titleIdentifier = "document-title"
-    var figureIdentifier = "document-figure"
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        // At accessibility sizes the status goes under the title, so "Estimate 2218" never splits around it.
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
-        VStack(alignment: .leading, spacing: 0) {
-            layout {
-                Text(title).font(Theme.font(34)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier(titleIdentifier)
-                StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet)
-                    .accessibilityLabel("Status, \(status.word)")
-                    .accessibilityIdentifier(statusIdentifier ?? "document-status")
-                Spacer(minLength: 0)
-            }
-            if let subtitle, !subtitle.isEmpty {
-                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 2)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(figureLabel).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                Text(cents.map { money($0, currency: currency) } ?? "Unavailable")
-                    .font(Theme.moneyHeroFont).tracking(-0.85)
-                    .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .contentTransition(.numericText())
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: cents)
-            }
-            .padding(.top, 20)
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier(figureIdentifier)
-            .accessibilityAddTraits(.updatesFrequently)
-        }
-        .foregroundStyle(Theme.foreground)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// One quiet property of a document: Paper's 15 muted label in a fixed column, the value 16 Medium.
-/// With an action the value reads as a link-like row (opens the customer, the job).
-struct EvidenceProperty: View {
-    let label: String
-    let value: String
-    var action: (() -> Void)? = nil
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @ScaledMetric(relativeTo: .subheadline) private var labelWidth: CGFloat = 96
-
-    var body: some View {
-        if let action {
-            Button(action: action) { content(linked: true) }
-                .buttonStyle(RowPressStyle())
-                .accessibilityHint("Opens the \(label.lowercased())")
-        } else {
-            content(linked: false)
-        }
-    }
-
-    private func content(linked: Bool) -> some View {
-        let stacked = typeSize.isAccessibilitySize
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-        return layout {
-            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .frame(width: stacked ? nil : labelWidth, alignment: .leading)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                if linked {
-                    Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 6)
-        .frame(minHeight: linked ? 44 : 32, alignment: .leading)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// A run of quiet properties, grouped by space (no panel, no lines).
-struct EvidenceProperties<Content: View>: View {
-    @ViewBuilder var content: Content
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .contain)
-    }
 }
 
 /// One priced line on paper: the name (and its explanation) on the left, the quantity in a tabular
@@ -300,22 +186,6 @@ struct FormField<Content: View>: View {
                 Text(help).font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// A form's cluster: a 13 Semibold heading (Paper's section label) over related fields, grouped by space (no card per field).
-struct FormCluster<Content: View>: View {
-    var title: String? = nil
-    @ViewBuilder var content: Content
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let title {
-                Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

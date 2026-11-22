@@ -505,7 +505,7 @@ struct SkeletonPulse<Content: View>: View {
 }
 
 /// A loading list the way the loaded one draws: a header-sized bar over one well of skeleton rows
-/// with inset hairlines. No side margin; the caller pads it like its `WellSection`s.
+/// with inset hairlines. No side margin; the caller pads it like the cards it stands in for.
 struct SkeletonList: View {
     var count = 5
     var leading = false

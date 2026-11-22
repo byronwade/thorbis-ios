@@ -171,8 +171,6 @@ enum Theme {
     /// The phone drawer's floating panel (Paper 29N / 57N / 58N "Panel": #1B1B1B on the dark
     /// frame, #FFFFFF in the Light copy), a step off the canvas the place behind it is drawn on.
     static let drawerPanel = adaptive(light: 0xFFFFFF, dark: 0x1B1B1B)
-    /// A neutral step (kept for call sites); never the electric blue, which is `brand`.
-    static let accent = adaptive(light: 0xECEAE5, dark: 0x2A2A2A)
     /// Type (Paper `foreground`).
     static let foreground = adaptive(light: 0x1A1A1A, dark: 0xEDEDED, highLight: 0x000000, highDark: 0xFFFFFF)
     /// The marker: times, counts, labels (Paper `muted-foreground`). Dimmer than body.

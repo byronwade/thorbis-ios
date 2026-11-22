@@ -1605,30 +1605,6 @@ struct MoneyFigure: View {
 
 // MARK: - Document pieces (estimate and invoice detail)
 
-/// Redesign phase 3: a document's header in Linear's grammar — the kind and reference as a quiet
-/// eyebrow, the title at 30 semibold, then property chips that wrap (status with its glyph, who,
-/// the job, the date, the amount). Chips with something to open are buttons; the rest are labels.
-struct DocumentHeader<Chips: View>: View {
-    let eyebrow: String
-    let title: String
-    @ViewBuilder var chips: Chips
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(eyebrow).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
-                .accessibilityAddTraits(.isHeader)
-            FlowRow(spacing: 6, lineSpacing: 6) { chips }
-                .padding(.top, 14)
-                .accessibilityElement(children: .contain)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 /// "Sent Jul 18" for a document's date chip; nil when the date doesn't parse.
 func documentDateChipText(_ verb: String, _ raw: String?) -> String? {
     JobFiltering.date(raw).map { "\(verb) \(documentDate($0))" }

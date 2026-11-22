@@ -570,22 +570,6 @@ struct PaperChevron: View {
     }
 }
 
-/// A small status word on a row or a card (Paper 84 "Low", 62 "Invite pending"): 26 tall, 13
-/// Semibold, the tone's word on the tone's surface. Not tappable.
-struct PaperStatusPill: View {
-    let text: String
-    var ink: Color = Theme.muted
-    var surface: Color = Theme.fill
-
-    var body: some View {
-        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(ink)
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .frame(minHeight: PaperControl.statusHeight)
-            .background(surface, in: Capsule())
-    }
-}
-
 /// Paper's quiet round button: a 48pt circle of ink at 9% with a 20pt glyph (the call and message
 /// circles beside Navigate). 44 in a tighter row. A label only.
 struct PaperRoundLabel: View {

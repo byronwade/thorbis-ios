@@ -30,9 +30,10 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   inside one grouped card, inset to the row text. Never between cards or under a heading;
   `PaperCard` has no rim; no coloured side rails.
 - **Status is a word:** `StatusLabel` (a small `StatusMark` in the hue, then the word). Rows lead
-  with the street; the status word sits in the subtitle (`JobListRowContent`,
-  `DocumentListRowContent`) or at the trailing edge (`CustomerListRowContent`, search). Never a
-  coloured glyph without its word. Status chips are neutral pills with the mark beside the word.
+  with the street; the status word sits at the trailing edge (`JobRoomRow`, `MoneyListRow`,
+  `CustomerListRowContent`, search) or in the subtitle (`DocumentListRowContent`). Never a
+  coloured glyph without its word. A record's header carries one `RecordStatusBadge`: the word in
+  the status's text colour on its surface.
 - **Modals:** `ThorbisModalSheet` — a clean system sheet on the panel (`thorbisSheetPresentation`,
   no Liquid Glass), `ThorbisSheetHeader` (17pt Medium title + close circle), content grouped by
   space with 20pt padding, fields as sunk wells (`ThorbisSheetField`: label, well, one slot for
@@ -74,7 +75,7 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   only, plus saved work needing the person on the gear. Bottom: the ink New job commit (radius 10)
   and the Settings circle (its menu: businesses, saved work, Add a business, Settings, Edit menu).
   The iPad sidebar uses the same `PlacesList` (On this iPad). New also stays in the root header's
-  ink + (`CreamPlaceHeader` on Today, `PaperHeader(showsCreate: true)` elsewhere). UI tests:
+  blue + (`PaperHeader(showsCreate: true)`). UI tests:
   `drawer-menu`, then `drawer-<id>` rows (`openDrawer()` / `openFromDrawer(_:)`, which scrolls to
   low rows, and `openSavedWorkFromDrawer()` in `ThorbisUITests`). iPad keeps its
   sidebar. **No stock SwiftUI controls** in app screens:
@@ -97,7 +98,7 @@ carry Paper's own values; build screens from them before writing a one-off.
 | One card of rows | `PaperRowsCard { rows }` with `WellDivider(leading:)` between rows | `PaperPrimitives.swift` |
 | The blue pill / its tinted twin | `PaperPillLabel(title:glyph:height:tinted:)` | `PaperPrimitives.swift` |
 | Any other pill button (ramp: field 60 / commit 50 / card 48 / secondary 44 / compact 36; tones brand, tinted, quiet, danger, dangerQuiet) | `PaperButtonLabel(title:glyph:symbol:size:tone:fills:busy:)` or `.paperButton(_:tone:fills:)` on a custom label | `PaperPrimitives.swift` |
-| A status word (26 tall, 13 Semibold) / a row's chevron | `PaperStatusPill(text:ink:surface:)` / `PaperChevron()` | `PaperPrimitives.swift` |
+| A row's chevron | `PaperChevron()` | `PaperPrimitives.swift` |
 | Quiet 48pt round button (call, message) | `PaperRoundButton(glyph:label:action:)`, `PaperRoundLabel` | `PaperPrimitives.swift` |
 | Avatar chip (initials) | `PaperInitials(name:size:)` / `InitialsAvatar` | `PaperPrimitives.swift`, `StatusGlyph.swift` |
 | Status glyph (ring, half, check) | `StatusGlyph(tone:label:pending:size:)` | `StatusGlyph.swift` |
@@ -117,21 +118,20 @@ carry Paper's own values; build screens from them before writing a one-off.
 | Status / value chip (display only) | `Chip` | `../Theme.swift` |
 | Status as a word with its mark | `StatusLabel` (+ `StatusMark`) | `StatusGlyph.swift` |
 | The status mark alone (inside a chip or menu row) | `StatusGlyph` (+ `StatusTone` mapping) | `StatusGlyph.swift` |
-| Tinted property chip (status, time, tech, amount) | `PropertyChip` | `StatusGlyph.swift` |
-| Property chip whose words wrap at large text (job header) | `WrappingPropertyChip` | `WrappingPropertyChip.swift` |
+| A record's one status badge (job, customer, estimate, invoice header) | `RecordStatusBadge` | `RecordPage.swift` |
+| A record page's header (reference, badge, title, one muted line) | `RecordHeader` | `RecordPage.swift` |
 | Person's initials circle | `InitialsAvatar` | `StatusGlyph.swift` |
 | Place mark (soft hue, outline at rest, fill when here) | `PlaceMark(filled:)` | `StatusGlyph.swift` |
-| Grouped rows on a panel, no lines | `Well`, `WellList` | `StatusGlyph.swift` |
-| A long list's well, row by row (stays lazy) | `WellSection`, `.wellSlice(first:last:)` | `ListRows.swift` |
-| Job row (street, problem, status word · who and when, avatar) | `JobListRowContent` | `ListRows.swift` |
+| One grouped card of rows, a hairline between them | `Well` + `WellDivider` | `StatusGlyph.swift` |
+| Job row on a list (street, problem · customer, when · who, status word) | `JobRoomRow` | `ListRoomRows.swift` |
+| A list's group label, loading rows, empty room | `ListGroupLabel`, `ListRoomSkeleton`, `ListRoomEmpty` | `ListRoomRows.swift` |
 | Customer row (initials, name, where, open job's status) | `CustomerListRowContent` | `ListRows.swift` |
 | Search row's kind glyph (status, initials, place mark) | `SearchGlyph` | `ListRows.swift` |
 | Estimate / invoice status as a glyph tone and word (no new `StatusTone` cases) | `DocumentStatus` | `DocumentRows.swift` |
 | Estimate / invoice row (glyph, title, who · reference, semibold amount) | `DocumentListRowContent` | `DocumentRows.swift` |
-| Document status chip | `WrappingPropertyChip(document:)` | `DocumentRows.swift` |
-| Label and amount on a well (totals) | `WellAmountRow` | `DocumentRows.swift` |
+| Estimate / invoice row on a v2 list (name, one line, amount over the status word) | `MoneyListRow` | `MoneyRoom.swift` |
+| A line item, and the totals under the lines | `EvidenceLineRow`, `EvidenceTotalRow` | `MoneyRoom.swift` |
 | Semibold tabular amount (staff screens; customer mode keeps `moneyFont`) | `Theme.amountFont(_:)` | `DocumentRows.swift` |
-| Document header (eyebrow, 30pt title, wrapping chips) | `DocumentHeader` | `../FinancialViews.swift` |
 | Old `PaperSection`/`PaperCard` drawn as header + well | `.environment(\.paperGroupedWells, true)` | `PaperComponents.swift` |
 | Section header with count | `SectionHeader` | `../Theme.swift` |
 | Linear text tabs (plain words, well pill) | `PaperTabs(textTabs: true)` | `../PaperComponents.swift` |

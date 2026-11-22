@@ -741,22 +741,6 @@ struct RimmedButtonLabel: View {
     }
 }
 
-/// The place header's mark: the place's symbol on a tinted tile (radius 10).
-struct PlaceMarkTile: View {
-    let symbol: String
-    var tint: Color = Theme.markAccent
-    @ScaledMetric(relativeTo: .title) private var size: CGFloat = 34
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.5, weight: .regular))
-            .foregroundStyle(Theme.onInk)
-            .frame(width: size, height: size)
-            .background(tint, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .accessibilityHidden(true)
-    }
-}
-
 /// A row of numbers on the canvas, no cards (C-Today: "4 stops left · $1,240 to collect · 1 running
 /// late"). The number in tabular figures, its word under it. Stacks at accessibility sizes.
 struct NumbersRow: View {
@@ -897,75 +881,5 @@ extension EnvironmentValues {
     var paperSearch: PaperSearchAction? {
         get { self[PaperSearchKey.self] }
         set { self[PaperSearchKey.self] = newValue }
-    }
-}
-
-// MARK: - A place's header
-
-/// A place root's header (C-Today.dc.html): the menu circle on the left of the top bar, Search and
-/// the ink + on its right; then the place's mark on a tinted tile, its title and a muted line, with
-/// the place's own circles (view, layout) at the trailing edge. The title scrolls with the content.
-struct CreamPlaceHeader<Trailing: View>: View {
-    let title: String
-    let subtitle: String
-    let symbol: String
-    var tint: Color = Theme.markAccent
-    var titleIdentifier: String? = nil
-    var showsCreate = true
-    @ViewBuilder var trailing: Trailing
-    @Environment(\.paperCreate) private var create
-    @Environment(\.paperDrawer) private var drawer
-    @Environment(\.paperSearch) private var search
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 4) {
-                if let drawer { DrawerMenuCircle(control: drawer) }
-                Spacer(minLength: 0)
-                if let search {
-                    Button(action: search.run) { CreamCircleLabel(symbol: "magnifyingglass") }
-                        .buttonStyle(PressStyle())
-                        .accessibilityLabel("Search")
-                        .accessibilityIdentifier("header-search")
-                }
-                if showsCreate, let create {
-                    Button(action: create.run) { CreamCircleLabel(symbol: "plus", ink: true) }
-                        .buttonStyle(PressStyle())
-                        .contextMenu {
-                            ForEach(create.choices) { choice in
-                                Button(action: choice.run) { Label(choice.title, systemImage: choice.symbol) }
-                            }
-                        }
-                        .accessibilityLabel(create.label)
-                        .accessibilityIdentifier("header-create")
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 44)
-            let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
-                                                   : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
-            row {
-                HStack(alignment: .center, spacing: 10) {
-                    PlaceMarkTile(symbol: symbol, tint: tint)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(Theme.font(28, weight: .medium)).tracking(-0.5)
-                            .foregroundStyle(Theme.foreground)
-                            .lineLimit(1).minimumScaleFactor(0.7)
-                            .accessibilityAddTraits(.isHeader)
-                            .modifier(OptionalIdentifier(identifier: titleIdentifier))
-                        DotLine(subtitle)
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    }
-                }
-                // The title column takes every point the circles leave (a Spacer would split the
-                // room with it, and the subtitle would wrap with half the row empty).
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) { trailing }.fixedSize()
-            }
-            .padding(.leading, Theme.gutter).padding(.trailing, 14)
-            .padding(.top, 14)
-        }
     }
 }
