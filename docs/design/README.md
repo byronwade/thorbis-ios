@@ -6,7 +6,7 @@ and the [implementation/review process](ios-implementation-process.md). The
 is preserved in full. These apply across the entire app and existing work in progress;
 the coverage below records current implementation, not automatic conformance.
 
-Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01KY0S86CYXENWSH216F3ZB058/B-0), token hash `2803f4aa`, exported 2026-10-26. JSON files contain original Paper JSX, not hand-measured screenshots. Inter and Geist Mono are bundled with their OFL licenses.
+Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01KY0S86CYXENWSH216F3ZB058/B-0), token hash `2803f4aa`, exported 2026-10-26. JSON files contain original Paper JSX, not hand-measured screenshots. Inter is bundled with its OFL license.
 
 Current direction: [continuous UI and UX goal](continuous-ux-goal.md), updated
 28 October 2026. Simplify complete user flows, preserve every feature, and use
