@@ -318,7 +318,7 @@ final class FieldOutboxTests: XCTestCase {
             XCTFail("Expected a network error")
         } catch {
             XCTAssertTrue(error.isConnectivityFailure)
-            XCTAssertTrue(error.neverReachedServer, "No connection: nothing was sent")
+            XCTAssertTrue(error.neverReachedServer, "No connection is taken to mean nothing was sent")
         }
         do {
             _ = try await api([URLProtocolFixture.timedOut]).addFieldNote(jobA, body: "Gate code 4417")

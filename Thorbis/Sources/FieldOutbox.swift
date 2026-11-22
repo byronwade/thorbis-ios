@@ -395,11 +395,12 @@ final class FieldOutbox: ObservableObject {
     }
 
     /// - Parameter attemptedSince: when an online send that may have reached the server started (a
-    ///   timeout or a dropped connection). Nil when nothing left the phone (`neverReachedServer`).
-    ///   Its first replay then has no lookup. A note goes through /v1/commands when offline sync is
-    ///   on, which dedupes on the entry id, and otherwise through REST. A follow-up has no command,
-    ///   so it always goes through REST. A REST send is marked attempted first, so a retry after it
-    ///   looks on the server before sending again.
+    ///   timeout or a dropped connection). Nil when the send is taken to have never left the phone
+    ///   (`neverReachedServer`, which is not certain for no connection). Its first replay then has
+    ///   no lookup. A note goes through /v1/commands when offline sync is on, which dedupes on the
+    ///   entry id, and otherwise through REST. A follow-up has no command, so it always goes
+    ///   through REST. A REST send is marked attempted first, so a retry after it looks on the
+    ///   server before sending again.
     @discardableResult
     func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, label: String? = nil, attemptedSince: Date? = nil) -> OutboxEntry? {
         guard let identity else { return nil }

@@ -67,7 +67,12 @@ final class MemorySessionSnapshotStore: SessionSnapshotStoring {
 }
 
 extension URLError.Code {
-    /// No network, or the server's host could not be found or connected to: nothing was sent.
+    /// No network, or the server's host could not be found or connected to. These codes are taken
+    /// to mean nothing was sent. The host, DNS, connect, data-not-allowed and roaming codes fail
+    /// before a connection exists. iOS may also return `.notConnectedToInternet` for a request
+    /// already in flight when the network interface goes down. A send that reached the server can
+    /// then land here, and its queued copy is sent a second time. That gives a duplicate note or
+    /// follow-up, never a lost one.
     var neverLeavesThePhone: Bool {
         switch self {
         case .notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
@@ -85,8 +90,10 @@ extension Error {
         return false
     }
 
-    /// A connectivity failure whose request never left the phone, so the server cannot have it.
-    /// A timeout or a dropped connection is not this: that request may have arrived.
+    /// A connectivity failure taken to mean the request never left the phone (`neverLeavesThePhone`),
+    /// so its queued copy is resent without a lookup first. A timeout or a dropped connection is
+    /// not this: that request may have arrived. `.notConnectedToInternet` is not certain either;
+    /// see `neverLeavesThePhone`.
     var neverReachedServer: Bool {
         if let problem = self as? Problem { return problem.status == nil && problem.neverSent }
         if let urlError = self as? URLError { return urlError.code.neverLeavesThePhone }

@@ -155,8 +155,9 @@ struct Problem: Codable, Error, LocalizedError {
     var category: String? = nil
     /// The fields a validation refusal names (`errors[].path`), when the server sends them.
     var errors: [ProblemIssue]? = nil
-    /// A "Network error" whose request never left the phone (no network, or the host could not be
-    /// found or connected to), so the server cannot have acted on it. Never read from a response.
+    /// A "Network error" taken to mean the request never left the phone (no network, or the host
+    /// could not be found or connected to; `URLError.Code.neverLeavesThePhone` says where that is
+    /// not certain). Never read from a response.
     var neverSent = false
     var errorDescription: String? { detail ?? title ?? "Request failed (\(status ?? 0))" }
 
