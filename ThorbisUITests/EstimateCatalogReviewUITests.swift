@@ -75,8 +75,14 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
         let add = app.buttons.matching(identifier: "estimate-add-item-heading")
             .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
-        for _ in 0..<8 where !add.exists { app.swipeUp() }
-        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        // One look at a time. Each accessibility read of this 500-line screen takes 15 to 30 s on
+        // CI, and `for … where !add.exists` read it on all eight passes after finding the button.
+        var found = add.exists
+        for _ in 0..<8 where !found {
+            app.swipeUp()
+            found = add.exists
+        }
+        XCTAssertTrue(found || add.waitForExistence(timeout: 20))
         XCTAssertFalse(add.isEnabled, "The option must respect its 500-line limit")
     }
 

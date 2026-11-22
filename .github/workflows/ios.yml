@@ -117,10 +117,33 @@ jobs:
         with:
           name: ios-test-build
           path: ${{ runner.temp }}
-      - name: Run this shard's UI tests
+      - name: Unpack the build and warm the simulator
+        # xcodebuild used to boot the simulator cold and install the app as the first test began.
+        # Three failures landed in a shard's first two minutes that way: a first launch that timed
+        # out in Xcode, and two taps the app received and never acted on while the system was still
+        # starting services and rendering the app's widgets (BYR-1835). This step does that work
+        # before any test: boot, install the app once, then wait (at most three minutes) for the
+        # machine's load to come back under its core count.
         run: |
           mkdir -p "${{ runner.temp }}/ThorbisBuild"
           tar -C "${{ runner.temp }}/ThorbisBuild" -xf "${{ runner.temp }}/ThorbisTestBuild.tar"
+          simulator_id=$(scripts/ci-simulator-id.sh)
+          xcrun simctl bootstatus "$simulator_id" -b
+          app=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 2 -name 'Thorbis.app' | head -n 1)
+          if [[ -n "$app" ]]; then
+            xcrun simctl install "$simulator_id" "$app" || echo "::warning::The app could not be installed ahead of the tests"
+          else
+            echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
+          fi
+          cores=$(sysctl -n hw.ncpu)
+          for _ in $(seq 1 36); do
+            load=$(sysctl -n vm.loadavg | awk '{print $2}')
+            if awk -v load="$load" -v cores="$cores" 'BEGIN { exit !(load < cores) }'; then break; fi
+            sleep 5
+          done
+          echo "Load before the first test: $(sysctl -n vm.loadavg) on $cores cores"
+      - name: Run this shard's UI tests
+        run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
           only_testing=$(python3 scripts/ui_test_shards.py --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
