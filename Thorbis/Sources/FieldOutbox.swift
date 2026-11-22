@@ -116,6 +116,20 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     /// Set before a send that may have reached the server without an answer; the next send of
     /// a follow-up or a note then checks the server first, since those routes cannot dedupe on their own.
     var attempted: Bool? = nil
+    /// When the first of those sends started. The check accepts only a note or follow-up made from
+    /// then on (less `clockAllowance` for the phone's clock), so the same words saved minutes
+    /// earlier are not taken for this one. Entries saved before this was kept have none.
+    var attemptedSince: Date? = nil
+
+    /// How far the phone's clock may run ahead of the server's for the check above.
+    static let clockAllowance: TimeInterval = 60
+    /// The window entries without `attemptedSince` keep: ten minutes before they were queued.
+    static let legacyLookback: TimeInterval = 600
+
+    /// The earliest server time a matching note or follow-up may carry to count as this one.
+    var lookupStart: Date {
+        attemptedSince.map { $0.addingTimeInterval(-Self.clockAllowance) } ?? createdAt.addingTimeInterval(-Self.legacyLookback)
+    }
 
     /// The record whose changes land in order (OF-06): the job, or the invoice for a payment
     /// on an invoice with no job.
@@ -380,8 +394,10 @@ final class FieldOutbox: ObservableObject {
         storageFailed ? "This phone could not save the latest change. Keep Thorbis open until it sends." : nil
     }
 
+    /// - Parameter attemptedSince: when an online send that may have reached the server started (a
+    ///   timeout or a dropped connection). Nil when nothing left the phone (`neverReachedServer`).
     @discardableResult
-    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, label: String? = nil, attempted: Bool = false) -> OutboxEntry? {
+    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, label: String? = nil, attemptedSince: Date? = nil) -> OutboxEntry? {
         guard let identity else { return nil }
         // A second tap on the same collected payment is the same payment, not another one.
         if case .payment(let payment) = action,
@@ -400,13 +416,15 @@ final class FieldOutbox: ObservableObject {
         entry.label = label
         if case .followUp = action {
             entry.restOnly = true
-            entry.attempted = attempted ? true : nil
+            entry.attempted = attemptedSince == nil ? nil : true
+            entry.attemptedSince = attemptedSince
         }
-        // A note queued after an online send failed may already be on the server. Replay it through
-        // REST, which looks for it first, so it is never posted twice.
-        if case .note = action, attempted {
+        // A note queued after an online send that may have arrived could already be on the server.
+        // Replay it through REST, which looks for it first, so it is never posted twice.
+        if case .note = action, let attemptedSince {
             entry.restOnly = true
             entry.attempted = true
+            entry.attemptedSince = attemptedSince
         }
         entries.append(entry)
         // Money and ink only count as saved once they are on disk; the caller keeps its own copy otherwise.
@@ -677,15 +695,12 @@ final class FieldOutbox: ObservableObject {
                 // A send that timed out may still have reached the server. Before sending the same
                 // note again, look for it there, so it is never posted twice.
                 if entry.attempted == true {
-                    let earlier = await noteExists(payload, since: entry.createdAt, actorID: entry.actorId, api: api)
+                    let earlier = await noteExists(payload, since: entry.lookupStart, actorID: entry.actorId, api: api)
                     guard current() else { return .stop }
                     guard let earlier else { return .stop }
                     if earlier { break }
                 }
-                if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-                    entries[index].attempted = true
-                    persist()
-                }
+                markAttempted(entry.id)
                 _ = try await api.addFieldNote(payload.jobId, body: payload.body)
             case .acknowledgeCheck(let payload):
                 _ = try await api.acknowledgeFieldCheck(payload.jobId, checkKey: payload.checkKey)
@@ -711,16 +726,13 @@ final class FieldOutbox: ObservableObject {
                                                       actorID: entry.actorId, organizationID: entry.organizationId)
             case .followUp(let payload):
                 if entry.attempted == true {
-                    let earlier = await followUpExists(payload, since: entry.createdAt, actorID: entry.actorId, api: api)
+                    let earlier = await followUpExists(payload, since: entry.lookupStart, actorID: entry.actorId, api: api)
                     guard current() else { return .stop }
                     // Unknown (no live answer): keep it queued rather than risk sending it twice.
                     guard let earlier else { return .stop }
                     if earlier { break } // An earlier send reached the server; it is done.
                 }
-                if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-                    entries[index].attempted = true
-                    persist()
-                }
+                markAttempted(entry.id)
                 guard let kind = FieldFollowUpRequest.Kind(rawValue: payload.kind) else {
                     reject(entry.id, reason: "This follow-up type is not supported.")
                     persist()
@@ -762,6 +774,14 @@ final class FieldOutbox: ObservableObject {
         }
     }
 
+    /// Marks a note or follow-up as about to be sent, keeping the start of its first such send.
+    private func markAttempted(_ id: String) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].attempted = true
+        if entries[index].attemptedSince == nil { entries[index].attemptedSince = Date() }
+        persist()
+    }
+
     /// Clears a change the server has, with the ink it no longer needs.
     private func finish(_ id: String) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
@@ -775,27 +795,25 @@ final class FieldOutbox: ObservableObject {
         entries.remove(at: index)
     }
 
-    /// Whether the job already has this follow-up from this person, made around or after it was
-    /// queued (ten minutes of slack for the phone's clock). Nil when there is no live answer:
-    /// a failed read, or one answered by the copy saved on this phone.
-    private func followUpExists(_ payload: OutboxEntry.FollowUpPayload, since queued: Date, actorID: String, api: APIClient) async -> Bool? {
+    /// Whether the job already has this follow-up from this person, made at or after `earliest`
+    /// (`OutboxEntry.lookupStart`). Nil when there is no live answer: a failed read, or one
+    /// answered by the copy saved on this phone.
+    private func followUpExists(_ payload: OutboxEntry.FollowUpPayload, since earliest: Date, actorID: String, api: APIClient) async -> Bool? {
         guard let records = try? await SavedCopies.$liveOnly.withValue(true, operation: { try await api.fieldFollowUps(payload.jobId) }),
               api.savedCopyDate("/v1/jobs/\(payload.jobId)/followups") == nil
         else { return nil }
-        let earliest = queued.addingTimeInterval(-600)
         return records.contains { record in
             record.kind == payload.kind && record.reason == payload.reason && record.nextAction == payload.nextAction &&
                 record.createdByUserId == actorID && (JobFiltering.date(record.createdAt).map { $0 >= earliest } ?? true)
         }
     }
 
-    /// Whether the job already has this note from this person, written around or after it was
-    /// queued. Nil when there is no live answer.
-    private func noteExists(_ payload: OutboxEntry.NotePayload, since queued: Date, actorID: String, api: APIClient) async -> Bool? {
+    /// Whether the job already has this note from this person, written at or after `earliest`
+    /// (`OutboxEntry.lookupStart`). Nil when there is no live answer.
+    private func noteExists(_ payload: OutboxEntry.NotePayload, since earliest: Date, actorID: String, api: APIClient) async -> Bool? {
         guard let records = try? await SavedCopies.$liveOnly.withValue(true, operation: { try await api.fieldNotes(payload.jobId) }),
               api.savedCopyDate("/v1/jobs/\(payload.jobId)/notes") == nil
         else { return nil }
-        let earliest = queued.addingTimeInterval(-600)
         return records.contains { record in
             record.body == payload.body && record.authorUserId == actorID &&
                 (JobFiltering.date(record.createdAt).map { $0 >= earliest } ?? true)

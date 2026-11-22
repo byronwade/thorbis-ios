@@ -297,13 +297,13 @@ struct CantStartSheet: View {
     }
 
     /// The follow-up path the job's Follow-ups screen uses (`JobFollowUpsView.create`): offline goes
-    /// to the outbox; a dropped connection is queued as attempted so the resend checks first.
+    /// to the outbox; a timeout or dropped connection is queued as attempted so the resend checks first.
     private func send(_ report: CantStartReport) async {
         busy = true
         defer { busy = false }
         let payload = report.payload(jobID: jobID)
-        func keep(attempted: Bool) {
-            guard outbox.enqueue(.followUp(payload), policyVersion: session.policyVersion ?? 0, attempted: attempted) != nil else {
+        func keep(attemptedSince: Date?) {
+            guard outbox.enqueue(.followUp(payload), policyVersion: session.policyVersion ?? 0, attemptedSince: attemptedSince) != nil else {
                 error = "This couldn\u{2019}t be saved on this phone. Try again when you have signal."
                 return
             }
@@ -311,7 +311,8 @@ struct CantStartSheet: View {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             onDone(.queued)
         }
-        if session.isOffline { keep(attempted: false); return }
+        if session.isOffline { keep(attemptedSince: nil); return }
+        let started = Date()
         do {
             _ = try await api.requestFieldFollowUp(jobID, request: report.request)
             error = nil
@@ -319,7 +320,9 @@ struct CantStartSheet: View {
             onDone(.sent)
         } catch is CancellationError {
         } catch {
-            if error.isConnectivityFailure { keep(attempted: true) } else { self.error = error.localizedDescription }
+            if error.isConnectivityFailure {
+                keep(attemptedSince: error.neverReachedServer ? nil : started)
+            } else { self.error = error.localizedDescription }
         }
     }
 }

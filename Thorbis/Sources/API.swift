@@ -155,6 +155,9 @@ struct Problem: Codable, Error, LocalizedError {
     var category: String? = nil
     /// The fields a validation refusal names (`errors[].path`), when the server sends them.
     var errors: [ProblemIssue]? = nil
+    /// A "Network error" whose request never left the phone (no network, or the host could not be
+    /// found or connected to), so the server cannot have acted on it. Never read from a response.
+    var neverSent = false
     var errorDescription: String? { detail ?? title ?? "Request failed (\(status ?? 0))" }
 
     /// True when a validation refusal names this field, or one under it ("multipart.parts.3").
@@ -712,7 +715,8 @@ final class APIClient: ObservableObject {
             let detail = (error as? URLError).map { offline.contains($0.code) } == true
                 ? (isGET ? "No connection. Check your signal and try again." : "This needs a connection. Try again when you have signal.")
                 : error.localizedDescription
-            throw Problem(title: "Network error", status: nil, detail: detail)
+            throw Problem(title: "Network error", status: nil, detail: detail,
+                          neverSent: (error as? URLError)?.code.neverLeavesThePhone == true)
         }
         try Task.checkCancellation()
         guard generation == requestGeneration else { throw CancellationError() }

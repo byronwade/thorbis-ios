@@ -225,8 +225,10 @@ final class FieldOutboxTests: XCTestCase {
         let task = Task { await box.drain(api: client, useCommandEndpoint: false, canSend: { allowed }) }
         try await waitForRequests(1); allowed = false; gate.release(); await task.value
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
-        // The first note is marked as tried, so the next sync looks for it before sending again.
-        var expected = original; expected[0].attempted = true
+        // The first note is marked as tried, so the next sync looks for it before sending again,
+        // from the time this send started.
+        let since = try XCTUnwrap(box.entries.first?.attemptedSince)
+        var expected = original; expected[0].attempted = true; expected[0].attemptedSince = since
         XCTAssertEqual(box.entries, expected); XCTAssertEqual(outbox().entries, expected)
     }
 
@@ -253,7 +255,7 @@ final class FieldOutboxTests: XCTestCase {
 
     func testANoteQueuedAfterAFailedSendIsLookedForBeforeItIsSentAgain() async throws {
         let box = outbox()
-        box.enqueue(.note(.init(jobId: jobA, body: "First")), policyVersion: 1, attempted: true)
+        box.enqueue(.note(.init(jobId: jobA, body: "First")), policyVersion: 1, attemptedSince: Date())
         let saved = #"{"id":"019f0000-0000-7000-8000-0000000000c1","organizationId":"\#(org)","jobId":"\#(jobA)","authorUserId":"\#(actor)","body":"First","createdAt":"\#(ISO8601DateFormatter().string(from: Date()))"}"#
         // Even with the command endpoint on, the retry reads the job's notes, finds it, and sends nothing more.
         await box.drain(api: api([.init(200, #"{"items":[\#(saved)]}"#)]), useCommandEndpoint: true)
@@ -271,6 +273,106 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertEqual(box.entries.first?.attempted, true)
         // The retry reads the job's notes, finds it, and sends nothing more.
         await box.drain(api: api([.init(200, #"{"items":[\#(saved)]}"#)]), useCommandEndpoint: false)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET"])
+        XCTAssertTrue(box.entries.isEmpty)
+    }
+
+    private func noteJSON(_ body: String, at date: Date) -> String {
+        #"{"id":"\#(UUID().uuidString.lowercased())","organizationId":"\#(org)","jobId":"\#(jobA)","authorUserId":"\#(actor)","body":"\#(body)","createdAt":"\#(ISO8601DateFormatter().string(from: date))"}"#
+    }
+
+    func testTheSameWordsSavedMinutesBeforeTheFailedSendDoNotSwallowTheQueuedNote() async throws {
+        let box = outbox()
+        // 10:00 "No answer at the door" saved; at 10:05 the same words time out and are queued.
+        let started = Date()
+        box.enqueue(.note(.init(jobId: jobA, body: "No answer at the door")), policyVersion: 1, attemptedSince: started)
+        let earlier = noteJSON("No answer at the door", at: started.addingTimeInterval(-5 * 60))
+        let sent = noteJSON("No answer at the door", at: Date())
+        await box.drain(api: api([.init(200, #"{"items":[\#(earlier)]}"#), .init(201, sent)]), useCommandEndpoint: false)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET", "POST"], "The 10:00 note is not this one, so it is sent")
+        XCTAssertTrue(box.entries.isEmpty)
+    }
+
+    func testANoteFromJustBeforeTheSendStartedStillCountsForTheClock() async throws {
+        let box = outbox()
+        let started = Date()
+        box.enqueue(.note(.init(jobId: jobA, body: "Gate code 4417")), policyVersion: 1, attemptedSince: started)
+        // The server's clock reads a little behind the phone's.
+        let landed = noteJSON("Gate code 4417", at: started.addingTimeInterval(-30))
+        await box.drain(api: api([.init(200, #"{"items":[\#(landed)]}"#)]), useCommandEndpoint: false)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET"])
+        XCTAssertTrue(box.entries.isEmpty)
+    }
+
+    func testANoteThatNeverLeftThePhoneIsQueuedWithoutALookup() async throws {
+        let box = outbox()
+        let entry = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Gate code 4417")), policyVersion: 1, attemptedSince: nil))
+        XCTAssertNil(entry.attempted)
+        XCTAssertNil(entry.restOnly, "It goes through the command endpoint, which dedupes on its id")
+        XCTAssertNil(entry.attemptedSince)
+    }
+
+    func testOnlyARequestThatNeverLeftThePhoneIsCalledUnsent() async throws {
+        do {
+            _ = try await api([URLProtocolFixture.offline]).addFieldNote(jobA, body: "Gate code 4417")
+            XCTFail("Expected a network error")
+        } catch {
+            XCTAssertTrue(error.isConnectivityFailure)
+            XCTAssertTrue(error.neverReachedServer, "No connection: nothing was sent")
+        }
+        do {
+            _ = try await api([URLProtocolFixture.timedOut]).addFieldNote(jobA, body: "Gate code 4417")
+            XCTFail("Expected a network error")
+        } catch {
+            XCTAssertTrue(error.isConnectivityFailure)
+            XCTAssertFalse(error.neverReachedServer, "A timeout may have reached the server")
+        }
+        XCTAssertTrue(URLError(.cannotConnectToHost).neverReachedServer)
+        XCTAssertFalse(URLError(.networkConnectionLost).neverReachedServer)
+        XCTAssertFalse(Problem(title: "Bad Request", status: 400, detail: nil).neverReachedServer)
+    }
+
+    func testTheLookupStartsAMinuteBeforeTheSendOrTenMinutesBeforeAnOlderEntry() {
+        let queued = Date(timeIntervalSince1970: 1_800_000_000)
+        var entry = OutboxEntry(id: "e", deviceId: "d", actorId: actor, organizationId: org, policyVersion: 1,
+                                createdAt: queued, action: .note(.init(jobId: jobA, body: "Gate code 4417")))
+        entry.attempted = true
+        XCTAssertEqual(entry.lookupStart, queued.addingTimeInterval(-600), "Saved before send times were kept")
+        entry.attemptedSince = queued.addingTimeInterval(-20)
+        XCTAssertEqual(entry.lookupStart, queued.addingTimeInterval(-80))
+    }
+
+    func testARetriedNoteLooksFromItsFirstSendNotTheRetry() async throws {
+        let box = outbox()
+        let started = Date().addingTimeInterval(-120)
+        box.enqueue(.note(.init(jobId: jobA, body: "First")), policyVersion: 1, attemptedSince: started)
+        // The replay finds nothing, sends, and times out too.
+        await box.drain(api: api([.init(200, #"{"items":[]}"#), URLProtocolFixture.timedOut]), useCommandEndpoint: false)
+        XCTAssertEqual(box.entries.first?.attemptedSince, started, "The first send's start is kept")
+        // The first send landed after all, 90 seconds before the retry started.
+        let landed = noteJSON("First", at: started.addingTimeInterval(30))
+        await box.drain(api: api([.init(200, #"{"items":[\#(landed)]}"#)]), useCommandEndpoint: false)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET"])
+        XCTAssertTrue(box.entries.isEmpty)
+    }
+
+    private func followUpJSON(at date: Date) -> String {
+        #"{"id":"\#(UUID().uuidString.lowercased())","organizationId":"\#(org)","jobId":"\#(jobA)","kind":"office_scheduling","reason":"Needs return visit","nextAction":"Call customer","ownerUserId":"\#(actor)","status":"open","createdByUserId":"\#(actor)","createdAt":"\#(ISO8601DateFormatter().string(from: date))"}"#
+    }
+
+    func testAFollowUpLooksOnlyFromWhenItsSendStarted() async throws {
+        let payload = OutboxEntry.FollowUpPayload(jobId: jobA, kind: "office_scheduling", reason: "Needs return visit", nextAction: "Call customer")
+        let box = outbox()
+        let started = Date()
+        box.enqueue(.followUp(payload), policyVersion: 1, attemptedSince: started)
+        // The same follow-up made five minutes earlier is another one: this one is still sent.
+        let earlier = followUpJSON(at: started.addingTimeInterval(-5 * 60))
+        await box.drain(api: api([.init(200, #"{"items":[\#(earlier)]}"#), .init(201, followUpJSON(at: Date()))]), useCommandEndpoint: false)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET", "POST"])
+        XCTAssertTrue(box.entries.isEmpty)
+        // One made after the send started is this one: nothing more is sent.
+        box.enqueue(.followUp(payload), policyVersion: 1, attemptedSince: started)
+        await box.drain(api: api([.init(200, #"{"items":[\#(followUpJSON(at: started.addingTimeInterval(5)))]}"#)]), useCommandEndpoint: false)
         XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET"])
         XCTAssertTrue(box.entries.isEmpty)
     }

@@ -5684,6 +5684,7 @@ struct JobDetailView: View {
         }
         busy = true
         defer { busy = false }
+        let started = Date()
         do {
             let saved = try await api.addFieldNote(jobId, body: note.trimmingCharacters(in: .whitespacesAndNewlines))
             notes.append(saved)
@@ -5692,8 +5693,10 @@ struct JobDetailView: View {
             await loadCloseout()
         } catch is CancellationError {} catch {
             if error.isConnectivityFailure {
-                // The send may have reached the server before the connection dropped.
-                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0, attempted: true)
+                // A timeout or a dropped connection may have reached the server, so the replay looks
+                // for the note from `started` on first. A send that never left the phone is just resent.
+                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0,
+                               attemptedSince: error.neverReachedServer ? nil : started)
                 note = ""
             } else {
                 self.error = error.localizedDescription

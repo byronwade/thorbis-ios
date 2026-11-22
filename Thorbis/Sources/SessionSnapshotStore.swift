@@ -66,11 +66,30 @@ final class MemorySessionSnapshotStore: SessionSnapshotStoring {
     func clear() { snapshot = nil }
 }
 
+extension URLError.Code {
+    /// No network, or the server's host could not be found or connected to: nothing was sent.
+    var neverLeavesThePhone: Bool {
+        switch self {
+        case .notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+             .dataNotAllowed, .internationalRoamingOff: true
+        default: false
+        }
+    }
+}
+
 extension Error {
     /// True when the request never reached a server answer (no signal, DNS, timeout).
     var isConnectivityFailure: Bool {
         if let problem = self as? Problem { return problem.status == nil && problem.title == "Network error" }
         if let urlError = self as? URLError { return urlError.code != .cancelled }
+        return false
+    }
+
+    /// A connectivity failure whose request never left the phone, so the server cannot have it.
+    /// A timeout or a dropped connection is not this: that request may have arrived.
+    var neverReachedServer: Bool {
+        if let problem = self as? Problem { return problem.status == nil && problem.neverSent }
+        if let urlError = self as? URLError { return urlError.code.neverLeavesThePhone }
         return false
     }
 
