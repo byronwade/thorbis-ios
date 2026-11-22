@@ -459,6 +459,14 @@ final class SessionController: ObservableObject {
             guard Set(memberships.map(\.id)).count == memberships.count,
                   memberships.allSatisfy({ !$0.id.isEmpty && !$0.name.isEmpty })
             else { throw SessionValidationError(reason: "Invalid workspace list.") }
+            // A removed member's sessions come back with no active company (the server nulls it), so
+            // the offline copy is forgotten here, before the no-workspace and picker paths, whenever
+            // it names another account or a company this account no longer belongs to. Otherwise a
+            // later launch without signal would reopen the company the person was removed from.
+            if let held = snapshots.load(),
+               held.user.id != payload.user.id || !memberships.contains(where: { $0.id == held.organization.id }) {
+                snapshots.clear()
+            }
             user = payload.user
             organizations = memberships
             sessionDeadline = sessionExpiry
