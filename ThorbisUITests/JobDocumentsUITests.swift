@@ -53,6 +53,8 @@ final class JobDocumentsUITests: XCTestCase {
         let app = preview(extra: ["--paper-preview-overview-payment-hold"])
         thorbisTapStableButton(app, "job-section-money")
         let collect = app.buttons["job-invoice-collect-\(invoiceA)"]
+        // The invoice's card sits below the fold in Money's lazy stack, as in the test above.
+        for _ in 0..<10 where !collect.exists { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(collect.waitForExistence(timeout: 15))
         app.scrollClearOfFoot(collect)
         XCTAssertTrue(collect.isHittable)
