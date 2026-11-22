@@ -20,8 +20,10 @@ The port plan is [paper-v2-port-plan.md](paper-v2-port-plan.md).
   and the one live thing. This is the iOS blue; the web keeps its own accent
   (`#3A6AE0`), and neither client is repainted to the other's. Status words use Paper's
   `-text` colours and marks use the plain hue. `Theme.ai*` is Paper's purple for AI help
-  only. Eight Paper values are one shade off (1–4%) so that `scripts/tests/contrast.py`
-  still passes with 0 failures; `Theme.swift` lists them.
+  only. Eight Paper values are one shade off (1–4%), and five coloured words (dark brand
+  text, destructive and AI; light success and warning) sit one step further from the ground
+  so they hold 4.5:1 on a chip fill and a field as well as the canvas and card. With them
+  `scripts/tests/contrast.py` passes with 0 failures; `Theme.swift` lists them.
 - **Canvas:** every screen sits on Paper's `sidebar` tone (`Theme.background` =
   `#F3F2EE` / `#141414`) with grouped cards (`Theme.card`, radius 20) on top; Paper's own
   `background` (`#FAF9F6` / `#1F1F1F`) only frames the drawer in its mock-ups.

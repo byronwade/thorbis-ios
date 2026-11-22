@@ -35,15 +35,17 @@ checks = {
     "muted": grounds + ["surface", "warningSurface"],
     # The unchosen segments of every segmented control sit on the track.
     "subtle": grounds + ["surface", "warningSurface", "segmentTrack"],
-    "brandText": grounds[:2] + ["brandSurface"],
-    "success": grounds[:2] + ["successSurface"],
-    "warning": grounds[:2] + ["warningSurface"],
-    "destructive": grounds[:2] + ["destructiveSurface"],
-    "statusScheduledText": grounds[:2] + ["statusScheduledSurface"],
-    "statusInvoicedText": grounds[:2] + ["statusInvoicedSurface"],
+    # Coloured words sit on every ground too: a ••• sheet menu draws its rows (Cancel job in
+    # destructive, links in brandText) on fill, and a select or field sets them on field.
+    "brandText": grounds + ["brandSurface"],
+    "success": grounds + ["successSurface"],
+    "warning": grounds + ["warningSurface"],
+    "destructive": grounds + ["destructiveSurface"],
+    "statusScheduledText": grounds + ["statusScheduledSurface"],
+    "statusInvoicedText": grounds + ["statusInvoicedSurface"],
     "onInk": ["foreground"],
     # Paper v2: the drawer / iPad sidebar and its chosen place; the AI accent as text.
-    "ai": grounds[:2] + ["aiSurface"],
+    "ai": grounds + ["aiSurface"],
 }
 for t in ["foreground", "muted", "subtle"]:
     checks[t] = checks[t] + ["sidebar", "sidebarAccent"]

@@ -147,6 +147,10 @@ enum Theme {
     // light muted 6B6B6B→686868, AI 7C5BC2→7757BA, success text 15803D→157D3C, warning text B45309→B15209, the
     // in-progress mark D97706→D07206 and the done mark 16A34A→159E48; dark brand text 5285FF→5587FF;
     // and brand 2F6BFF→2F6AFF, so the white words on every blue commit and pill hold 4.5:1.
+    // Coloured words also sit on a chip's fill and a field (a ••• sheet menu's rows, a select), so
+    // five more moved a step to hold 4.5:1 there: dark brand text 5587FF→6494FF, dark destructive
+    // text F15A5A→F46A6A, dark AI 9D7FD1→A688D8, light success text 157D3C→137333 (and the
+    // invoiced word with it), light warning text B15209→A44A08.
     static let card = adaptive(light: 0xFFFFFF, dark: 0x232323)
     /// The panel grouped rows sit on (radius 14). Same as `card`, named for what it is.
     static let well = card
@@ -194,15 +198,15 @@ enum Theme {
     /// 4.5:1): selected, focus, switches, the one live thing. Never a wash.
     static let brand = Color(hex: 0x2F6AFF)
     /// Brand used as text or a link (Paper `brand-text`).
-    static let brandText = adaptive(light: 0x1F55E0, dark: 0x5587FF, highLight: 0x1A44B7, highDark: 0xBDD8FF)
+    static let brandText = adaptive(light: 0x1F55E0, dark: 0x6494FF, highLight: 0x1A44B7, highDark: 0xBDD8FF)
     static let brandSurface = adaptive(light: 0xE3ECFF, dark: 0x182642)
     /// Success as a word (Paper `success-text`); `statusDone` is the mark.
-    static let success = adaptive(light: 0x157D3C, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
+    static let success = adaptive(light: 0x137333, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
     /// Warning as a word (Paper `warning-text`); `statusInProgress` is the mark.
-    static let warning = adaptive(light: 0xB15209, dark: 0xFBBF24, highLight: 0x7E3E00, highDark: 0xFFD27A)
+    static let warning = adaptive(light: 0xA44A08, dark: 0xFBBF24, highLight: 0x7E3E00, highDark: 0xFFD27A)
     static let warningSurface = adaptive(light: 0xFCEFD2, dark: 0x2A2008)
     /// Error as a word (Paper `destructive-text`); `statusAttention` is the mark.
-    static let destructive = adaptive(light: 0xC81E1E, dark: 0xF15A5A, highLight: 0xA10015, highDark: 0xFFB1AC)
+    static let destructive = adaptive(light: 0xC81E1E, dark: 0xF46A6A, highLight: 0xA10015, highDark: 0xFFB1AC)
     /// Red as a fill under white type or a white glyph (a badge, a destructive commit): 4.5:1 or better.
     static let destructiveFill = adaptive(light: 0xDC2626, dark: 0xC81E1E)
     /// The chosen segment's raised pill. In dark it sits lighter than the panel so the choice shows.
@@ -213,7 +217,7 @@ enum Theme {
     static let segmentTrack = adaptive(light: 0xE7E5E0, dark: 0x262626)
     static let segmentShadow = Color.black.opacity(0.12)
     /// Paper's AI accent: the AI help button, suggestions and drafts. Never for status.
-    static let ai = adaptive(light: 0x7757BA, dark: 0x9D7FD1)
+    static let ai = adaptive(light: 0x7757BA, dark: 0xA688D8)
     static let aiSurface = adaptive(light: 0xEEE8FA, dark: 0x241B33)
     static let aiBorder = adaptive(light: 0xD6C9F0, dark: 0x3A2E52)
 
@@ -242,7 +246,7 @@ enum Theme {
     static let statusAttentionSurface = destructiveSurface
     /// Paid reads as success too; the word ("Paid", "Invoiced") tells it from Done.
     static let statusInvoiced = adaptive(light: 0x159E48, dark: 0x22C55E)
-    static let statusInvoicedText = adaptive(light: 0x157D3C, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
+    static let statusInvoicedText = adaptive(light: 0x137333, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
     static let statusInvoicedSurface = adaptive(light: 0xDCF5E4, dark: 0x122B1C)
 
     /// Place marks (design.thorbis.com Color): olive, forest, pumpkin, burnt, and the accent mixed
