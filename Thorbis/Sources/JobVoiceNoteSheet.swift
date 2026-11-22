@@ -80,7 +80,7 @@ struct JobVoiceNoteSheet: View {
                     Button(action: onStop) {
                         VStack(spacing: 8) {
                             RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.white).frame(width: 26, height: 26)
-                                .frame(width: 84, height: 84).background(Theme.destructive, in: Circle())
+                                .frame(width: 84, height: 84).background(Theme.destructiveFill, in: Circle())
                             Text("Stop").font(Theme.font(15, weight: .semibold))
                         }
                     }
