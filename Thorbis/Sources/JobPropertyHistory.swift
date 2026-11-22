@@ -111,8 +111,8 @@ struct JobPropertyHistory: Codable, Hashable {
     }
 
     /// The job's street (the first line of its own location's address), or nil when the job
-    /// records no site (BYR-1593). A job without one is shown at `JobFallbackAddress`, with its
-    /// caveat, never as if it were the job's own site.
+    /// records no site (BYR-1593). A job without one may be shown at the customer's own address
+    /// (`JobFallbackAddress`), with its caveat, never as if it were the job's own site.
     static func street(job: JobRecord, locations: [ServiceLocationRecord]) -> String? {
         guard let locationID = job.locationId,
               let place = locations.first(where: { $0.id == locationID && $0.customerId == job.customerId && $0.organizationId == job.organizationId })
@@ -155,14 +155,17 @@ struct JobPropertyHistory: Codable, Hashable {
 }
 
 /// Where a job that records no site of its own is shown to be, until BYR-1593 settles which field
-/// holds a job's site: the customer's only service location, else, when they have none, the
-/// customer's own address (`customers.address`), as the server's job notices and the web job page
-/// already do. Every surface that shows it says `caveat`. Never a guess between several service
-/// locations, and nothing while the customer's locations are unread.
+/// holds a job's site: the customer's own address (`customers.address`), as the server's job
+/// notices and the web job page already show it, when it is their only address on file. That is
+/// when no service location says otherwise: they have none, or only the property made from that
+/// same address (New customer and Book job's new caller make one). Every surface that shows it says
+/// `caveat`. A service location's own address is never promoted to the job's, and nothing shows
+/// while the customer's locations are unread.
 struct JobFallbackAddress: Equatable {
     static let caveat = "From the customer's only address on file"
 
     let address: String
+    /// The pin of a property at this same address, when one has it.
     let coordinates: FieldCoordinates?
 
     /// The street line, as a stop's own address reads it.
@@ -176,14 +179,20 @@ struct JobFallbackAddress: Equatable {
     static func make(locationID: String?, customerID: String?, organizationID: String?,
                      locations: [ServiceLocationRecord]?, customerAddress: String?) -> JobFallbackAddress? {
         guard locationID == nil, let customerID, let organizationID, let locations else { return nil }
+        let address = customerAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !address.isEmpty else { return nil }
         let service = locations.filter {
             $0.customerId == customerID && $0.organizationId == organizationID && $0.kind != "billing"
         }
-        if service.count > 1 { return nil }
-        let place = service.first
-        let address = (place?.address ?? customerAddress)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !address.isEmpty else { return nil }
-        return JobFallbackAddress(address: address, coordinates: place?.coordinates)
+        // A property somewhere else means the account's address is not the only one on file.
+        guard service.allSatisfy({ sameAddress($0.address, address) }) else { return nil }
+        return JobFallbackAddress(address: address, coordinates: service.lazy.compactMap(\.coordinates).first)
+    }
+
+    /// The same words, ignoring case and spacing: the property made from a typed address is that address.
+    static func sameAddress(_ lhs: String, _ rhs: String) -> Bool {
+        func words(_ value: String) -> [Substring] { value.lowercased().split(whereSeparator: \.isWhitespace) }
+        return words(lhs) == words(rhs)
     }
 }
 

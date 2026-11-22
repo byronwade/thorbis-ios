@@ -1784,8 +1784,9 @@ struct JobDetailView: View {
     }
 
     /// Paper 21's bar: Call, Text and Directions as card circles, 8 apart, after the commit.
-    /// Directions go to the one location on file or ask which of several; with none, to the
-    /// customer's own address (JobFallbackAddress). No job site is inferred.
+    /// Directions go where the header says: for a job with no site, the customer's own address when
+    /// it is their only one on file (JobFallbackAddress); else the one location on file, or a choice
+    /// of several. No job site is inferred.
     private func reachCircles(_ job: JobRecord) -> some View {
         let phone = customerContext(job) == contactsContext ? customerPhone : nil
         let reach = JobReach(phone: phone, email: nil)
@@ -1810,7 +1811,15 @@ struct JobDetailView: View {
 
     @ViewBuilder
     private var directionsCircle: some View {
-        if customerLocations.count == 1, let only = customerLocations.first,
+        if let url = job.flatMap({ fallbackAddress($0) })?.directions {
+            // No site on the job: the customer's own address, the one the header shows.
+            Button { openURL(url) } label: { barCircle("location") }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Directions")
+                .accessibilityValue(JobFallbackAddress.caveat)
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("job-directions")
+        } else if customerLocations.count == 1, let only = customerLocations.first,
            let url = JobLocationPolicy.directions(for: only.id, in: customerLocations) {
             Button { openURL(url) } label: { barCircle("location") }
                 .buttonStyle(PressStyle())
@@ -1829,14 +1838,6 @@ struct JobDetailView: View {
             .accessibilityLabel("Directions")
             .accessibilityHint("Choose a customer location")
             .accessibilityIdentifier("job-directions")
-        } else if let url = job.flatMap({ fallbackAddress($0) })?.directions {
-            // No location on file: the customer's own address, as the header says.
-            Button { openURL(url) } label: { barCircle("location") }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Directions")
-                .accessibilityValue(JobFallbackAddress.caveat)
-                .accessibilityHint("Opens driving directions in Maps")
-                .accessibilityIdentifier("job-directions")
         } else {
             barCircle("location", enabled: false)
                 .accessibilityElement(children: .ignore)
@@ -2389,10 +2390,17 @@ struct JobDetailView: View {
         .accessibilityIdentifier("job-commit")
     }
 
-    /// Directions as the bar's circle gives them: straight to Maps with one address on file, a
-    /// choice with several, the customer's own address with no location (no job site is inferred).
+    /// Directions as the bar's circle gives them: the header's fallback address first, else straight
+    /// to Maps with one address on file or a choice with several (no job site is inferred).
     @ViewBuilder private var openInMaps: some View {
-        if customerLocations.count == 1, let only = customerLocations.first,
+        if let url = job.flatMap({ fallbackAddress($0) })?.directions {
+            // No site on the job: the customer's own address, the one the header shows.
+            Button { openURL(url) } label: { secondaryPill("Open in Maps") }
+                .buttonStyle(PressStyle())
+                .accessibilityValue(JobFallbackAddress.caveat)
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("job-open-in-maps")
+        } else if customerLocations.count == 1, let only = customerLocations.first,
            let url = JobLocationPolicy.directions(for: only.id, in: customerLocations) {
             Button { openURL(url) } label: { secondaryPill("Open in Maps") }
                 .buttonStyle(PressStyle())
@@ -2409,12 +2417,6 @@ struct JobDetailView: View {
             }
             .accessibilityHint("Choose a customer location")
             .accessibilityIdentifier("job-open-in-maps")
-        } else if customerLocations.isEmpty, let url = job.flatMap({ fallbackAddress($0) })?.directions {
-            Button { openURL(url) } label: { secondaryPill("Open in Maps") }
-                .buttonStyle(PressStyle())
-                .accessibilityValue(JobFallbackAddress.caveat)
-                .accessibilityHint("Opens driving directions in Maps")
-                .accessibilityIdentifier("job-open-in-maps")
         }
     }
 
@@ -3025,12 +3027,14 @@ struct JobDetailView: View {
     /// Paper's Overview (service addresses, membership, the booking call, follow-ups and the
     /// record's own dates) follow them here.
     private func atAddressScreen(_ job: JobRecord) -> some View {
-        JobAtAddressView(job: job, street: street(job), visits: visits, visitsLoaded: visitsLoaded, locations: customerLocations) {
+        // The job's own site only: the visits here are the customer's, not visits at their address.
+        JobAtAddressView(job: job, street: JobPropertyHistory.street(job: job, locations: customerLocations), visits: visits,
+                         visitsLoaded: visitsLoaded, locations: customerLocations) {
             if session.can("customer.view", feature: "core_crm") {
                 let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
                                            loaded: placesCurrent, failed: locationsFailed,
-                                           headerStreet: displayTitle(job),
+                                           headerStreet: displayTitle(job), accountAddress: fallbackAddress(job)?.address,
                                            factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
             }
             CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)

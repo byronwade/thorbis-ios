@@ -141,7 +141,7 @@ struct NewCustomerSheet: View {
             .sheet(isPresented: $editingReferral) { ReferralSourceSheet(value: $referral) }
             // "Save and book a job": the new job opens over this sheet; closing it closes both.
             .sheet(item: $bookFor, onDismiss: { dismiss() }) { customer in
-                SheetSurface { NewJobSheet(preselected: customer) }
+                SheetSurface { NewJobSheet(preselected: customer, justCreated: true, owedProperty: owed) }
             }
             .onAppear {
                 if request.name.isEmpty { request.name = initialName.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -171,17 +171,25 @@ struct NewCustomerSheet: View {
     /// Paper's title row: Cancel on a card pill, the title, Save customer on the brand pill.
     private func header(canCreate: Bool) -> some View {
         // Once the customer is saved without their property, the way out keeps them ("Close") and
-        // the commit tries only the property again.
+        // the commit tries only the property again, or is gone when trying again can't help.
         PaperTaskBar(title: "New customer", cancelTitle: owed == nil ? "Cancel" : "Close", cancelDisabled: busy,
-                     commit: ThorbisSheetHeaderAction(title: owed == nil ? "Save customer" : "Try again", busy: busy, enabled: canCreate,
-                                                      identifier: "sheet-commit",
-                                                      hint: canCreate ? nil : "Your role can't add customers. Ask your office.",
-                                                      accessibilityLabel: owed == nil ? nil : "Try adding the address as a property again",
-                                                      action: { Task { await commit() } }),
+                     commit: owed?.retryable == false ? nil : commitAction(canCreate: canCreate),
                      onCancel: { dismiss() })
         // A title row is a bar: it stops growing at xLarge so the pills never break mid-word and
         // the title keeps its room. The form under it follows the reader's text size in full.
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
+    }
+
+    /// Save customer, or Try again (the property only) once the customer is saved without it. The
+    /// spoken name is the visible words, so Voice Control's "Tap Try again" finds it.
+    private func commitAction(canCreate: Bool) -> ThorbisSheetHeaderAction {
+        if owed != nil {
+            return ThorbisSheetHeaderAction(title: "Try again", busy: busy, identifier: "sheet-commit",
+                                            hint: "Adds their address as a property", action: { Task { await commit() } })
+        }
+        return ThorbisSheetHeaderAction(title: "Save customer", busy: busy, enabled: canCreate, identifier: "sheet-commit",
+                                        hint: canCreate ? nil : "Your role can't add customers. Ask your office.",
+                                        action: { Task { await commit() } })
     }
 
     /// "How they found us" with the answer trailing in the muted ink and a quiet chevron, 56 tall.
@@ -273,6 +281,11 @@ struct NewCustomerSheet: View {
     private var addressProblem: String? { commitPressed && address.count > 500 ? "Keep the address to 500 characters." : nil }
 
     private func commit(thenBook: Bool = false) async {
+        // Saved, with a property that trying again can't add: nothing is sent again.
+        if let owed, !owed.retryable {
+            if thenBook { focused = nil; bookFor = owed.customer } else { dismiss() }
+            return
+        }
         commitPressed = true
         emailChecked = true
         guard valid else {
@@ -332,27 +345,32 @@ struct NewCustomerSheet: View {
         body.phone = clean(phone)
         body.email = clean(email)
         body.address = clean(address)
+        let session = self.session
+        let access = NewCustomerSave.Access(session: session)
+        let generation = session.generation
+        let organizationID = session.activeOrganization?.id
+        let current: @MainActor () -> Bool = {
+            session.generation == generation && session.activeOrganization?.id == organizationID
+        }
         do {
             let outcome: NewCustomerSave.Outcome
             if let owed {
                 // The customer is saved; only their address is left to add as a property.
-                outcome = try await NewCustomerSave.add(owed, api: api)
+                outcome = try await NewCustomerSave.add(owed, api: api, access: access, currentAuthority: current)
             } else {
-                outcome = try await NewCustomerSave.run(body, referralSource: clean(String(referral.prefix(120))), api: api)
+                outcome = try await NewCustomerSave.run(body, referralSource: clean(String(referral.prefix(120))), api: api,
+                                                        access: access, currentAuthority: current)
                 await store.refresh(api)
                 onCreated(outcome.customer)
             }
             owed = outcome.owed
-            if let notice = outcome.owed?.notice {
-                // The customer is kept; the sheet stays to say so.
-                error = notice
-                return
-            }
-            error = nil
+            // The customer is kept either way; a property that didn't save is said in the error line.
+            error = outcome.owed?.notice
             if thenBook {
+                // The booking still opens: Book job tries an owed property again and says how it went.
                 focused = nil
                 bookFor = outcome.customer
-            } else {
+            } else if outcome.owed == nil {
                 dismiss()
             }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
@@ -365,20 +383,58 @@ struct NewCustomerSheet: View {
 /// only, so the property is a second call. The customer is kept when only that call fails, and a
 /// retry adds only the property, so it never makes a second customer.
 enum NewCustomerSave {
+    /// What the role may do with the property: `customers.addLocation` needs customer.edit, and the
+    /// look for one already there (after a try that got no answer) needs customer.view.
+    struct Access: Equatable {
+        var canAdd: Bool
+        var canCheck: Bool
+
+        init(canAdd: Bool, canCheck: Bool) {
+            self.canAdd = canAdd
+            self.canCheck = canCheck
+        }
+
+        @MainActor init(session: SessionController) {
+            self.init(canAdd: session.can("customer.edit", feature: "core_crm"),
+                      canCheck: session.can("customer.view", feature: "core_crm"))
+        }
+    }
+
     /// A customer saved without their property yet: what the next press tries again.
     struct Owed {
+        enum Reason: Equatable {
+            /// It didn't save; trying again may.
+            case failed
+            /// The role can't add a property: trying again won't help.
+            case refused
+            /// A try got no answer and the role can't look whether it made one: trying again could
+            /// add a second copy.
+            case unchecked
+        }
+
         let customer: Customer
         let property: FieldLocationCreate
         /// The last try got no answer, so the property may already be there.
         let uncertain: Bool
-        /// The server said this role can't add a property, so trying again won't help.
-        let refused: Bool
+        var reason: Reason = .failed
+
+        /// Whether Try again can still help. A refused or unchecked property is never sent again.
+        var retryable: Bool { reason == .failed }
 
         /// What the sheet says, in its own error line.
         var notice: String {
-            refused
-                ? "\(customer.name) is saved, but your role can\u{2019}t add their address as a property. Ask your office to add it."
-                : "\(customer.name) is saved, but their address wasn\u{2019}t added as a property. Tap Try again, or add it on their record."
+            switch reason {
+            case .failed:
+                "\(customer.name) is saved, but their address wasn\u{2019}t added as a property. Tap Try again, or add it on their record."
+            case .refused:
+                "\(customer.name) is saved, but your role can\u{2019}t add their address as a property. Ask your office to add it."
+            case .unchecked:
+                "\(customer.name) is saved, but their address may not have been added as a property. Ask your office to check their record."
+            }
+        }
+
+        func because(_ reason: Reason) -> Owed {
+            Owed(customer: customer, property: property, uncertain: uncertain, reason: reason)
         }
     }
 
@@ -397,8 +453,10 @@ enum NewCustomerSave {
 
     /// `POST /v1/customers`, then `POST /v1/customers/{id}/locations` when the request carries an
     /// address. Throws only while the customer is not saved, or when the work was cancelled.
+    /// - Parameter currentAuthority: still the same session and workspace that started the save.
     @MainActor
-    static func run(_ request: NewCustomerRequest, referralSource: String? = nil, api: APIClient) async throws -> Outcome {
+    static func run(_ request: NewCustomerRequest, referralSource: String? = nil, api: APIClient, access: Access,
+                    currentAuthority: @escaping @MainActor () -> Bool) async throws -> Outcome {
         let customer: Customer
         if let referralSource {
             // The same create, with "How they found us" beside the request's own fields.
@@ -409,22 +467,42 @@ enum NewCustomerSave {
         guard let property = property(address: request.address, accountType: request.accountType) else {
             return Outcome(customer: customer, owed: nil)
         }
-        return try await add(Owed(customer: customer, property: property, uncertain: false, refused: false), api: api)
+        return try await add(Owed(customer: customer, property: property, uncertain: false), api: api, access: access,
+                             currentAuthority: currentAuthority)
     }
 
     /// Adds an owed property. After a try that got no answer it reads the customer's locations
-    /// first and keeps the one already there: the route takes no idempotency key, so this is what
-    /// stops a lost answer from leaving two copies. Throws only when the work was cancelled.
+    /// first, from the server only, and keeps the one already there: the route takes no idempotency
+    /// key, so this is what stops a lost answer from leaving two copies. A property that can't be
+    /// helped by trying again comes back as it was, with nothing sent. Throws only when the work was
+    /// cancelled.
     @MainActor
-    static func add(_ owed: Owed, api: APIClient) async throws -> Outcome {
+    static func add(_ owed: Owed, api: APIClient, access: Access,
+                    currentAuthority: @escaping @MainActor () -> Bool) async throws -> Outcome {
+        guard owed.retryable else { return Outcome(customer: owed.customer, owed: owed) }
+        // Not sent when the role is known not to be allowed; the server would refuse it.
+        guard access.canAdd else { return Outcome(customer: owed.customer, owed: owed.because(.refused)) }
         let customerID = owed.customer.id
-        do {
-            if owed.uncertain {
-                let places = try await api.allLocationsForRecovery(customerID, currentAuthority: { true })
-                if places.contains(where: { $0.customerId == customerID && $0.kind == owed.property.kind && $0.address == owed.property.address }) {
+        if owed.uncertain {
+            guard access.canCheck else { return Outcome(customer: owed.customer, owed: owed.because(.unchecked)) }
+            do {
+                // Never a copy saved on this phone: it may predate the try that got no answer.
+                let places = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await api.allLocationsForRecovery(customerID, currentAuthority: currentAuthority)
+                }
+                guard currentAuthority() else { throw CancellationError() }
+                if places.contains(where: { $0.customerId == customerID && $0.kind == owed.property.kind
+                                            && JobFallbackAddress.sameAddress($0.address, owed.property.address) }) {
                     return Outcome(customer: owed.customer, owed: nil)
                 }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Not known whether it is there, so nothing is sent; a refused look can't be tried again.
+                return Outcome(customer: owed.customer, owed: (error as? Problem)?.status == 403 ? owed.because(.unchecked) : owed)
             }
+        }
+        do {
             _ = try await api.createFieldLocation(customerID, request: owed.property)
             return Outcome(customer: owed.customer, owed: nil)
         } catch is CancellationError {
@@ -434,7 +512,7 @@ enum NewCustomerSave {
             let madeNothing = RetryKey<String>.isDefinite(error) || (error as? Problem)?.neverSent == true
             return Outcome(customer: owed.customer,
                            owed: Owed(customer: owed.customer, property: owed.property, uncertain: owed.uncertain || !madeNothing,
-                                      refused: (error as? Problem)?.status == 403))
+                                      reason: (error as? Problem)?.status == 403 ? .refused : .failed))
         }
     }
 }

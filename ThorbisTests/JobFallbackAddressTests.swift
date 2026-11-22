@@ -1,9 +1,10 @@
 import XCTest
 @testable import Thorbis
 
-/// A job that records no site of its own is shown at the customer's only address on file, said
-/// with its caveat: the only service location, else the customer's own address. Never a guess
-/// between several, and never another customer's or workspace's place.
+/// A job that records no site of its own is shown at the customer's own address, said with its
+/// caveat, when it is their only address on file: no service location, or only the property made
+/// from that same address. A property elsewhere is never promoted to the job, and another
+/// customer's or workspace's place never counts.
 @MainActor
 final class JobFallbackAddressTests: XCTestCase {
     private let organization = "00000000-0000-4000-8000-000000000002"
@@ -43,18 +44,27 @@ final class JobFallbackAddressTests: XCTestCase {
         XCTAssertEqual(fallback(locations: [billing], customerAddress: "731 Cassia Way")?.address, "731 Cassia Way")
     }
 
-    func testTheOnlyServiceLocationStandsInWithItsPin() {
+    func testThePropertyMadeFromTheCustomersAddressLeavesItTheirOnlyOne() {
+        // New customer and Book job make "Home" from the typed address; it is the same address, so the
+        // account's address still stands in, with that property's pin when it has one.
         let pin = FieldCoordinates(latitude: 38.5, longitude: -121.4)
-        let place = fallback(locations: [location(home, coordinates: pin), location("00000000-0000-4000-8000-000000007002", kind: "billing")],
-                             customerAddress: "731 Cassia Way")
-        XCTAssertEqual(place?.address, "412 Birchwood Ln, Springfield")
+        let place = fallback(locations: [location(home, address: "731  cassia way, Springfield", coordinates: pin),
+                                         location("00000000-0000-4000-8000-000000007002", kind: "billing", address: "PO Box 12")],
+                             customerAddress: "731 Cassia Way, Springfield")
+        XCTAssertEqual(place?.address, "731 Cassia Way, Springfield", "The account's own words, not the property's")
         XCTAssertEqual(place?.coordinates, pin)
-        XCTAssertEqual(place?.street, "412 Birchwood Ln")
+        XCTAssertEqual(place?.street, "731 Cassia Way")
         XCTAssertEqual(destination(place?.directions), "38.5,-121.4")
     }
 
+    func testAPropertySomewhereElseIsNeverPromotedToTheJob() {
+        // The customer's address is not their only one, and the property may not be where the job is.
+        XCTAssertNil(fallback(locations: [location(home, address: "412 Birchwood Ln, Springfield")], customerAddress: "731 Cassia Way"))
+        XCTAssertNil(fallback(locations: [location(home)], customerAddress: nil), "A property's address never stands in for the job's")
+    }
+
     func testSeveralServiceLocationsAreNeverGuessedBetween() {
-        let two = [location(home), location("00000000-0000-4000-8000-000000007002", address: "88 Larch Ave")]
+        let two = [location(home, address: "731 Cassia Way"), location("00000000-0000-4000-8000-000000007002", address: "88 Larch Ave")]
         XCTAssertNil(fallback(locations: two, customerAddress: "731 Cassia Way"))
     }
 
@@ -80,7 +90,7 @@ final class JobFallbackAddressTests: XCTestCase {
         XCTAssertEqual(stop.caveat, JobFallbackAddress.caveat)
         XCTAssertEqual(destination(stop.directions), "731 Cassia Way, Springfield")
 
-        // Read again once the customer has several places: nothing is guessed, and nothing is said.
+        // Read again once the customer has places elsewhere: nothing is guessed, and nothing is said.
         stop.setPlace(from: [location(home), location("00000000-0000-4000-8000-000000007002", address: "88 Larch Ave")],
                       customerAddress: "731 Cassia Way")
         XCTAssertNil(stop.address)
@@ -137,6 +147,52 @@ final class JobFallbackAddressTests: XCTestCase {
 
         XCTAssertEqual(book.street(sited), "412 Birchwood Ln")
         XCTAssertNil(book.caveat(sited))
+    }
+
+    func testRowsFollowAnAddressThatArrivesLaterWithoutReadingAgain() async {
+        // The first pass has the customer list saved before addresses were kept; the next has the server's.
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
+        let book = JobAddressBook()
+        let row = job("00000000-0000-4000-8000-000000002224")
+
+        await book.load([row], api: client, organizationID: organization, identity: "me", customerAddresses: [:])
+        XCTAssertNil(book.street(row))
+
+        await book.load([row], api: client, organizationID: organization, identity: "me",
+                        customerAddresses: [customer: "731 Cassia Way, Springfield"])
+        XCTAssertEqual(book.street(row), "731 Cassia Way")
+        XCTAssertEqual(book.caveat(row), JobFallbackAddress.caveat)
+
+        await book.load([row], api: client, organizationID: organization, identity: "me", customerAddresses: [customer: "9 Fern Ct"])
+        XCTAssertEqual(book.street(row), "9 Fern Ct", "An address changed elsewhere is followed too")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "The customer's places are read once")
+    }
+
+    func testTheScreensTaskRunsAgainWhenAFallbackAddressChanges() {
+        let row = job("00000000-0000-4000-8000-000000002224")
+        let sited = job("00000000-0000-4000-8000-000000002214", locationID: home)
+        XCTAssertNotEqual(JobAddressBook.taskKey([row], customerAddresses: [:]),
+                          JobAddressBook.taskKey([row], customerAddresses: [customer: "731 Cassia Way"]))
+        XCTAssertEqual(JobAddressBook.taskKey([sited], customerAddresses: [:]),
+                       JobAddressBook.taskKey([sited], customerAddresses: [customer: "731 Cassia Way"]),
+                       "A job with its own site never falls back, so the address doesn't matter to it")
+    }
+
+    func testJobsWithASiteAreReadFirstSoRowsWithoutOneNeverCostThemTheirStreet() async {
+        let page = #"{"items":[{"id":"\#(home)","organizationId":"\#(organization)","customerId":"\#(other)","label":"Home","kind":"service","address":"88 Larch Ave","createdAt":"2026-11-22T12:00:00Z","updatedAt":"2026-11-22T12:00:00Z"}]}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, page)]), baseURL: "https://app.thorbis.com")
+        let book = JobAddressBook()
+        let unsited = job("00000000-0000-4000-8000-000000002224")
+        let sited = Job(id: "00000000-0000-4000-8000-000000002214", customerId: other, title: "AC not cooling", status: "scheduled",
+                        createdAt: nil, updatedAt: nil, allowedTransitions: nil, locationId: home)
+
+        // The row without a site comes first on screen; with room for one customer, the sited one is read.
+        await book.load([unsited, sited], api: client, organizationID: organization, identity: "me", limit: 1,
+                        customerAddresses: [customer: "731 Cassia Way"])
+
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, ["/v1/customers/\(other)/locations"])
+        XCTAssertEqual(book.street(sited), "88 Larch Ave")
+        XCTAssertNil(book.street(unsited))
     }
 
     func testScreensThatDoNotAskReadNothingForRowsWithoutASite() async {

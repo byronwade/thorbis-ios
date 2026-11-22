@@ -121,8 +121,20 @@ final class JobAddressBook: ObservableObject {
     private(set) var places: [String: (address: String, coordinates: FieldCoordinates?)] = [:]
     /// For jobs without a site of their own: the customer's only address on file, by customer.
     @Published private(set) var fallbacks: [String: JobFallbackAddress] = [:]
+    /// Each read customer's own locations, so `fallbacks` follows a customer's address that arrives
+    /// or changes later without reading their places again.
+    private var read: [String: [ServiceLocationRecord]] = [:]
     private var loaded: Set<String> = []
     private var key = ""
+
+    /// The part of a screen's `.task(id:)` that changes when a row's place or the address it falls
+    /// back to does, so `load` runs again for either.
+    static func taskKey(_ jobs: [Job], customerAddresses: [String: String]?) -> String {
+        jobs.map { job in
+            let fallback = job.locationId == nil ? job.customerId.flatMap { customerAddresses?[$0] } : nil
+            return "\(job.id):\(job.locationId ?? "")\(fallback.map { "@\($0)" } ?? "")"
+        }.joined(separator: ",")
+    }
 
     /// Keyed by customer and place, so a place is only ever read for its own customer's job.
     func street(_ job: Job) -> String? {
@@ -149,15 +161,19 @@ final class JobAddressBook: ObservableObject {
     /// Never more than `limit` customers per screen.
     /// - Parameter customerAddresses: each customer's own address, already loaded with the
     ///   customer list (`Store.customerAddresses`). When given, the customers of jobs without a
-    ///   site are read too, so those jobs can show the only address on file; nil reads only the
-    ///   customers of jobs with a site.
+    ///   site are read too, after every customer of a job with one and only in the slots left under
+    ///   `limit`, so those jobs can show the only address on file without costing a job its own
+    ///   street; nil reads only the customers of jobs with a site.
     func load(_ jobs: [Job], api: APIClient, organizationID: String?, identity: String, limit: Int = 20,
               customerAddresses: [String: String]? = nil) async {
-        if identity != key { key = identity; streets = [:]; places = [:]; fallbacks = [:]; loaded = [] }
+        if identity != key { key = identity; streets = [:]; places = [:]; fallbacks = [:]; read = [:]; loaded = [] }
         guard let organizationID else { return }
+        // Customers already read follow the addresses as given now.
+        refreshFallbacks(customerAddresses, organizationID: organizationID)
         var seen = Set<String>()
-        let customers = jobs.compactMap { $0.locationId == nil && customerAddresses == nil ? nil : $0.customerId }
-            .filter { !loaded.contains($0) && seen.insert($0).inserted }.prefix(limit)
+        let sited = jobs.filter { $0.locationId != nil }.compactMap(\.customerId)
+        let unsited = customerAddresses == nil ? [] : jobs.filter { $0.locationId == nil }.compactMap(\.customerId)
+        let customers = (sited + unsited).filter { !loaded.contains($0) && seen.insert($0).inserted }.prefix(limit)
         for customerID in customers {
             guard !Task.isCancelled else { return }
             let places: [ServiceLocationRecord]
@@ -175,11 +191,26 @@ final class JobAddressBook: ObservableObject {
                 }
                 if let line { streets["\(customerID)|\(place.id)"] = line }
             }
+            read[customerID] = places
             if let customerAddresses {
                 fallbacks[customerID] = JobFallbackAddress.make(locationID: nil, customerID: customerID, organizationID: organizationID,
                                                                 locations: places, customerAddress: customerAddresses[customerID])
             }
         }
+    }
+
+    /// Works out every read customer's fallback again from `customerAddresses` (nil: none shown).
+    private func refreshFallbacks(_ customerAddresses: [String: String]?, organizationID: String) {
+        guard let customerAddresses else {
+            if !fallbacks.isEmpty { fallbacks = [:] }
+            return
+        }
+        var next: [String: JobFallbackAddress] = [:]
+        for (customerID, places) in read {
+            next[customerID] = JobFallbackAddress.make(locationID: nil, customerID: customerID, organizationID: organizationID,
+                                                       locations: places, customerAddress: customerAddresses[customerID])
+        }
+        if next != fallbacks { fallbacks = next }
     }
 }
 

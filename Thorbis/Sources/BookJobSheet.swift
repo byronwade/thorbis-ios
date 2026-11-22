@@ -140,8 +140,9 @@ struct NewJobSheet: View {
     @State private var techSaved = false
     /// A new caller saved before their address became a property; Try again adds only that.
     @State private var owedProperty: NewCustomerSave.Owed?
-    /// Customers made in this sheet. The property made from their address is never picked for the
-    /// job on its own: which field holds a job's site waits on BYR-1593.
+    /// Customers made in this sheet, or just before it opened (`justCreated`). The property made
+    /// from their address is never picked for the job on its own: which field holds a job's site
+    /// waits on BYR-1593.
     @State private var createdCustomers: Set<String> = []
 
     /// Problems shown under their fields after Book job is pressed (design.thorbis.com Forms:
@@ -160,13 +161,37 @@ struct NewJobSheet: View {
     private var canCreateCustomer: Bool { session.can("customer.create", feature: "core_crm") }
     private var locked: Bool { busy || savedJob != nil }
 
-    /// - Parameter locationID: one of the preselected customer's service locations (a property's
-    ///   "New job here", a unit's "Start a job for this unit"). Dropped when it isn't theirs.
-    init(preselected: Customer? = nil, locationID: String? = nil) {
+    /// - Parameters:
+    ///   - locationID: one of the preselected customer's service locations (a property's
+    ///     "New job here", a unit's "Start a job for this unit"). Dropped when it isn't theirs.
+    ///   - justCreated: the preselected customer was made just now (New customer's "Save and book a
+    ///     job"), so the property made from their address is not picked as the job's site.
+    ///   - owedProperty: that property, when it didn't save; booking tries it again and says how.
+    init(preselected: Customer? = nil, locationID: String? = nil, justCreated: Bool = false,
+         owedProperty: NewCustomerSave.Owed? = nil) {
         var initial = FieldJobDraft(customerID: preselected?.id ?? "")
         if preselected != nil { initial.locationID = locationID }
         _draft = State(initialValue: initial)
-        if let preselected { _knownNames = State(initialValue: [preselected.id: preselected.name]) }
+        if let preselected {
+            _knownNames = State(initialValue: [preselected.id: preselected.name])
+            if justCreated { _createdCustomers = State(initialValue: [preselected.id]) }
+            if owedProperty?.customer.id == preselected.id { _owedProperty = State(initialValue: owedProperty) }
+        }
+    }
+
+    /// The place a booking takes on its own: a place handed in stays while it is the customer's;
+    /// otherwise their one place on file, with several the CSR picks. A customer made just now gets
+    /// none: their one place is the property made from their address, and which field holds a job's
+    /// site waits on BYR-1593 (their job shows it as the customer's only address on file).
+    static func chosenLocation(_ chosen: String?, among locations: [ServiceLocationRecord], justCreated: Bool) -> String? {
+        if let chosen, locations.contains(where: { $0.id == chosen }) { return chosen }
+        return locations.count == 1 && !justCreated ? locations[0].id : nil
+    }
+
+    /// Something booked part-way can still be sent again: a time or technician that didn't save, or
+    /// a property that trying again can add.
+    private var retryLeft: Bool {
+        (canAssign && when != nil && !timeSaved) || (canAssign && tech != nil && !techSaved) || owedProperty?.retryable == true
     }
 
     var body: some View {
@@ -195,7 +220,7 @@ struct NewJobSheet: View {
                                 .foregroundStyle(Theme.destructive)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("new-job-error")
-                            if savedJob != nil {
+                            if savedJob != nil && retryLeft {
                                 Button("Try again") { Task { await book() } }
                                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
                                     .frame(minHeight: 44)
@@ -966,12 +991,7 @@ struct NewJobSheet: View {
         guard session.generation == generation, draft.customerID == customerID, !Task.isCancelled else { return }
         locations = places.filter { $0.customerId == customerID && $0.organizationId == organizationID }
         locationsLoaded = true
-        // A place handed in (New job here, Start a job for this unit) stays only when it is theirs.
-        if let chosen = draft.locationID, !locations.contains(where: { $0.id == chosen }) { draft.locationID = nil }
-        // One place on file is the place; with several the CSR picks. The property this sheet just
-        // made for a new caller is not picked on its own (BYR-1593); their job shows it as the
-        // customer's only address on file.
-        if draft.locationID == nil, locations.count == 1, !createdCustomers.contains(customerID) { draft.locationID = locations[0].id }
+        draft.locationID = Self.chosenLocation(draft.locationID, among: locations, justCreated: createdCustomers.contains(customerID))
     }
 
     /// The server's phone lookup for a typed number (7+ digits). Never blocks booking.
@@ -1024,7 +1044,8 @@ struct NewJobSheet: View {
                 }
                 let body = NewCustomerRequest(name: newName.trimmingCharacters(in: .whitespacesAndNewlines),
                                               phone: clean(newPhone), address: clean(newAddress), accountType: "residential")
-                let outcome = try await NewCustomerSave.run(body, api: api)
+                let outcome = try await NewCustomerSave.run(body, api: api, access: NewCustomerSave.Access(session: session),
+                                                            currentAuthority: { stillHere() })
                 guard stillHere() else { return }
                 let customer = outcome.customer
                 createdCustomers.insert(customer.id)
@@ -1032,8 +1053,9 @@ struct NewJobSheet: View {
                 draft.customerID = customer.id
                 addingCustomer = false
                 owedProperty = outcome.owed
-            } else if let owed = owedProperty, owed.customer.id == draft.customerID {
-                owedProperty = try await NewCustomerSave.add(owed, api: api).owed
+            } else if let owed = owedProperty, owed.customer.id == draft.customerID, owed.retryable {
+                owedProperty = try await NewCustomerSave.add(owed, api: api, access: NewCustomerSave.Access(session: session),
+                                                             currentAuthority: { stillHere() }).owed
                 guard stillHere() else { return }
             }
             // 2. The job (once; a failed time or tech retries on the same job).

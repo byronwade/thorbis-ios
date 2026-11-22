@@ -257,9 +257,11 @@ final class JobRowSwipeBook: ObservableObject {
                                       spokenName: "Call \(customer)") { openURL(url) }
             case .directions:
                 guard let directions else { return nil }
+                // To the customer's only address on file, when the job records no site: said so.
+                let caveat = places.caveat(job).map { ", " + $0.prefix(1).lowercased() + $0.dropFirst() } ?? ""
                 return RowSwipeAction(id: "row-swipe-directions-\(job.id)", title: "Directions",
                                       symbol: "arrow.triangle.turn.up.right.diamond", tone: .panel,
-                                      spokenName: "Directions") { openURL(directions) }
+                                      spokenName: "Directions" + caveat) { openURL(directions) }
             case .move(let step):
                 return RowSwipeAction(id: "row-swipe-move-\(job.id)", title: JobMoves.title(step), symbol: "arrow.right",
                                       tone: .status(StatusTone(jobStatus: step)), spokenName: JobMoves.title(step)) { move(step) }
