@@ -144,8 +144,10 @@ final class InvoicePaymentUITests: XCTestCase {
     func testReadyLinkShowsScannableCheckoutAndDoneReturnsToInvoice() {
         continueAfterFailure = false
         let app = linkPreview()
+        // The page first, then its code: a failure says which of the two was late.
+        XCTAssertTrue(app.buttons["check-invoice-payment-status"].waitForExistence(timeout: 30))
         let code = app.images["invoice-payment-qr"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertTrue(code.waitForExistence(timeout: Self.firstCodeTimeout))
         XCTAssertTrue(app.buttons["share-invoice-payment-link"].exists)
         app.buttons["Copy link"].tap()
         XCTAssertTrue(app.buttons["Link copied"].waitForExistence(timeout: 3))
@@ -169,8 +171,10 @@ final class InvoicePaymentUITests: XCTestCase {
     func testLargestTextAndDarkModeKeepSharingReachable() {
         continueAfterFailure = false
         let app = linkPreview(accessibleText: true)
+        // The page first, then its code: a failure says which of the two was late.
+        XCTAssertTrue(app.buttons["check-invoice-payment-status"].waitForExistence(timeout: 30))
         let code = app.images["invoice-payment-qr"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertTrue(code.waitForExistence(timeout: Self.firstCodeTimeout))
         capture(app, "Scan to pay with accessible text")
         let share = app.buttons["share-invoice-payment-link"]
         let content = app.scrollViews.containing(.image, identifier: "invoice-payment-qr").firstMatch
@@ -191,6 +195,12 @@ final class InvoicePaymentUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [create], timeout: 10), .completed, "An expired link offers a working Create new payment link")
         capture(app, "Expired payment link recovery")
     }
+
+    /// The first code in a fresh process is slow to draw on a busy machine. On one CI machine the
+    /// app's main thread did not answer for 18 seconds while it drew there, and the code appeared
+    /// about 24 seconds into a 15 second wait (BYR-1839). The app now draws on a detached task,
+    /// so the page answers meanwhile. How long the drawing takes there is not yet measured.
+    private static let firstCodeTimeout: TimeInterval = 30
 
     private func linkPreview(expired: Bool = false, accessibleText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
