@@ -24,6 +24,10 @@ extension XCUIApplication {
     /// Whether a keyboard is on screen. On iPad a put-away keyboard can stay in the tree as a
     /// zero-height element at the screen's foot, so existence alone is not enough.
     var keyboardShowing: Bool {
+        // No keyboard: hidden, at once. `snapshot()` of an element that is not there retries for
+        // several seconds before it throws, so asking it first made every wait for a hidden
+        // keyboard about 12 s slower (two reads per wait).
+        if keyboards.count == 0 { return false }
         // One snapshot, read once. Asking `exists` and then `frame` raced the keyboard going away
         // (a Done tap is exactly that): the frame read of a keyboard that had just gone failed the
         // test with "No matches found".
