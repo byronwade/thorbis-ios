@@ -144,9 +144,13 @@ final class SavedWorkReviewUITests: XCTestCase {
     func testEditOnlyRevocationCancelsAlertAndRetainsReadOnlyReviewWithoutMutation() throws {
         let app = open(["--paper-preview-saved-work-controls"])
         app.buttons["Sample controls"].tap()
-        app.buttons["Revoke sample editing shortly"].tap()
+        // The sample revocation lands five seconds after its tap, and bringing the row above the
+        // pinned bar can take most of that, so the row is found first and the question is opened
+        // straight after the revoke tap (as the workspace-change test does).
         let dismiss = app.buttons["saved-work-dismiss-00000000-0000-4000-8000-000000009711"]
-        reveal(dismiss, in: app); dismiss.tap()
+        reveal(dismiss, in: app)
+        app.buttons["Revoke sample editing shortly"].tap()
+        dismiss.tap()
         XCTAssertTrue(app.discardQuestion.waitForExistence(timeout: 5))
         XCTAssertTrue(app.discardQuestion.waitForNonExistence(timeout: 12))
         XCTAssertTrue(app.savedWorkReview.exists)
