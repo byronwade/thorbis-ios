@@ -293,7 +293,9 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(after.waitForExistence(timeout: 5))
         after.tap()
         XCTAssertTrue(after.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(filter.label.contains("After"), filter.label)
+        // The menu runs the row's action once its popover has gone, after the row itself is gone.
+        let applied = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "After"), object: filter)
+        XCTAssertEqual(XCTWaiter.wait(for: [applied], timeout: 5), .completed, filter.label)
         let photo = app.buttons["Photo, Finished unit"]
         // "Add photo or video" comes before the photos (its menu holds the camera, the library and PDFs).
         let library = app.buttons["job-media-take-photo"]

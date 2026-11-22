@@ -162,7 +162,10 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
 
         app.buttons["Choose a job document"].tap()
         app.buttons["INV-2209"].tap()
-        XCTAssertEqual(app.staticTexts["customer-document-position"].label, "4 of 4 documents")
+        // The document menu runs its row's action once its popover has gone.
+        let position = app.staticTexts["customer-document-position"]
+        let onLast = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "4 of 4 documents"), object: position)
+        XCTAssertEqual(XCTWaiter.wait(for: [onLast], timeout: 10), .completed, "Position reads \(position.label)")
         openHistory(in: app)
         assertText("Refunded $50.00", in: app)
         assertText("Cash", in: app)

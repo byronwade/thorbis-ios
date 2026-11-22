@@ -189,7 +189,7 @@ final class PriceBookPickerUITests: XCTestCase {
         chooseCategory("Materials", in: app)
         if app.keyboards.firstMatch.exists { search.typeText("\n") }
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Showing materials"].exists, "An active category must stay visible")
+        XCTAssertTrue(app.staticTexts["Showing materials"].waitForExistence(timeout: 5), "An active category must stay visible")
         XCTAssertEqual(app.buttons["Category"].value as? String, "Materials")
         chooseCategory("All", in: app)
         XCTAssertTrue(app.staticTexts["Showing materials"].waitForNonExistence(timeout: 5))
