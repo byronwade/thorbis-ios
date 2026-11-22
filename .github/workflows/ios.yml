@@ -99,7 +99,8 @@ jobs:
     name: UI tests (${{ matrix.shard }} of ${{ strategy.job-total }})
     needs: build
     runs-on: macos-15
-    timeout-minutes: 60
+    # Shards are balanced by test count, not time; the first run's slowest shards passed an hour.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
