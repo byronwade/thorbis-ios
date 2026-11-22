@@ -1731,7 +1731,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "owner-home", PaperPreview.role == nil { capabilities.append("organization.settings.edit") }
-            if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
+            // An owner or admin holds both: pricebook.edit opens, edits and removes items (the server's
+            // check), organization.settings.edit manages the book's settings.
+            if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities += ["organization.settings.edit", "pricebook.edit"] }
             if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
             if PaperPreview.isInvoiceRevisionsPreview { capabilities.append("job.complete") }
             switch PaperPreview.role {
