@@ -35,8 +35,9 @@ extension DynamicTypeSize {
 ///   "Pause job" and "Cancel job" in a second card). When no row sets it, destructive rows get
 ///   their own card as before. An anchored popover ignores it: it is one list.
 /// - `detail`: a short trailing value in the muted tone (a step's time, "Next", "$340 due").
-struct ThorbisMenuItem: Identifiable {
-    let id = UUID()
+/// Not `Identifiable` on purpose: pages build their items again on every render, so an id made
+/// here would be new each time, and rows keyed by it were replaced under the finger.
+struct ThorbisMenuItem {
     var title: String
     var subtitle: String? = nil
     var icon: String? = nil
@@ -108,6 +109,19 @@ enum ThorbisMenuGrouping {
         if !regular.isEmpty { groups.append(regular) }
         if !destructive.isEmpty { groups.append(destructive) }
         return groups
+    }
+}
+
+/// What fills a menu slot: a row keeps its view while the same item stays in its slot.
+struct ThorbisMenuRowKey: Hashable {
+    let title: String
+    let subtitle: String?
+    let destructive: Bool
+
+    init(_ item: ThorbisMenuItem) {
+        title = item.title
+        subtitle = item.subtitle
+        destructive = item.role == .destructive
     }
 }
 
@@ -507,16 +521,18 @@ struct ThorbisMenuRows: View {
     }
 
     private func group(_ rows: [ThorbisMenuItem]) -> some View {
-        // Rows are keyed by position, not by `item.id`. A page builds its items again, with new ids,
-        // every time it renders, and a row keyed by them was replaced under the finger: a tap that
-        // landed while anything on the page updated (a reload, a background session check) was
-        // dropped and the menu stayed open. Positions do not change while a menu is open.
+        // Rows are keyed by their slot and what fills it. A page builds its items again every time
+        // it renders; a re-render of the same list keeps every row, so a tap that lands while the
+        // page updates (a reload, a background session check) is not dropped. A slot that a
+        // different item takes (a roster or refresh inserting a row) gets a new row, so a press
+        // already on it is dropped, never retargeted to another action.
         VStack(spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, item in
                 Button { onSelect(item) } label: { row(item, divided: index > 0) }
                     .buttonStyle(MenuRowPressStyle(pressChanged: pressChanged))
                     .disabled(item.isDisabled)
                     .opacity(item.isDisabled ? 0.4 : 1)
+                    .id(ThorbisMenuRowKey(item))
             }
         }
     }

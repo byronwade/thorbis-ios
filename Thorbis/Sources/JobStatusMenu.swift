@@ -243,13 +243,15 @@ private struct JobStatusMenuGroup: View {
             ForEach(doneSteps) { step in
                 doneRow(step)
             }
-            // Keyed by position: the items get new ids on every render, which would replace a row
-            // under the finger and drop its tap (see ThorbisMenuPanel's rows).
+            // Keyed by slot and occupant, as ThorbisMenuRows.group(_:) does: the items are rebuilt on
+            // every render, an unchanged list keeps its rows, and a slot a refresh fills with another
+            // status gets a new row, so a press already on it is dropped, never retargeted.
             ForEach(Array(rows.enumerated()), id: \.offset) { index, item in
                 Button { onSelect(item) } label: { row(item, divided: !steps && index > 0) }
                     .buttonStyle(MenuRowPressStyle(radius: steps ? 14 : 0))
                     .disabled(item.isDisabled)
                     .opacity(item.isDisabled ? 0.4 : 1)
+                    .id(ThorbisMenuRowKey(item))
             }
         }
         .padding(.vertical, steps ? 6 : 0)

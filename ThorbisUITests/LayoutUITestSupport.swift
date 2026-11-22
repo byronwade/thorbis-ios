@@ -26,8 +26,17 @@ extension XCUIApplication {
     var keyboardShowing: Bool {
         // One snapshot, read once. Asking `exists` and then `frame` raced the keyboard going away
         // (a Done tap is exactly that): the frame read of a keyboard that had just gone failed the
-        // test with "No matches found". A keyboard that is gone throws here and reads as hidden.
-        guard let keyboard = try? keyboards.firstMatch.snapshot() else { return false }
+        // test with "No matches found".
+        let keyboard: XCUIElementSnapshot
+        do {
+            keyboard = try keyboards.firstMatch.snapshot()
+        } catch {
+            // Gone between reads: hidden. `count` records any other query error (a timeout, a lost
+            // connection) as `exists` used to, and a keyboard that is still there is not read as hidden.
+            if keyboards.count == 0 { return false }
+            XCTFail("Could not read the keyboard: \(error)")
+            return false
+        }
         return keyboard.frame.height > 1 && keyboard.frame.minY < frame.maxY - 1
     }
 
