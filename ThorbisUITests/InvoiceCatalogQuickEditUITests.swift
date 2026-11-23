@@ -179,10 +179,12 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         return search
     }
 
-    /// The one line the editor opened: only an open line carries its description field.
-    private func openLineIdentity(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) -> String {
+    /// The one line the editor opened: only an open line carries its description field. Straight
+    /// after launch the editor sheet is still on its way, so a launch passes the 20 s that
+    /// `launch()` gives the editor to appear.
+    private func openLineIdentity(_ app: XCUIApplication, timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) -> String {
         let fields = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-"))
-        XCTAssertTrue(fields.firstMatch.waitForExistence(timeout: 5), "The last added line must open for editing", file: file, line: line)
+        XCTAssertTrue(fields.firstMatch.waitForExistence(timeout: timeout), "The last added line must open for editing", file: file, line: line)
         XCTAssertEqual(fields.count, 1, "Exactly one line opens", file: file, line: line)
         return String(fields.firstMatch.identifier.dropFirst("invoice-line-description-".count))
     }
@@ -277,7 +279,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
         app.launch()
-        let identity = openLineIdentity(app)
+        let identity = openLineIdentity(app, timeout: 20)
         let price = app.textFields["invoice-line-price-" + identity]
         XCTAssertTrue(price.waitForExistence(timeout: 10))
         reveal(price, in: app); price.tap()
@@ -311,7 +313,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        let identity = openLineIdentity(app)
+        let identity = openLineIdentity(app, timeout: 20)
         let price = app.textFields["invoice-line-price-" + identity]
         reveal(price, in: app)
         price.tap()
@@ -341,7 +343,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
         app.launch()
-        let identity = openLineIdentity(app)
+        let identity = openLineIdentity(app, timeout: 20)
         let price = app.textFields["invoice-line-price-" + identity]
         reveal(price, in: app)
         price.tap()

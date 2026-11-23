@@ -714,6 +714,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
                         "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let door = thorbisShowCustomerDoor(app)
         XCTAssertTrue(door.waitForExistence(timeout: 45)); door.tap()
+        XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].waitForExistence(timeout: customerViewFirstEstimate))
         let list = app.scrollViews["job-estimate-handoff"], more = app.buttons["handoff-load-more-estimates"]
         let review = app.buttons["handoff-review-selected"]
         for _ in 0..<50 where !more.exists || !more.isHittable || more.frame.maxY > review.frame.minY { list.swipeUp() }
@@ -1410,6 +1411,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         _ = ownerExit(app)
         capture(app, "Largest text dark estimate overview top")
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate))
         visible(app, first); selectEstimate(app, first)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         visible(app, second); selectEstimate(app, second)
@@ -1609,6 +1611,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"].exists)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        let firstPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"])
+        let secondPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPrice, secondPrice], timeout: 45), .completed, "Both verified prices must load before the cards are measured and read")
         XCTAssertLessThanOrEqual(second.frame.maxY, app.buttons["Review selected (0)"].frame.minY, "Both ordinary cards and prices fit above the primary action")
         let spoken = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].value as? String
         XCTAssertTrue(spoken?.contains("Sent") == true)

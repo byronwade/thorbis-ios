@@ -83,6 +83,7 @@ struct ThorbisApp: App {
             OfficeContact.clearAll()
             PendingTeamGoalEdits().clearAll()
             PendingOrganizationFacts().clearAll()
+            BillingMoneyIntents().clearAll()
             TeamGoalsCache.clear()
             ReviewRequestsCache.clear()
             Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }

@@ -48,6 +48,14 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         for (label, option) in [("Kind,", "Material")] {
             let select = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
             XCTAssertTrue(select.waitForExistence(timeout: 30), app.debugDescription)
+            // The editor is a sheet that slides up; its controls exist from the first frame of the slide.
+            var lastFrame = CGRect.null
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let now = select.frame
+                defer { lastFrame = now }
+                return now == lastFrame
+            }, object: select)
+            XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed, "The editor sheet settles before Kind is measured: \(select.frame)")
             let lowerHalf = select.frame.midY > app.windows.firstMatch.frame.midY
             select.tap()
             // Paper's price book also has a category tab with this name behind the sheet.

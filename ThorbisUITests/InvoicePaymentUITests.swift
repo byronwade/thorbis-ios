@@ -20,7 +20,8 @@ final class InvoicePaymentUITests: XCTestCase {
         app.launch()
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 30))
-        XCTAssertTrue(collect.isEnabled)
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: collect)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "Collect payment turns on once the payment history has loaded")
         collect.tap()
         XCTAssertTrue(app.buttons["received-payment-methods"].waitForExistence(timeout: 15))
     }
@@ -129,7 +130,8 @@ final class InvoicePaymentUITests: XCTestCase {
         menu.tap()
         let bank = app.buttons["Bank transfer (ACH) received"]
         XCTAssertTrue(bank.waitForExistence(timeout: 10))
-        XCTAssertTrue(bank.isHittable)
+        let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: bank)
+        XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 10), .completed, "Bank transfer can be reached once the menu is up")
         bank.tap()
         let record = button("Record $340.00 bank transfer received", in: app)
         XCTAssertTrue(record.waitForExistence(timeout: 10))

@@ -238,7 +238,7 @@ class RunUITestsTests(unittest.TestCase):
             except (ProcessLookupError, ValueError):
                 pass
 
-    def run_script(self, first, reruns=(), stream_broken=False):
+    def run_script(self, first, reruns=(), stream_broken=False, hold_samples=None):
         """Run the script once. `first` is the first run's steps; ["say", line] prints a line."""
         steps = []
         for step in first:
@@ -249,6 +249,9 @@ class RunUITestsTests(unittest.TestCase):
         env.pop("STREAM_BROKEN", None)
         if stream_broken:
             env["STREAM_BROKEN"] = "yes"
+        env.pop("THORBIS_HOLD_SAMPLES", None)
+        if hold_samples is not None:
+            env["THORBIS_HOLD_SAMPLES"] = str(hold_samples)
         began = time.time()
         # Output goes to files, not pipes: a process the script leaves behind must not be able
         # to hold this test open by keeping a pipe of ours.
@@ -469,6 +472,41 @@ class RunUITestsTests(unittest.TestCase):
             self.assertIn(clause, predicate)
         self.assertEqual(predicate.count("("), predicate.count(")"))
         self.assertIn('eventMessage CONTAINS "unknown digitizer"', SCRIPT.read_text().split("stop_watcher() {", 1)[1])
+
+    def hold_streams(self):
+        return [call for call in self.calls()
+                if call[0] == "xcrun" and any("CFRunLoopPerform" in arg for arg in call)]
+
+    def test_without_thorbis_hold_samples_no_hold_sampler_runs(self):
+        result = self.run_script(run_case(A, "passed") + summary(1, 0) + [["exit", 0]])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.hold_streams(), [])
+        self.assertNotIn("Hold sampler", result.stderr)
+        self.assertEqual(len([call for call in self.calls() if call[0] == "xcrun"]), 1)
+
+    def test_with_thorbis_hold_samples_the_sampler_runs_beside_the_tests_and_changes_nothing(self):
+        samples = self.dir / "hold-samples"
+        # A pass, a failure that stands, and a cancelled tap that is run once more: the status
+        # and the re-run decision are the same as without the sampler.
+        result = self.run_script(run_case(A, "passed") + summary(1, 0) + [["exit", 0]], hold_samples=samples)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(self.hold_streams()), 1)
+        self.assertEqual(self.hold_streams()[0][1:4], ["simctl", "spawn", "SIM-1"])
+        self.assertIn("Hold sampler (BYR-1841): the log stream started;", result.stderr)
+        self.assertIn("0 samples taken, 0 failed.", (samples / "summary.txt").read_text())
+        self.assertIn('Simulator log filter: Filtering the log data using "process == "backboardd"', result.stderr)
+        self.assertEqual(result.stdout.count("Hold sampler"), 0)
+        result = self.run_script(run_case(A, "failed") + summary(1, 1) + [["exit", 65]], hold_samples=samples)
+        self.assertEqual(result.returncode, 65)
+        self.assertEqual(self.reruns(), [])
+        (self.stub / "calls.jsonl").unlink()
+        shutil.rmtree(self.evidence)
+        result = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]], hold_samples=samples)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.reruns()), 1)
+        self.assert_rerun_of(self.reruns()[0], A, 1)
+        self.assert_evidence()
+        self.assertEqual(len(self.hold_streams()), 1)       # started once, for the first run only
 
     def test_a_wrong_command_line_is_refused(self):
         result = subprocess.run(["bash", str(SCRIPT), "a", "b", "c", "d"], capture_output=True, text=True, timeout=30)

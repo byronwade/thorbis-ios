@@ -908,6 +908,17 @@ struct CustomerEstimatePresentation: View {
 
 // MARK: - Invoice
 
+/// The line under "Pay in full" on the customer's pay screen. Paying in full hands back to the
+/// technician's collect screen, so it names only what that screen offers in this build: with
+/// Tap to Pay off (TapToPayReadiness.buildEnabled), a card is paid through the code to scan.
+enum CustomerPayWords {
+    static func payInFullDetail(tapToPayEnabled: Bool) -> String {
+        tapToPayEnabled
+            ? "Card or Tap to Pay with your technician"
+            : "Your technician shows a code to pay by card, or takes cash or check"
+    }
+}
+
 /// "Show to customer" for an invoice: what was done, what it cost, what is due, then sign or
 /// hand back to pay. Payment itself stays with the technician's collect screen.
 struct CustomerInvoicePresentation: View {
@@ -915,7 +926,7 @@ struct CustomerInvoicePresentation: View {
     let customerName: String
     /// True when the customer should sign for the work on this device.
     let canSign: Bool
-    /// The technician takes payment next (Tap to Pay, card, cash); nil when they can't.
+    /// The technician takes payment next on the collect screen; nil when they can't.
     let onPay: (() -> Void)?
     /// True when the company offers financing and this person may send an application.
     let financing: Bool
@@ -1094,7 +1105,8 @@ struct CustomerInvoicePresentation: View {
             if payChoice?.canPayInFull == true {
                 payCard(.inFull, title: "Pay in full") {
                     Text(dueText).font(Theme.customerMonoFont(type.total, weight: .bold)).minimumScaleFactor(0.6).lineLimit(1)
-                    Text("Card or Tap to Pay with your technician").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    Text(CustomerPayWords.payInFullDetail(tapToPayEnabled: TapToPayReadiness.buildEnabled))
+                        .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 }
             }
             if payChoice?.canFinance == true, let example = dueExample {

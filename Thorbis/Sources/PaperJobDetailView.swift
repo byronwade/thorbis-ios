@@ -429,11 +429,12 @@ struct JobDetailView: View {
         .thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await completeHere() } }])
         .background { revisionFlowHosts }
-        .sheet(isPresented: $showDeposit) { SheetSurface {
+        // Closing the sheet reloads the invoices however it closed, so a deposit whose answer was
+        // lost shows on the job and the deposit entry hides.
+        .sheet(isPresented: $showDeposit, onDismiss: { Task { await loadInvoices() } }) { SheetSurface {
             // Paper 89: the approved estimate's total feeds the 25% and 50% chips, when it is loaded.
             JobDepositSheet(jobID: jobId, estimateTotalCents: depositEstimateTotal, subtitle: depositSubtitle) { invoice in
                 selectedInvoiceID = invoice.id
-                Task { await loadInvoices() }
             }
         } }
         .thorbisDestination(item: $documentInvoiceID) { id in

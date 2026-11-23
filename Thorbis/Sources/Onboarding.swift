@@ -1266,7 +1266,7 @@ struct BusinessSetupView: View {
     @ViewBuilder
     private func settingsGroups(_ steps: [BusinessSetupModel.Step], current: Bool, unfinished: Bool) -> some View {
         let editsSettings = session.can("organization.settings.edit")
-        let canImport = session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm")
+        let canImport = CustomerImportModel.permitted { session.can($0, feature: "core_crm") }
         var company: [BusinessPlace] {
             var rows: [BusinessPlace] = []
             if steps.contains(.details) { rows.append(.profile) }

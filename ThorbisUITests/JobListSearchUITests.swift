@@ -20,17 +20,17 @@ final class JobListSearchUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         if !app.usesTabletLayout { XCTAssertEqual(field.placeholderValue, "Search or ask") }
         field.typeText("Kitchen")
+        // Until the typing lands, both layouts show search's empty state (Recently viewed, Open
+        // jobs), which lists both jobs; the first keyboard of a fresh simulator can deliver it
+        // seconds after typeText returns, so the results are read once the field holds the words.
+        let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Kitchen"), object: field)
+        XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 20), .completed,
+                       "The search field reads \((field.value as? String) ?? "nothing"), expected Kitchen")
         // Each result is one button whose label combines street, title, customer, number and status.
         let kitchen = NSPredicate(format: "label CONTAINS %@", "Kitchen sink backup")
         let notCooling = NSPredicate(format: "label CONTAINS %@", "AC not cooling")
         if app.usesTabletLayout {
-            // iPad search is a sheet over the columns (the Jobs list stays behind it). Until the
-            // typing lands, the sheet shows its empty state (Recently viewed, Open jobs), which
-            // lists both jobs; the first keyboard of a fresh iPad simulator can deliver it seconds
-            // after typeText returns, so the results are read once the field holds the words.
-            let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Kitchen"), object: field)
-            XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 20), .completed,
-                           "The search field reads \((field.value as? String) ?? "nothing"), expected Kitchen")
+            // iPad search is a sheet over the columns (the Jobs list stays behind it).
             let results = app.scrollViews["search-results"]
             XCTAssertTrue(results.waitForExistence(timeout: 10))
             XCTAssertTrue(results.buttons.matching(kitchen).firstMatch.waitForExistence(timeout: 10))

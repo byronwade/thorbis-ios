@@ -9,8 +9,9 @@ final class InboxVisualUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(identifier: "inbox-day-heading").firstMatch.waitForExistence(timeout: 20))
         // Paper 49N: one "Recent" card; each row carries its own day, and a bad date shows none.
         XCTAssertEqual(app.staticTexts.matching(identifier: "inbox-day-heading").firstMatch.label, "Recent")
+        // "Recent" is drawn over the on-device sample texts first; the job notices land after their fetch.
         let invalid = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "A visit with an invalid date")).firstMatch
-        XCTAssertTrue(invalid.exists)
+        XCTAssertTrue(invalid.waitForExistence(timeout: 20))
         XCTAssertFalse(invalid.label.contains("not-a-date"))
         let notice = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "A visit is ready", "Unread")).firstMatch
         XCTAssertTrue(notice.exists)
