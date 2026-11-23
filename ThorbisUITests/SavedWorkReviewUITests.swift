@@ -148,11 +148,11 @@ final class SavedWorkReviewUITests: XCTestCase {
         capture(app, "Outbox binding round trip retires old review and preserves work")
     }
     func testEditOnlyRevocationCancelsAlertAndRetainsReadOnlyReviewWithoutMutation() throws {
-        let app = open(["--paper-preview-saved-work-controls"])
+        let app = open(["--paper-preview-saved-work-controls", "--paper-preview-saved-work-from-question"])
         app.buttons["Sample controls"].tap()
-        // The sample revocation lands five seconds after its tap, and bringing the row above the
-        // pinned bar can take most of that, so the row is found first and the question is opened
-        // straight after the revoke tap (as the workspace-change test does).
+        // The sample revocation lands five seconds after the question opens, so XCTest's time between
+        // the two taps on a loaded simulator can't use up the delay. The row is still found first and
+        // the question opened straight after the revoke tap (as the workspace-change test does).
         let dismiss = app.buttons["saved-work-dismiss-00000000-0000-4000-8000-000000009711"]
         reveal(dismiss, in: app)
         app.buttons["Revoke sample editing shortly"].tap()
@@ -183,16 +183,17 @@ final class SavedWorkReviewUITests: XCTestCase {
         capture(app, "Edit-only revocation retains read-only review and cancels stale alert")
     }
     func testWorkspaceChangeRetiresOpenDiscardConfirmation() {
-        let app = open(["--paper-preview-saved-work-controls"])
+        let app = open(["--paper-preview-saved-work-controls", "--paper-preview-saved-work-from-question"])
         app.buttons["Sample controls"].tap()
-        // The sample switch fires five seconds after its tap, so the row is found first and the
-        // question is opened straight after.
+        // The sample switch fires five seconds after the question opens, not after its own tap. The
+        // row is found first and the question opened straight after.
         let dismiss = app.buttons["saved-work-dismiss-00000000-0000-4000-8000-000000009711"]
         reveal(dismiss, in: app)
         app.buttons["Switch sample workspace shortly"].tap()
         dismiss.tap()
-        // The question is up when the switch lands about a second later; asking whether Discard can
-        // be tapped in that second races the sheet leaving.
+        // The question is up when the switch lands about five seconds after it opens, and XCTest's first
+        // look can use most of that on a slow simulator; asking whether Discard can be tapped then
+        // races the sheet leaving.
         XCTAssertTrue(app.discardQuestion.waitForExistence(timeout: 5))
         XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 15))
         // The question is its own sheet over the review: it leaves with the review, one sheet

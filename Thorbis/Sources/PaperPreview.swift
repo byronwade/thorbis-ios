@@ -112,6 +112,9 @@ enum PaperPreview {
     @MainActor static var descriptionOpened = false
     /// Set once the price book's local item sheet has opened; `--paper-preview-pricebook-from-detail` waits for it.
     @MainActor static var priceBookDetailOpened = false
+    /// Set when the saved work review's discard question opens and cleared by the two sample access buttons;
+    /// under `--paper-preview-saved-work-from-question` they wait for it.
+    @MainActor static var savedWorkDiscardQuestionOpened = false
     @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
         let args = ProcessInfo.processInfo.arguments
         guard isJobDocumentsPreview || (screen == "present-estimate" && args.contains("--paper-preview-option-long-description")),
@@ -793,7 +796,15 @@ struct SavedWorkPreviewControls: View {
                 let actor = session.user?.id, organization = session.activeOrganization?.id
                 let before = try? PaperPreview.savedWorkFileHashes()
                 let mutations = PaperPreviewProtocol.savedWorkMutationCount
+                PaperPreview.savedWorkDiscardQuestionOpened = false
                 Task { @MainActor in
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-from-question") {
+                        // Count from the open discard question, as the price book does from an open item:
+                        // on a slow simulator the tap that opens it can't use up the delay.
+                        for _ in 0..<600 where !PaperPreview.savedWorkDiscardQuestionOpened {
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
+                    }
                     try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled else { return }
                     PaperPreviewProtocol.revokeSavedWorkEditing()
@@ -817,7 +828,15 @@ struct SavedWorkPreviewControls: View {
             }.frame(minHeight: 44)
             Button("Retire sample requests") { api.invalidateRequests() }.frame(minHeight: 44)
             Button("Switch sample workspace shortly") {
+                PaperPreview.savedWorkDiscardQuestionOpened = false
                 Task { @MainActor in
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-from-question") {
+                        // Count from the open discard question, as the price book does from an open item:
+                        // on a slow simulator the tap that opens it can't use up the delay.
+                        for _ in 0..<600 where !PaperPreview.savedWorkDiscardQuestionOpened {
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
+                    }
                     try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled else { return }
                     PaperPreviewProtocol.switchSavedWorkWorkspace()
