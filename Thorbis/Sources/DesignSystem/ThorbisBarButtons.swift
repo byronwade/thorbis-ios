@@ -137,6 +137,11 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
                 let percent = Double(context.percentComplete), velocity = Double(context.completionVelocity)
                 NSLog("%@", "[pop-gesture] interaction ended cancelled=\(context.isCancelled) percent=\(percent) completionVelocity=\(velocity)")
             }
+            // When the pop has committed or rolled back, after the finishing or cancelling
+            // animation, so the overview's own lines can be read against it.
+            _ = coordinator?.animate(alongsideTransition: nil) { context in
+                NSLog("%@", "[pop-gesture] transition completed cancelled=\(context.isCancelled)")
+            }
         case .ended, .cancelled:
             let cancelled = coordinator.map { "\($0.isCancelled)" } ?? "no transition"
             let percent = coordinator.map { "\(Double($0.percentComplete))" } ?? "no transition"

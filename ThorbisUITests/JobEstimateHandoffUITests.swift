@@ -373,6 +373,31 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["job-estimate-handoff"].waitForExistence(timeout: 15), "The system edge-back gesture must return to the estimate overview")
     }
 
+    /// A swipe back let go a fifth of the way across, after a hold, must roll back (BYR-1842).
+    /// The finger stops before it lifts, so it lifts with no speed, far short of half way. The
+    /// estimate stays open, and Back still reaches a loaded overview. The test cannot see the
+    /// swipe begin: the app log's "[pop-gesture] began" line for this test shows that it did.
+    func testAbandonedEdgeBackKeepsTheEstimateOpen() {
+        let app = open(["--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: customerViewFirstEstimate)); visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30), "The estimate must finish loading before the swipe")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.21, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.5)
+        // The overview is in the hierarchy only while the swipe shows it; it leaves when the pop rolls back.
+        let rolledBack = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.scrollViews["job-estimate-handoff"])
+        XCTAssertEqual(XCTWaiter.wait(for: [rolledBack], timeout: 15), .completed, "A swipe let go short of half way must not go back")
+        XCTAssertTrue(app.navigationBars["EST-8101"].exists); XCTAssertTrue(app.staticTexts["Sample repair"].exists)
+        waitHittable(app.scrollViews["handoff-estimate-details"])
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let firstPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"])
+        let secondPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"])
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPrice, secondPrice], timeout: 45), .completed, "Back after an abandoned swipe must reach an overview that has loaded both prices")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't finish loading estimates")).firstMatch.exists)
+    }
+
     func testOverviewLoadsBothVerifiedPricesBeforeSelection() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
