@@ -139,7 +139,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(row(app, "inbox-local-t-preview-text").exists)
         XCTAssertTrue(row(app, "inbox-local-t-preview-email").exists)
-        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.exists, "All carries the job notices too")
+        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 15), "All carries the job notices too")
 
         pick(app, "unread")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "A visit is ready")).firstMatch.waitForExistence(timeout: 5))
@@ -172,6 +172,8 @@ final class CommsInboxUITests: XCTestCase {
     func testDraftsChipShowsLocalDrafts() {
         continueAfterFailure = false
         let app = launch()
+        XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         pick(app, "drafts")
         let text = row(app, "inbox-local-t-preview-text")
         XCTAssertTrue(text.waitForExistence(timeout: 10), app.debugDescription)

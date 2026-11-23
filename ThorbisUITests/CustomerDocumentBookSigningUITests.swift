@@ -9,12 +9,13 @@ final class CustomerDocumentBookSigningUITests: XCTestCase {
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.exists)
         sign.tap()
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForNonExistence(timeout: 5), "Signing must replace the document pages")
     }
 
     func testAPaidInvoicesCurrentSignatureRemainsVisibleWithoutAnotherPaymentAction() {
         let app = paidInvoice(signed: true)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Signed by Preview customer")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["customer-payment-history"].waitForExistence(timeout: 10), "The page's own invoice and payments have loaded")
         XCTAssertFalse(app.buttons["Sign for the work"].exists)
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.exists)
         let proof = XCTAttachment(screenshot: app.screenshot())

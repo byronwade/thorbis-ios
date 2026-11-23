@@ -600,7 +600,7 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         for identifier in ["customer-estimate-\(estimateA)", "customer-estimate-\(addonA)",
                            "customer-invoice-\(invoiceA)", "customer-invoice-\(depositA)"] {
-            XCTAssertTrue(app.buttons[identifier].exists, identifier)
+            XCTAssertTrue(app.buttons[identifier].waitForExistence(timeout: 10), identifier)
         }
         XCTAssertFalse(app.buttons["customer-invoice-\(invoiceB)"].exists)
         XCTAssertFalse(app.staticTexts["Other job estimate"].exists)

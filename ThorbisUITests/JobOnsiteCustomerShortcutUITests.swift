@@ -22,10 +22,10 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
         shortcut.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 20))
         for id in ["00000000-0000-4000-8000-000000002218", "00000000-0000-4000-8000-000000002238"] {
-            XCTAssertTrue(app.buttons["customer-estimate-\(id)"].exists)
+            XCTAssertTrue(app.buttons["customer-estimate-\(id)"].waitForExistence(timeout: 20))
         }
         for id in ["00000000-0000-4000-8000-000000002209", "00000000-0000-4000-8000-000000002240"] {
-            XCTAssertTrue(app.buttons["customer-invoice-\(id)"].exists)
+            XCTAssertTrue(app.buttons["customer-invoice-\(id)"].waitForExistence(timeout: 20))
         }
         XCTAssertFalse(app.buttons["customer-invoice-00000000-0000-4000-8000-000000002241"].exists)
         let handBack = app.buttons["Hand back to technician"]

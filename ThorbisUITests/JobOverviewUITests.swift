@@ -386,7 +386,7 @@ final class JobOverviewUITests: XCTestCase {
         let back = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Back to the visit")).firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
         XCTAssertTrue(app.buttons["job-tool-photo"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["job-section-money"].exists, "Field mode has no sections")
+        XCTAssertTrue(app.buttons["job-section-money"].waitForNonExistence(timeout: 5), "Field mode has no sections")
     }
 
     func testSingleEstimateOptionUsesSingularLabel() {

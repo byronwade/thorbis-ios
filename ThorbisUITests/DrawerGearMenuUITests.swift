@@ -138,7 +138,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.launch(); app.openDrawer()
         let jobs = app.buttons["drawer-jobs"]
         XCTAssertTrue(jobs.waitForExistence(timeout: 15))
-        XCTAssertTrue(jobs.isHittable)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: jobs)], timeout: 15), .completed, "The Jobs row is reachable once the drawer has slid in")
         XCTAssertFalse(app.buttons["drawer-estimates"].exists)
         XCTAssertFalse(app.buttons["drawer-invoices"].exists)
         XCTAssertFalse(app.buttons["drawer-team"].exists)
@@ -248,7 +248,7 @@ final class DrawerGearMenuUITests: XCTestCase {
             XCTAssertFalse(app.buttons["sidebar-search"].exists)
             app.swipeInFromLeftEdge()
             XCTAssertTrue(app.buttons["sidebar-search"].waitForExistence(timeout: 5), "The edge swipe shows the sidebar")
-            XCTAssertTrue(app.buttons["sidebar-jobs"].isHittable)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: app.buttons["sidebar-jobs"])], timeout: 5), .completed, "The sidebar's Jobs row is reachable once it has slid in")
             return
         }
         XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 30))
