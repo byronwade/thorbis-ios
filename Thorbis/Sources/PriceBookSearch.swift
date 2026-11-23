@@ -464,6 +464,14 @@ final class PriceBookCatalog: ObservableObject {
     static let shared = PriceBookCatalog()
     /// 50 pages of 200 is far beyond any real price book; the cap only bounds a runaway cursor.
     static let maximumPages = 50
+    /// How long a complete load is reused before the next refresh reloads it.
+    private static var freshnessWindow: TimeInterval {
+        #if DEBUG
+        // `--paper-preview-picker-stale-window`: every refresh finds the window already passed.
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-stale-window") { return 0 }
+        #endif
+        return 60
+    }
 
     @Published private(set) var items: [PriceBookListItem] = []
     @Published private(set) var index = PriceBookSearchIndex(items: [])
@@ -559,7 +567,7 @@ final class PriceBookCatalog: ObservableObject {
             loading = false
             return
         }
-        if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 60 { return }
+        if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < Self.freshnessWindow { return }
         if let pending = loadingRequest, pending.context == requested, pending.apiGeneration == apiGeneration {
             await pending.task.value
             return

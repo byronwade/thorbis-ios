@@ -157,6 +157,41 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"].exists)
     }
 
+    /// The same refresh once the catalog's 60 s freshness window has passed: the catalog adopts the
+    /// new revision and starts a reload in the same step. `--paper-preview-picker-stale-window`
+    /// treats the window as passed and leaves that reload unanswered, so the page is read while the
+    /// reload runs. Before the list kept its page through it, this read "1–50 of 73".
+    func testInvoicePickerKeepsCurrentPageWhileSameAuthorityRevalidationReloads() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-many",
+                               "--paper-preview-picker-revalidation", "--paper-preview-picker-feature-change",
+                               "--paper-preview-picker-stale-window"]
+        app.launch()
+        openPicker(in: app, addItem: "invoice-add-item")
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("plumbing\n")
+        // On iPad a put-away keyboard can stay in the tree at zero height, so ask the helper there.
+        XCTAssertTrue(app.usesTabletLayout ? app.waitForKeyboardToHide(timeout: 5) : app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        let more = app.buttons["price-book-show-more"]
+        expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", "23 remaining"), evaluatedWith: more)
+        waitForExpectations(timeout: 15)
+        showMore(in: app)
+        let range = app.staticTexts["price-book-page-range"]
+        expectation(for: NSPredicate(format: "label == %@", "51–73 of 73"), evaluatedWith: range)
+        waitForExpectations(timeout: 5)
+        let revalidate = app.buttons["price-book-preview-revalidate"]
+        XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
+        revalidate.tap()
+        XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        // The list shows placeholder rows until the catalog adopts the revision; the range returns with it.
+        XCTAssertTrue(range.waitForExistence(timeout: 5))
+        XCTAssertEqual(range.label, "51–73 of 73", "A reload over the kept snapshot should preserve the current page")
+        XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"].exists)
+    }
+
     func testInvoicePickerKeepsFirstPageSelectionOpen() {
         let app = openPriceBook()
         settleSearchFocus(in: app)

@@ -179,6 +179,38 @@ final class PriceBookCatalogTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
     }
 
+    func testAdoptedRevisionKeepsItsSnapshotWhileTheReloadItStartsRuns() async throws {
+        let org = UUID().uuidString.lowercased(), session = UUID()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(1, "Existing catalog")])),
+                          .init(200, try page([(1, "Existing catalog")]), gate: gate),
+                          .init(200, try page([(2, "Another actor's catalog")]))])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: testAuthority, force: true)
+        XCTAssertFalse(catalog.keptSnapshot)
+        let refreshed = PriceBookAuthority(actorID: testAuthority.actorID, policyVersion: testAuthority.policyVersion,
+                                           generation: testAuthority.generation, revision: UUID())
+        let next = PriceBookCatalogContext(organizationID: org, sessionGeneration: session, authority: refreshed)
+        // `force` stands in for a passed 60 s window: the revision is adopted and the reload starts in one step.
+        let reload = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: refreshed, force: true) }
+        try await waitForRequests(2)
+        XCTAssertTrue(catalog.isCurrent(next, api: api), "The revision is adopted before the reload finishes")
+        XCTAssertTrue(catalog.loading)
+        XCTAssertTrue(catalog.keptSnapshot, "A list keeps its page while the reload of a kept snapshot runs")
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertFalse(catalog.isPartial)
+        gate.release()
+        await reload.value
+        XCTAssertFalse(catalog.loading)
+        let other = PriceBookAuthority(actorID: "another-actor", policyVersion: 1, generation: "another-scope", revision: UUID())
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: other, force: true)
+        XCTAssertFalse(catalog.keptSnapshot, "A change of scope does not keep the page")
+        XCTAssertEqual(catalog.items.map(\.id), [id(2)])
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+    }
+
     func testAuthorityRevisionRetiresAnInFlightPartialCatalog() async throws {
         let org = UUID().uuidString.lowercased(), session = UUID()
         defer { removeOwnCache(org) }

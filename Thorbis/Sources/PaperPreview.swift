@@ -1015,6 +1015,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        // `--paper-preview-picker-stale-window`: the reload a revised sample authority starts is never
+        // answered, so the picker is read while that reload runs over the snapshot it kept.
+        if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-stale-window"), url.path == "/v1/query",
+           let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }),
+           Self.scenario.lock.withLock({ Self.scenario.authorityRevisions > 0 }) {
+            return
+        }
         // Keep the second catalog page pending to exercise honest partial search states.
         if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
