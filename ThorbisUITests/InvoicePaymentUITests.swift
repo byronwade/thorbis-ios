@@ -50,6 +50,9 @@ final class InvoicePaymentUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-overflow"]
         app.launch()
         XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
+        // The amount can be drawn from the copy saved on this phone before the live invoice answers.
+        // The page's menu exists only once it has, and Issue is decided from that same live invoice.
+        XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 10))
         let issue = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Issue")).firstMatch
         if issue.exists { XCTAssertFalse(issue.isEnabled, "An unverified amount must not be issued") }
     }

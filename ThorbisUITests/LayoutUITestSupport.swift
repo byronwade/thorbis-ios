@@ -94,6 +94,10 @@ extension XCUIApplication {
     /// Opens a place (`jobs`, `inbox`, `priceBook`…) from the phone drawer or the iPad sidebar.
     func openPlace(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
         guard usesTabletLayout else { return openFromDrawer(id, file: file, line: line) }
+        // The shell first: the sidebar's own Search (docked beside the columns, or showing) or the
+        // top bar's Show sidebar (hidden). Read before either is drawn, a docked sidebar looks
+        // hidden, and `showSidebar` then waits for a Show button the docked layout never draws.
+        waitForShell(file: file, line: line)
         let row = buttons["sidebar-\(id)"]
         if !(row.exists && row.isHittable) { showSidebar(file: file, line: line) }
         XCTAssertTrue(row.waitForExistence(timeout: 5), "No sidebar row \(id)", file: file, line: line)

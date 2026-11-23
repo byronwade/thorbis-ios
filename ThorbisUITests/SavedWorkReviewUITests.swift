@@ -95,6 +95,10 @@ final class SavedWorkReviewUITests: XCTestCase {
         app.scrollViews["saved-work-review"].swipeDown()
         reveal(cached, in: app); cached.tap()
         XCTAssertTrue(app.buttons["saved-work-summary"].firstMatch.waitForExistence(timeout: 10))
+        // Schedule keeps its own banner in the tree under the review sheet, so the wait above is
+        // already true before the job is pushed. The review's list leaves the tree once the job's
+        // page has finished sliding in; only then is "which banners can be tapped" settled.
+        _ = app.scrollViews["saved-work-review"].waitForNonExistence(timeout: 10)
         let visibleBanners = app.buttons.matching(identifier: "saved-work-summary").allElementsBoundByIndex.filter { $0.isHittable }
         XCTAssertEqual(visibleBanners.count, 1, "Only the pushed job's banner is actionable")
         visibleBanners[0].tap()
