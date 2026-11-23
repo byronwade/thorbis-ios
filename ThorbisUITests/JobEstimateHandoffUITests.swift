@@ -1182,14 +1182,17 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = open(["--paper-preview-handoff-slow-first-approval-post", "--paper-preview-handoff-hide-controls"])
         reachSignTogether(app); try approveTogether(app)
         // The first approval is on its way (its answer is slow): the customer goes Back in the bar.
-        let busy = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "handoff-approve-selected", "Approving")).firstMatch
-        _ = busy.waitForExistence(timeout: 5)
+        // The running commit has no identifier; the first estimate's own row says it is being approved.
+        let firstRow = app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"]
+        let inFlight = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Approving"), object: firstRow)
+        XCTAssertEqual(XCTWaiter.wait(for: [inFlight], timeout: 5), .completed, "The first approval must be running")
         var sent = false
         for _ in 0..<20 where !sent {
             sent = ((try? receipt(app))?["approvals"] as? [[String: Any]])?.count == 1
             if !sent { _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Wait for the approval to go out")], timeout: 0.5) }
         }
         XCTAssertTrue(sent, "The first approval must be in flight before leaving")
+        XCTAssertTrue(firstRow.label.contains("Approving"), "The first approval's answer must not have landed before leaving")
         app.navigationBars.buttons["Back"].firstMatch.tap()
         let again = app.buttons["customer-view-approve-estimates"]
         XCTAssertTrue(again.waitForExistence(timeout: 15))
