@@ -1,8 +1,12 @@
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from scripts.ui_test_shards import _mask, shards, tablet_classes, test_classes
+from scripts import ui_test_shards
+from scripts.ui_test_shards import _mask, main, shards, tablet_classes, test_classes
 
 
 class UITestShardTests(unittest.TestCase):
@@ -192,6 +196,42 @@ class UITestShardTests(unittest.TestCase):
         self.assertLessEqual(set(classes), set(test_classes()))
         split = shards(classes, 2)
         self.assertEqual(sorted(name for shard in split for name in shard), sorted(classes))
+
+    def test_an_extension_of_a_base_class_gives_its_subclasses_the_ipad_path(self):
+        self.assertEqual(self.tablet_plan({
+            "Base.swift": "class BaseUITestCase: XCTestCase {\n    func open() {}\n}\n",
+            "Base+Pad.swift": "extension BaseUITestCase {\n    func sidebar() { _ = app.usesTabletLayout }\n}\n",
+            "InheritedUITests.swift": "final class InheritedUITests: BaseUITestCase {\n    func testOpens() {}\n}\n",
+        }), {"InheritedUITests": 1})
+
+    def run_main(self, *arguments: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(list(arguments))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_the_tablet_flag_narrows_the_printed_share_and_the_check(self):
+        tablet = tablet_classes()
+        printed: list[str] = []
+        for index in (1, 2):
+            code, out, _ = self.run_main("--tablet", "--shards", "2", "--index", str(index))
+            self.assertEqual(code, 0)
+            printed += [argument.split("/")[-1] for argument in out.split()]
+        self.assertEqual(sorted(printed), sorted(tablet))
+        code, out, _ = self.run_main("--tablet", "--shards", "2", "--check")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), f"{len(tablet)} classes, {sum(tablet.values())} tests, 2 shards")
+        # Without the flag the same commands still cover every class.
+        code, out, _ = self.run_main("--shards", "6", "--check")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith(f"{len(test_classes())} classes, "))
+
+    def test_no_class_with_an_ipad_path_is_an_error_not_an_empty_run(self):
+        with mock.patch.object(ui_test_shards, "tablet_classes", return_value={}):
+            code, out, err = self.run_main("--tablet", "--shards", "2", "--index", "1")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("usesTabletLayout", err)
 
     def test_mask_keeps_offsets_and_lines(self):
         source = 'let a = "x\\"y" // }\nlet b = #"{"#\n'
