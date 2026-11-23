@@ -275,6 +275,10 @@ final class JobOverviewUITests: XCTestCase {
         // Owner 2026-11-21: the customer is the first pill of the related row under the header.
         let customer = app.buttons["job-customer-link"]
         XCTAssertTrue(customer.waitForExistence(timeout: 20))
+        // The job first shows the workspace the last launch saved. Measure the link once this
+        // launch's customer list has named the customer.
+        let named = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Danielle Marlowe"), object: customer)
+        XCTAssertEqual(XCTWaiter.wait(for: [named], timeout: 15), .completed, customer.label)
         // Bring the row into the open middle of the screen, clear of the bar above and the commit below.
         let barBottom = app.navigationBars.firstMatch.frame.maxY
         for _ in 0..<12 {

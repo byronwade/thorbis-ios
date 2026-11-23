@@ -119,7 +119,10 @@ final class CustomerClarityUITests: XCTestCase {
         let jobs = app.buttons["customer-hub-jobs"]
         XCTAssertTrue(jobs.waitForExistence(timeout: 30))
         XCTAssertTrue(jobs.isHittable)
-        XCTAssertTrue((jobs.value as? String ?? "").contains("AC not cooling"), "The row names the open job")
+        // The customer first shows the workspace the last launch saved, which another test's sample
+        // jobs may have written. Read the row once this launch's jobs have named the open one.
+        let named = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "AC not cooling"), object: jobs)
+        XCTAssertEqual(XCTWaiter.wait(for: [named], timeout: 30), .completed, "The row names the open job")
         capture("Customer dark overview")
         jobs.tap()
         XCTAssertTrue(app.staticTexts["AC not cooling"].firstMatch.waitForExistence(timeout: 10))
