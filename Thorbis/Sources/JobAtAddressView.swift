@@ -9,7 +9,11 @@ struct JobAtAddressView<Extras: View>: View {
     let street: String?
     let visits: [JobVisitRecord]
     let visitsLoaded: Bool
+    /// The customer's locations, already checked against the current customer context.
     let locations: [ServiceLocationRecord]
+    /// The locations above were read for this customer. The saved copy is shared with the job's
+    /// access banner, so it is written only once the access facts are in.
+    let locationsLoaded: Bool
     @ViewBuilder var extras: Extras
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
@@ -20,7 +24,8 @@ struct JobAtAddressView<Extras: View>: View {
     @State private var notices: [JobNoticeStatus] = []
     @State private var editing: EquipmentEditorItem?
 
-    private var ready: Bool { visitsLoaded && equipment != nil }
+    private var canViewCustomer: Bool { session.can("customer.view", feature: "core_crm") }
+    private var ready: Bool { visitsLoaded && equipment != nil && (locationsLoaded || !canViewCustomer) }
 
     private var live: JobPropertyHistory {
         JobPropertyHistory.make(job: job, locations: locations, equipment: equipment ?? [], visits: visits,
