@@ -45,6 +45,10 @@ says every shard passed. The planner counts tests a class inherits or declares i
 stops with an error for any `func test…` it cannot place in a class it names, so a test never
 drops out of the split unnoticed.
 
+The tests run a Debug build. `Release build` compiles the app and its widgets as Release, for
+the simulator and unsigned, so a debug-only symbol used in shipping code fails here and not at
+archive time. It tests nothing and is its own check.
+
 The shards run on an iPhone simulator. The iPad layout has its own run, `iPad UI tests`, on an
 iPad simulator: the test classes with an iPad path (`scripts/ui_test_shards.py --tablet --shards 2
 --list`), in two shards. It starts only for a pull request that changes the iPad layout, a test
