@@ -230,7 +230,10 @@ final class SavedWorkReviewUITests: XCTestCase {
         XCTAssertTrue(dismiss.isHittable)
         capture(app, "Landscape review after cancel")
         app.buttons["saved-work-done"].tap()
-        XCTAssertFalse(app.savedWorkReview.exists)
+        // The review sheet slides away after Done, and on a loaded iPad in landscape it was still in
+        // the tree almost a second after the tap (CI bad4e32, iPad 1). Wait for it to leave, as the
+        // retirement tests in this class do.
+        XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 5), "Done closes the review")
     }
     func testLargeTextDarkReviewHasReachableRecoveryAndDone() {
         let app = open(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-thorbis.appearance", "dark"])

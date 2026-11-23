@@ -544,7 +544,9 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Water heater add-ons"].exists)
         app.collectionViews["customer-document-pages"].swipeLeft()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 10))
-        XCTAssertEqual(position.label, "3 of 4 documents")
+        // A swipe chooses the page only when the paging scroll settles, after the next page is built.
+        let third = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "3 of 4 documents"), object: position)
+        XCTAssertEqual(XCTWaiter.wait(for: [third], timeout: 10), .completed, position.label)
         app.buttons["Next document"].tap()
         XCTAssertEqual(position.label, "4 of 4 documents")
         XCTAssertFalse(app.buttons["Next document"].isEnabled)

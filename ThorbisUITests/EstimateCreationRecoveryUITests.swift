@@ -82,7 +82,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
-        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+        waitForCounts(counts, "creates=1,links=0,estimateReads=0,jobReads=0")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved with a different location")).firstMatch.exists)
         retry.tap()
         let expected = jobMatches ? "creates=1,links=1,estimateReads=1,jobReads=1" : "creates=1,links=0,estimateReads=1,jobReads=1"
@@ -237,7 +237,9 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         save.tap()
         let retry = app.buttons["Retry adding to job"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "adding it to this job could not be confirmed")).firstMatch.exists)
+        // Retry appears as soon as the create answers, before the link request goes out; the link's
+        // failure arrives after it.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "adding it to this job could not be confirmed")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["Estimate title"].isEnabled)
         XCTAssertFalse(app.buttons.matching(identifier: "estimate-add-item").firstMatch.isEnabled)
         XCTAssertTrue(description.exists)

@@ -72,7 +72,8 @@ final class AdaptiveControlsUITests: XCTestCase {
         for _ in 0..<8 where !cancel.isHittable { app.swipeUp() }
         XCTAssertTrue(cancel.isHittable, app.debugDescription)
         cancel.tap()
-        XCTAssertFalse(warning.exists)
+        // Cancel slides the sign out sheet away, and its words stay in the tree until it has gone.
+        XCTAssertTrue(warning.waitForNonExistence(timeout: 10))
     }
 }
 

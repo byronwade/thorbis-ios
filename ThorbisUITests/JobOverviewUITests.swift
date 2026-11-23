@@ -298,7 +298,10 @@ final class JobOverviewUITests: XCTestCase {
         app.launch()
         let customer = app.buttons["job-customer-link"]
         XCTAssertTrue(customer.waitForExistence(timeout: 20))
-        XCTAssertTrue(customer.label.hasPrefix("I"), customer.label)
+        // The job first shows the workspace the last launch saved, where the sample customer is
+        // Danielle Marlowe. Measure once this launch's customer list has put the short name in.
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "I"), object: customer)], timeout: 15), .completed,
+                       customer.label)
         XCTAssertGreaterThanOrEqual(customer.frame.width, 44)
         XCTAssertGreaterThanOrEqual(customer.frame.height, 44)
     }

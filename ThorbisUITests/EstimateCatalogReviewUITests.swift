@@ -205,6 +205,10 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
         let keyboardDone = app.keyboardDoneButton
         XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        // The price field takes focus a moment after the picker closes, so Done is there while the
+        // keyboard is still coming up. Save rides up with it; compare the frames once it has arrived.
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed, "Save must be reachable once the keyboard is up")
         XCTAssertFalse(save.frame.intersects(keyboardDone.frame), "The keyboard Done control must not cover any part of Save")
         save.tap()
         let warning = app.waitForDescriptionLengthWarning()

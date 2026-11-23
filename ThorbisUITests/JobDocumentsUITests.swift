@@ -270,6 +270,8 @@ final class JobDocumentsUITests: XCTestCase {
         invoice.tap()
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
         app.navigationBars.buttons["Back"].firstMatch.tap()
+        // The invoice's page has its own Collect payment and stays in the tree while it slides away.
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForNonExistence(timeout: 10))
         // Paper 24: the invoice's own card collects it; with two payable invoices no pill is unnamed.
         XCTAssertFalse(app.buttons["Collect payment"].exists, "Two payable invoices: every Collect payment names its invoice")
         let collect = app.buttons["job-invoice-collect-\(invoiceA)"]

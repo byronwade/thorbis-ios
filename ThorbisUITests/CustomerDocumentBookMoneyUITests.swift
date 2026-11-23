@@ -128,7 +128,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         reveal(history, in: app)
         XCTAssertTrue(history.isHittable)
         history.tap()
-        XCTAssertFalse(text("Card", in: app).exists)
+        // The history folds with an animation, and its rows stay in the tree until it ends.
+        XCTAssertTrue(text("Card", in: app).waitForNonExistence(timeout: 10))
         let collapsed = XCTAttachment(screenshot: app.screenshot())
         collapsed.name = "Payment history collapsed by customer"
         collapsed.lifetime = .keepAlways
@@ -225,7 +226,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(history.isHittable)
         XCTAssertTrue(text("Card", in: app).exists)
         history.tap()
-        XCTAssertFalse(text("Card", in: app).exists)
+        // The history folds with an animation, and its rows stay in the tree until it ends.
+        XCTAssertTrue(text("Card", in: app).waitForNonExistence(timeout: 10))
         let refresh = pages(app).buttons["Refresh payments"]
         reveal(refresh, in: app)
         XCTAssertTrue(refresh.isHittable)
