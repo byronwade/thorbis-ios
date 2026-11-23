@@ -21,6 +21,18 @@ enum AppIntroGate {
     }
 }
 
+/// The intro's payment line. It names Tap to Pay only when this build is allowed to take it
+/// (TapToPayReadiness.buildEnabled, the ThorbisTapToPayEnabled key in Info.plist). Otherwise it
+/// lists the ways the collect screen offers in every build: the code to scan, the texted pay
+/// link, cash and check.
+enum AppIntroCopy {
+    static func paymentMessage(tapToPayEnabled: Bool) -> String {
+        tapToPayEnabled
+            ? "Tap to Pay, a code to scan, cash or check — collect payment before you leave the job."
+            : "A code to scan, a texted pay link, cash or check — collect payment before you leave the job."
+    }
+}
+
 /// How the person left the intro. Every exit ends at Login; `getStarted` lets the host open
 /// sign-up there if it wants to.
 enum AppIntroExit: Equatable {
@@ -74,7 +86,7 @@ struct AppIntroView: View {
                 }
                 .tag(1)
                 IntroPage(title: "Get paid\non the spot",
-                          message: "Tap to Pay, a code to scan, cash or check — collect payment before you leave the job.") {
+                          message: AppIntroCopy.paymentMessage(tapToPayEnabled: TapToPayReadiness.buildEnabled)) {
                     IntroPaymentCard()
                 }
                 .tag(2)

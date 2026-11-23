@@ -27,6 +27,22 @@ final class IntroInviteTests: XCTestCase {
         XCTAssertFalse(AppIntroGate.shouldShow(defaults: defaults))
     }
 
+    // MARK: Intro copy
+
+    func testIntroPaymentPageNamesTapToPayOnlyWhenTheBuildAllowsIt() {
+        let off = AppIntroCopy.paymentMessage(tapToPayEnabled: false)
+        XCTAssertNil(off.range(of: "tap to pay", options: .caseInsensitive), off)
+        for way in ["code to scan", "pay link", "cash", "check"] {
+            XCTAssertTrue(off.contains(way), "Missing \(way): \(off)")
+        }
+
+        let on = AppIntroCopy.paymentMessage(tapToPayEnabled: true)
+        XCTAssertTrue(on.hasPrefix("Tap to Pay"), on)
+        for way in ["code to scan", "cash", "check"] {
+            XCTAssertTrue(on.contains(way), "Missing \(way): \(on)")
+        }
+    }
+
     // MARK: Invitation links
 
     func testReadsTheIdFromTheEmailLink() throws {
