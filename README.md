@@ -63,8 +63,3 @@ log, no unexpected failure). The shard passes only if each re-run shows that one
 Every such run is a warning on the job and is listed in its summary with the reasons, and its
 evidence is uploaded as `ios-ui-test-reruns-<shard>` (BYR-1835). A failure without that evidence
 is never run again.
-
-One shard also carries a temporary probe, `scripts/ci-freeze-sampler.sh`. It takes a few stack
-samples of the app when the simulator reports a frozen animation, and uploads them as
-`ios-ui-freeze-samples-<shard>`. It is evidence for BYR-1841 and goes when that issue has its
-answer.

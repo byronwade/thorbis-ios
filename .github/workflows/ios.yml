@@ -189,18 +189,6 @@ jobs:
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
           only_testing=$(python3 scripts/ui_test_shards.py --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
           simulator_id=$(scripts/ci-simulator-id.sh)
-          # Evidence for BYR-1841, not a test: in the shard that runs JobEstimateHandoffUITests,
-          # where the Customer view freezes happen, take a stack sample of the app each time the
-          # simulator logs a timed-out animation fence. The sampler cannot fail this step; the
-          # tests' own exit status is the step's. Remove it once BYR-1841 has its stack.
-          samples="${{ runner.temp }}/freeze-samples"
-          sampler=
-          if [[ "$only_testing" == *JobEstimateHandoffUITests* ]]; then
-            mkdir -p "$samples"
-            scripts/ci-freeze-sampler.sh "$simulator_id" "$samples" 10 >"$samples/sampler.log" 2>&1 &
-            sampler=$!
-          fi
-          status=0
           # The tests, and one more run of a failed test only when the simulator's own log shows
           # it cancelled that test's tap: scripts/ci-run-ui-tests.sh has the rule (BYR-1835).
           # $only_testing is a list of -only-testing: arguments and must split on spaces.
@@ -208,15 +196,7 @@ jobs:
           scripts/ci-run-ui-tests.sh "$test_run" "$simulator_id" \
             "${{ runner.temp }}/ThorbisUITests-${{ matrix.shard }}.xcresult" \
             "${{ runner.temp }}/ui-test-reruns" \
-            $only_testing || status=$?
-          if [[ -n "$sampler" ]]; then
-            kill "$sampler" 2>/dev/null || true
-            pkill -f 'log stream --style compact' 2>/dev/null || true
-            # Let a sample still being written finish, so the next step uploads it whole.
-            waited=$SECONDS
-            while pgrep -x sample >/dev/null && (( SECONDS - waited < 30 )); do sleep 2; done
-          fi
-          exit "$status"
+            $only_testing
       - name: Save UI test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -234,14 +214,6 @@ jobs:
         with:
           name: ios-ui-test-reruns-${{ matrix.shard }}
           path: ${{ runner.temp }}/ui-test-reruns
-          if-no-files-found: ignore
-          retention-days: 14
-      - name: Save freeze samples
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ui-freeze-samples-${{ matrix.shard }}
-          path: ${{ runner.temp }}/freeze-samples
           if-no-files-found: ignore
           retention-days: 14
 

@@ -60,8 +60,8 @@ taps="$scratch/cancelled-taps.log"
 : >"$times"
 : >"$taps"
 
-# The one error, as it is logged. `cat` keeps the stream writing to a pipe, as it does for the
-# freeze sampler, so each line reaches the file when it is logged.
+# The one error, as it is logged. `cat` keeps the stream writing to a pipe: into a pipe it handed
+# over each line as it was logged (seen in run 45119132156), and into a file it may hold lines back.
 xcrun simctl spawn "$simulator_id" log stream --style compact --level default \
   --predicate 'process == "backboardd" AND eventMessage CONTAINS "unknown digitizer"' </dev/null 2>/dev/null |
   cat >"$taps" &
