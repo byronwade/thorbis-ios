@@ -32,7 +32,7 @@ jobs:
           python3 scripts/ui_test_shards.py --shards 6 --check
           python3 scripts/ui_test_shards.py --tablet --shards 2 --check
       - name: Test the guard, the shard planner and the cancelled-tap rule
-        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps
+        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests
       - name: Check every text colour against the grounds it sits on
         run: python3 scripts/tests/contrast.py
 
@@ -225,8 +225,9 @@ jobs:
           path: ${{ runner.temp }}/ThorbisUITests-${{ matrix.shard }}.xcresult
           if-no-files-found: ignore
           retention-days: 14
-      # Only a failed shard has these: the times each test ran, the simulator's cancelled-tap
-      # lines, and the result bundle of each test that was run once more.
+      # Only a failed shard has these: the times and steps of each test, the simulator's
+      # cancelled-tap lines, the decision, and the times and result bundle of each test that was
+      # run once more.
       - name: Save the evidence for any test run once more
         if: always()
         uses: actions/upload-artifact@v4
