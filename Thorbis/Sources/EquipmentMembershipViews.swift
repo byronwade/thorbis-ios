@@ -511,7 +511,8 @@ struct JobAddPlanSheet: View {
             dismiss()
         } catch is CancellationError {
         } catch {
-            self.error = (error as? Problem)?.status == 403 ? MembershipAccess.membershipRefused : error.localizedDescription
+            // Enrolling sends only the plan and the start day, never a percent off.
+            self.error = MembershipAccess.saveError(error, plan: false)
         }
     }
 }
@@ -541,7 +542,12 @@ extension CustomerMembershipSection {
             choosing = false
             error = nil
             await load()
-        } catch { self.error = error.localizedDescription; choosing = false }
+        } catch {
+            // Enrolling sends only the plan and the start day, so a refusal is about the membership
+            // itself, never the percent off. Plain words, not the server's detail.
+            self.error = MembershipAccess.saveError(error, plan: false)
+            choosing = false
+        }
     }
 
     private func cancel(_ membership: MembershipRecord) async {

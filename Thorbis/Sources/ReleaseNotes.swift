@@ -21,6 +21,14 @@ enum ReleaseNotes {
 
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-23-member-discount",
+            date: "2026-11-23",
+            highlights: [
+                .init(symbol: "percent", title: "Percent off follows the plan",
+                      detail: "A membership\u{2019}s percent off comes from its plan; only an owner or admin can set a different one."),
+            ],
+            fixes: 1),
+        ReleaseNote(
             id: "2026-11-22-access-that-follows",
             date: "2026-11-22",
             highlights: [

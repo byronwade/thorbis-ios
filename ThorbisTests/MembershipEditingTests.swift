@@ -157,7 +157,8 @@ final class MembershipEditingTests: XCTestCase {
 
     // MARK: Membership requests
 
-    func testAnEditedMembershipSendsEveryFieldAndNullForEmptiedOnes() async throws {
+    /// An owner or admin types a new percent off: every field goes, the percent included.
+    func testAnEditedMembershipWithANewPercentSendsEveryFieldAndNullForEmptiedOnes() async throws {
         let api = client([.init(200, membershipReply)])
         var form = MembershipForm(try record())
         XCTAssertEqual(form.locationId, locationID)
@@ -167,7 +168,9 @@ final class MembershipEditingTests: XCTestCase {
         form.renews = nil
         form.locationId = nil
         form.notes = "  "
-        let saved = try await api.updateMembership(customerID, membershipID: membershipID, try form.input())
+        let input = try form.input()
+        XCTAssertTrue(input.discountChanged)
+        let saved = try await api.updateMembership(customerID, membershipID: membershipID, input)
         XCTAssertEqual(saved.id, membershipID)
         let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
         XCTAssertEqual(request.method, "POST")
@@ -181,18 +184,66 @@ final class MembershipEditingTests: XCTestCase {
         for key in ["locationId", "cadence", "renewsOn", "notes"] { XCTAssertTrue(body[key] is NSNull, "\(key) is cleared with null") }
         XCTAssertNil(body["customerId"], "The customer is in the route; the server refuses it in the body")
         XCTAssertNil(body["planId"])
+        XCTAssertNil(body["originalDiscountPercent"], "The saved percent is the app's to compare, never sent")
         XCTAssertEqual(body.count, 9)
+    }
+
+    /// Office staff change everything but the percent off (they see it and can't type it): the
+    /// percent is left out, so the server keeps the stored one and asks for no more permission.
+    func testAnEditedMembershipWithTheSamePercentLeavesThePercentOut() async throws {
+        let api = client([.init(200, membershipReply)])
+        var form = MembershipForm(try record())
+        form.name = " Comfort Club Gold "
+        form.cadence = ""
+        form.renews = nil
+        form.locationId = nil
+        form.notes = "  "
+        let input = try form.input()
+        XCTAssertFalse(input.discountChanged)
+        _ = try await api.updateMembership(customerID, membershipID: membershipID, input)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, "/v1/customers/\(customerID)/memberships/\(membershipID)")
+        let body = try sentBody()
+        XCTAssertEqual(body["name"] as? String, "Comfort Club Gold")
+        XCTAssertEqual(body["kind"] as? String, "membership")
+        XCTAssertEqual(body["status"] as? String, "active")
+        XCTAssertEqual(body["startsOn"] as? String, "2026-01-15")
+        for key in ["locationId", "cadence", "renewsOn", "notes"] { XCTAssertTrue(body[key] is NSNull, "\(key) is cleared with null") }
+        XCTAssertNil(body["discountPercent"], "An untouched percent is not sent")
+        XCTAssertEqual(body.count, 8)
     }
 
     func testAnUntouchedMembershipIsSentBackAsItWas() throws {
         let input = try MembershipForm(try record()).input()
+        XCTAssertEqual(input.discountPercent, 15)
+        XCTAssertEqual(input.originalDiscountPercent, 15)
+        XCTAssertFalse(input.discountChanged)
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(input)) as? [String: Any])
         XCTAssertEqual(body["locationId"] as? String, locationID)
         XCTAssertEqual(body["cadence"] as? String, "Twice a year")
         XCTAssertEqual(body["startsOn"] as? String, "2026-01-15")
         XCTAssertEqual(body["renewsOn"] as? String, "2027-01-15")
         XCTAssertEqual(body["notes"] as? String, "Gate code 4411")
-        XCTAssertEqual(body["discountPercent"] as? Int, 15)
+        XCTAssertNil(body["discountPercent"], "The server keeps the stored percent when it is left out")
+        XCTAssertEqual(body.count, 8)
+    }
+
+    func testOnlyANewPercentIsSent() throws {
+        func sent(_ typed: String) throws -> Any? {
+            var form = MembershipForm(try record())
+            form.discount = typed
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(try form.input())) as? [String: Any])
+            return body["discountPercent"]
+        }
+        XCTAssertNil(try sent("15%"), "The same percent typed another way is not a change")
+        XCTAssertNil(try sent(" 15 "))
+        XCTAssertEqual(try sent("") as? Int, 0, "Emptying the field takes the percent off")
+        XCTAssertEqual(try sent("16") as? Int, 16)
+
+        let free = try JSONDecoder().decode(MembershipRecord.self,
+                                            from: Data(membershipReply.replacingOccurrences(of: #""discountPercent":15"#, with: #""discountPercent":0"#).utf8))
+        let untouched = try MembershipForm(free).input()
+        XCTAssertEqual(untouched.discountPercent, 0)
+        XCTAssertFalse(untouched.discountChanged, "No percent off, left empty, is no change")
     }
 
     func testTheMembershipFormChecksNamePercentAndDates() throws {
@@ -235,12 +286,66 @@ final class MembershipEditingTests: XCTestCase {
             _ = try await api.createMembershipPlan(MembershipPlanInput(name: "Gold"))
             XCTFail("Expected a refusal")
         } catch {
-            XCTAssertEqual(MembershipAccess.saveError(error, plan: true), "You can\u{2019}t change plans. Ask an owner to do it.")
-            XCTAssertEqual(MembershipAccess.saveError(error, plan: false), "You can\u{2019}t change this membership. Ask the office to do it.")
+            XCTAssertEqual(MembershipAccess.saveError(error, plan: true), "You can\u{2019}t change plans. Ask an owner or admin to do it.")
+            XCTAssertEqual(MembershipAccess.saveError(error, plan: false),
+                           "You can\u{2019}t change this membership. Ask an owner or admin to do it.",
+                           "The same words are not about the percent unless the request carried one")
+            XCTAssertEqual(MembershipAccess.saveError(error, plan: true, discountChanged: true),
+                           "You can\u{2019}t change plans. Ask an owner or admin to do it.")
         }
         XCTAssertEqual(MembershipAccess.saveError(URLError(.notConnectedToInternet), plan: true), "Saving needs a connection.")
         XCTAssertEqual(MembershipAccess.saveError(Problem(title: "Conflict", status: 409, detail: "A plan has that name."), plan: true),
                        "A plan has that name.")
+    }
+
+    // MARK: Remove, and putting a membership back
+
+    func testRemoveIsOfferedOnlyWhenTheMembershipCouldBePutBack() throws {
+        func membership(planned: Bool = true, percent: Int = 15) throws -> MembershipRecord {
+            var json = membershipReply.replacingOccurrences(of: #""discountPercent":15"#, with: #""discountPercent":\#(percent)"#)
+            if !planned { json = json.replacingOccurrences(of: #""planId":"\#(planID)","#, with: "") }
+            let decoded = try JSONDecoder().decode(MembershipRecord.self, from: Data(json.utf8))
+            XCTAssertEqual(decoded.planId, planned ? planID : nil)
+            XCTAssertEqual(decoded.discountPercent, percent)
+            return decoded
+        }
+        func plan(percent: Int = 15, archived: Bool = false) throws -> MembershipPlan {
+            let json = planReply.replacingOccurrences(of: #""discountPercent":15"#, with: #""discountPercent":\#(percent)"#)
+                .replacingOccurrences(of: #""archived":false"#, with: #""archived":\#(archived)"#)
+            let decoded = try JSONDecoder().decode(MembershipPlan.self, from: Data(json.utf8))
+            XCTAssertEqual(decoded.discountPercent, percent)
+            XCTAssertEqual(decoded.archived, archived)
+            return decoded
+        }
+        let needs = MembershipAccess.restoreNeedsDiscountAuthority
+
+        XCTAssertFalse(needs(try membership(), [try plan()]), "15% on a plan still sold at 15% is put back as it was")
+        XCTAssertTrue(needs(try membership(), [try plan(percent: 10)]), "Put back, 15% would differ from the plan's 10%")
+        XCTAssertTrue(needs(try membership(), [try plan(archived: true)]), "An archived plan is not used: 15% differs from 0")
+        XCTAssertFalse(needs(try membership(percent: 0), [try plan(archived: true)]), "An archived plan at 0% is put back at 0%")
+        XCTAssertFalse(needs(try membership(planned: false, percent: 0), [try plan()]), "No plan and no percent off")
+        XCTAssertTrue(needs(try membership(planned: false), [try plan()]), "No plan: 15% differs from 0, whatever the plans are")
+        XCTAssertTrue(needs(try membership(), nil), "Plans not loaded: a membership with a plan is not offered on a guess")
+        XCTAssertTrue(needs(try membership(planned: false), nil), "Without a plan the plans don't matter: 15% differs from 0")
+        XCTAssertFalse(needs(try membership(planned: false, percent: 0), nil))
+        XCTAssertFalse(MembershipAccess.removeLocked.contains("office"))
+    }
+
+    func testARefusedNewPercentSaysWhoCanChangeIt() {
+        let discount = Problem(title: "Forbidden", status: 403, detail: "not permitted: organization.settings.edit (no_grant)")
+        XCTAssertEqual(MembershipAccess.saveError(discount, plan: false, discountChanged: true),
+                       "You can\u{2019}t change the percent off. Ask an owner or admin to do it.")
+        XCTAssertEqual(MembershipAccess.saveError(discount, plan: false, discountChanged: false),
+                       "You can\u{2019}t change this membership. Ask an owner or admin to do it.")
+        let scope = Problem(title: "Forbidden", status: 403, detail: "not permitted: customer.edit (out_of_scope)")
+        XCTAssertEqual(MembershipAccess.saveError(scope, plan: false, discountChanged: true),
+                       "You can\u{2019}t change this membership. Ask an owner or admin to do it.",
+                       "Refused for the membership itself, not the percent")
+        XCTAssertEqual(MembershipAccess.saveError(Problem(title: "Forbidden", status: 403, detail: nil), plan: false, discountChanged: true),
+                       "You can\u{2019}t change this membership. Ask an owner or admin to do it.")
+        XCTAssertFalse(MembershipAccess.discountRefused.contains("office"))
+        XCTAssertFalse(MembershipAccess.membershipRefused.contains("office"))
+        XCTAssertFalse(MembershipAccess.discountLocked.contains("office"))
     }
 
     // MARK: Who may edit, and the server features
@@ -275,18 +380,23 @@ final class MembershipEditingTests: XCTestCase {
         let owner = await session(capabilities: ["customer.view", "customer.edit", "organization.settings.edit"])
         XCTAssertTrue(MembershipAccess.canEditPlans(owner))
         XCTAssertTrue(MembershipAccess.canEditMemberships(owner))
+        XCTAssertTrue(MembershipAccess.canOverrideMembershipDiscount(owner))
 
         let office = await session(capabilities: ["customer.view", "customer.edit", "pricebook.view"])
         XCTAssertFalse(MembershipAccess.canEditPlans(office), "Office staff see plans and cannot change them")
         XCTAssertTrue(MembershipAccess.canEditMemberships(office))
+        XCTAssertFalse(MembershipAccess.canOverrideMembershipDiscount(office),
+                       "Office staff see a membership's percent off and cannot change it")
 
         let tech = await session(capabilities: ["customer.view", "job.view"])
         XCTAssertFalse(MembershipAccess.canEditPlans(tech))
         XCTAssertFalse(MembershipAccess.canEditMemberships(tech))
+        XCTAssertFalse(MembershipAccess.canOverrideMembershipDiscount(tech))
 
         let noCRM = await session(capabilities: ["customer.edit", "organization.settings.edit"], on: [])
         XCTAssertFalse(MembershipAccess.canEditPlans(noCRM), "The routes sit behind core_crm")
         XCTAssertFalse(MembershipAccess.canEditMemberships(noCRM))
+        XCTAssertFalse(MembershipAccess.canOverrideMembershipDiscount(noCRM))
     }
 
     func testServerFlagsMatchTheServerKeys() {

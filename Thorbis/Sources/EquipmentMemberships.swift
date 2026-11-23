@@ -162,7 +162,9 @@ struct MembershipPlanRequest: Encodable {
 }
 
 /// A customer's membership as edited. Days are "yyyy-MM-dd"; an emptied field is sent as null so
-/// the server clears it. Name, kind, status and the discount are always sent.
+/// the server clears it. Name, kind and status are always sent. The percent off is sent only when
+/// it differs from the one the membership was saved with: left out, the server keeps the stored
+/// percent, and a new one needs the company settings permission (organization.settings.edit).
 struct MembershipInput: Encodable, Equatable {
     var locationId: String?
     var name: String
@@ -172,6 +174,8 @@ struct MembershipInput: Encodable, Equatable {
     var renewsOn: String?
     var status: String
     var discountPercent: Int
+    /// The percent off the membership was saved with. Never sent.
+    var originalDiscountPercent: Int
     var notes: String?
 
     init(_ record: MembershipRecord) {
@@ -183,8 +187,12 @@ struct MembershipInput: Encodable, Equatable {
         renewsOn = record.renewsOn
         status = record.status
         discountPercent = record.discountPercent
+        originalDiscountPercent = record.discountPercent
         notes = record.notes
     }
+
+    /// True when this edit carries a new percent off.
+    var discountChanged: Bool { discountPercent != originalDiscountPercent }
 
     /// Trimmed, or nil when nothing is left.
     static func text(_ value: String?) -> String? {
@@ -201,7 +209,7 @@ struct MembershipInput: Encodable, Equatable {
         try c.encode(Self.text(startsOn), forKey: .startsOn)
         try c.encode(Self.text(renewsOn), forKey: .renewsOn)
         try c.encode(status, forKey: .status)
-        try c.encode(discountPercent, forKey: .discountPercent)
+        if discountChanged { try c.encode(discountPercent, forKey: .discountPercent) }
         try c.encode(Self.text(notes), forKey: .notes)
     }
     private enum CodingKeys: String, CodingKey { case locationId, name, kind, cadence, startsOn, renewsOn, status, discountPercent, notes }
