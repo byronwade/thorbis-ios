@@ -35,7 +35,7 @@ enum ReleaseNotes {
                 .init(symbol: "mappin.and.ellipse", title: "Jobs show the customer\u{2019}s address",
                       detail: "A new customer\u{2019}s address is saved as their property, and a job with no property shows the address on file."),
             ],
-            fixes: 18),
+            fixes: 19),
         ReleaseNote(
             id: "2026-11-21-saves-that-stick",
             date: "2026-11-21",

@@ -166,7 +166,7 @@ enum HelpCatalog {
                 HelpStep(symbol: "doc", text: "Choose a CSV file of up to 5 MB."),
                 HelpStep(symbol: "tablecells", text: "Check that the columns line up, then import."),
             ],
-            note: "Import customers shows only for people who may add and edit customers.",
+            note: "Import customers shows only for people who may view, add and edit customers.",
             keywords: ["csv", "excel", "spreadsheet", "migrate", "upload", "import"],
             related: ["customer-add"]),
         HelpArticle(

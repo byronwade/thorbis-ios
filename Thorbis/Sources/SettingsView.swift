@@ -25,7 +25,7 @@ struct SettingsView: View {
     /// the owner's) still need a way to the company pages they may open.
     private var reachesBusinessSettingsHere: Bool {
         guard !session.can("organization.settings.edit") else { return false }
-        return (session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm"))
+        return CustomerImportModel.permitted({ session.can($0, feature: "core_crm") })
             || session.can("organization.performance.view") || MenuItem.notices.permitted(session)
     }
 

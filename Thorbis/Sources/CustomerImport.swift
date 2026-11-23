@@ -5,6 +5,9 @@ import UniformTypeIdentifiers
 // `POST /v1/customer-imports` {dryRun, rows}: the server never sees the file, only rows already
 // mapped to {name, phones, emails, addresses, notes}. At most 100 rows and 200 records per request
 // (domains/customers CUSTOMER_IMPORT_MAX_ROWS / MAX_WORK), so rows are chunked by both.
+// The server refuses a row with no phone and no email as "invalid", and commits each request in
+// one transaction, so a chunk sent again after a lost answer creates nobody twice: the customers
+// the lost try made come back as "duplicate" with their existingCustomerId.
 
 /// A small RFC 4180 reader: quoted fields, doubled quotes, commas and line breaks inside quotes.
 /// Blank rows are kept so a row's position still matches the row number in the spreadsheet.
@@ -176,11 +179,19 @@ struct CustomerImportRow: Encodable, Equatable {
 struct CustomerImportResult: Decodable, Equatable {
     struct Summary: Decodable, Equatable { let new: Int; let duplicate: Int; let invalid: Int }
     struct Outcome: Decodable, Equatable {
-        let row: Int
-        let status: String
-        let name: String?
-        let reasons: [String]?
-        let matchedOn: String?
+        var row: Int
+        var status: String
+        var name: String? = nil
+        var reasons: [String]? = nil
+        var matchedOn: String? = nil
+        /// "new": parts of the row that were accepted but could not be kept, in the server's words.
+        var warnings: [String]? = nil
+        /// "new" on a commit: the customer just created.
+        var customerId: String? = nil
+        /// "duplicate": the customer already in the workspace with that phone or email.
+        var existingCustomerId: String? = nil
+        /// "duplicate": an earlier row of the same request with that phone or email.
+        var duplicateOfRow: Int? = nil
     }
     let dryRun: Bool
     let summary: Summary
@@ -206,13 +217,24 @@ final class CustomerImportModel: ObservableObject {
     /// Spreadsheet row of `records[0]` (the header is the row above it).
     var firstRecordLine = 2
     @Published var mapping = CustomerImportMapping() {
-        didSet { if mapping != oldValue { committedChunks = 0 } }
+        didSet { if mapping != oldValue { forgetRun() } }
     }
     /// Chunks already imported, so Try again after an error carries on instead of starting over.
     private(set) var committedChunks = 0
+    /// Each chunk's dry-run outcomes from `check`, by chunk index: what a row was expected to be.
+    private(set) var previewOutcomes: [Int: [CustomerImportResult.Outcome]] = [:]
+    /// The chunk whose last commit ended with no definite answer: it may have reached the server
+    /// and been saved. Cleared once a commit answer for that chunk arrives.
+    private(set) var uncertainChunk: Int?
+    /// Every customer this import run has seen created, so a retried chunk never counts one twice.
+    private(set) var createdCustomerIDs: Set<String> = []
     static let maxRows = 5000
     @Published var preview: CustomerImportResult.Summary?
     @Published var problems: [String] = []
+    /// The first five rows the server will import without some of their details ("Row 7: notes …").
+    @Published var warnings: [String] = []
+    /// How many rows carry at least one warning.
+    @Published var warningCount = 0
     @Published var imported = 0
     @Published var progress = 0.0
     @Published var error: String?
@@ -220,6 +242,76 @@ final class CustomerImportModel: ObservableObject {
     var running: Task<Void, Never>?
 
     func cancel() { running?.cancel() }
+
+    /// Who is offered Import: true when `can` grants all three capabilities the route needs
+    /// (customer.create, customer.edit and customer.view; services/api manifest, customers.import).
+    nonisolated static func permitted(_ can: (String) -> Bool) -> Bool {
+        ["customer.create", "customer.edit", "customer.view"].allSatisfy(can)
+    }
+
+    /// The import button on the last step.
+    var commitTitle: String {
+        // Also while a chunk is uncertain: its lost try may have saved it.
+        if committedChunks > 0 || uncertainChunk != nil { return "Import the rest" }
+        let new = preview?.new ?? 0
+        return new == 1 ? "Import 1 customer" : "Import \(new) customers"
+    }
+
+    /// A 403 for the role (category "authorization", or none from an older server).
+    nonisolated static func isRoleRefusal(_ error: Error) -> Bool {
+        guard let problem = error as? Problem, problem.status == 403 else { return false }
+        return problem.category == nil || problem.category == "authorization"
+    }
+
+    /// What a failed check or import says. A feature that is switched off (403
+    /// "feature_unavailable") and every other error keep their own description.
+    nonisolated static func message(for error: Error) -> String {
+        isRoleRefusal(error) ? "Your role can\u{2019}t import customers." : error.localizedDescription
+    }
+
+    /// True when a commit may have reached the server and been saved although no answer came
+    /// back: a timeout, a dropped connection, a server failure, or a Cancel while it was in
+    /// flight. Not for a request that provably never left (`Problem.neverSent`) or a definite
+    /// refusal (`RetryKey.isDefinite`: a 4xx other than 408 and 429).
+    nonisolated static func answerWasLost(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if (error as? Problem)?.neverSent == true { return false }
+        return !RetryKey<Int>.isDefinite(error)
+    }
+
+    /// The customers one committed chunk confirms, and the ids to remember as created this run.
+    /// Not uncertain: the server's own `summary.new`. Uncertain (an earlier try of this chunk lost
+    /// its answer, and a chunk lands whole or not at all): every row answered "new", plus each
+    /// distinct `existingCustomerId` among rows the preview called "new" that now come back
+    /// "duplicate", leaving out customers this run already counted (a row repeating a contact from
+    /// an earlier chunk previews as new, because every chunk is previewed before any is saved).
+    nonisolated static func confirmedNew(preview: [CustomerImportResult.Outcome]?, answer: CustomerImportResult,
+                                         uncertain: Bool, alreadyCounted: Set<String>) -> (count: Int, created: Set<String>) {
+        let createdNow = Set(answer.rows.compactMap { $0.status == "new" ? $0.customerId : nil })
+        guard uncertain else { return (answer.summary.new, createdNow) }
+        var previewStatus: [Int: String] = [:]
+        for outcome in preview ?? [] where previewStatus[outcome.row] == nil { previewStatus[outcome.row] = outcome.status }
+        var landed: Set<String> = []
+        for outcome in answer.rows where outcome.status == "duplicate" && previewStatus[outcome.row] == "new" {
+            if let id = outcome.existingCustomerId, !alreadyCounted.contains(id) { landed.insert(id) }
+        }
+        let newRows = answer.rows.filter { $0.status == "new" }.count
+        return (newRows + landed.count, createdNow.union(landed))
+    }
+
+    /// The spreadsheet line of a chunk's row (`row` is 1-based within the chunk).
+    static func line(chunkStart: Int, row: Int, lines: [Int]) -> Int {
+        let position = chunkStart + row - 1
+        return lines.indices.contains(position) ? lines[position] : position + 2
+    }
+
+    /// The mapping or the file changed: the next import is a new run.
+    private func forgetRun() {
+        committedChunks = 0
+        uncertainChunk = nil
+        previewOutcomes = [:]
+        createdCustomerIDs = []
+    }
 
     /// Rows to send, with the spreadsheet line each came from (line 1 is the header).
     var prepared: (rows: [CustomerImportRow], lines: [Int], unnamed: [Int]) {
@@ -275,66 +367,108 @@ final class CustomerImportModel: ObservableObject {
         error = nil
         var new = 0, duplicate = 0, invalid = 0
         var reasons: [String] = []
+        var outcomes: [Int: [CustomerImportResult.Outcome]] = [:]
+        var warned: [String] = []
+        var warnedRows = 0
         if !unnamed.isEmpty {
             let shown = unnamed.prefix(5).map(String.init).joined(separator: ", ")
             reasons.append(unnamed.count == 1 ? "Row \(shown): no name" : "Rows \(shown)\(unnamed.count > 5 ? " and \(unnamed.count - 5) more" : ""): no name")
         }
         do {
-            for range in CustomerImportRow.chunks(all) {
+            for (index, range) in CustomerImportRow.chunks(all).enumerated() {
                 try Task.checkCancellation()
                 let result = try await api.importCustomers(Array(all[range]), dryRun: true)
                 new += result.summary.new
                 duplicate += result.summary.duplicate
                 invalid += result.summary.invalid
+                outcomes[index] = result.rows
                 for outcome in result.rows where outcome.status == "invalid" && reasons.count < 5 {
-                    let position = range.lowerBound + outcome.row - 1
-                    let line = lines.indices.contains(position) ? lines[position] : position + 2
+                    let line = Self.line(chunkStart: range.lowerBound, row: outcome.row, lines: lines)
                     reasons.append("Row \(line): \((outcome.reasons ?? ["could not be read"]).joined(separator: ", "))")
+                }
+                for outcome in result.rows where outcome.status == "new" {
+                    let notes = outcome.warnings ?? []
+                    guard !notes.isEmpty else { continue }
+                    warnedRows += 1
+                    if warned.count < 5 {
+                        let line = Self.line(chunkStart: range.lowerBound, row: outcome.row, lines: lines)
+                        warned.append("Row \(line): \(notes.joined(separator: ", "))")
+                    }
                 }
                 progress = Double(range.upperBound) / Double(all.count)
             }
+            // A chunk whose answer was lost keeps the preview taken before it was sent: checking
+            // again now would call the rows it saved duplicates, and they would never be counted.
+            if let uncertainChunk, let kept = previewOutcomes[uncertainChunk] { outcomes[uncertainChunk] = kept }
+            previewOutcomes = outcomes
             preview = .init(new: new, duplicate: duplicate, invalid: invalid + unnamed.count)
             problems = reasons
+            warnings = warned
+            warningCount = warnedRows
             phase = .preview
         } catch is CancellationError {
             phase = .map
         } catch {
-            self.error = error.localizedDescription
+            self.error = Self.message(for: error)
             phase = .map
         }
     }
 
-    /// Commits chunk by chunk. A repeated chunk is safe: rows matching an existing customer by
-    /// phone or email come back as duplicates, never as second copies.
+    /// Commits chunk by chunk. Sending a chunk again is safe: every row the server accepts has a
+    /// phone or an email, and a row matching a customer already saved (by an earlier try whose
+    /// answer was lost, too) comes back as a duplicate, never as a second copy. Such a retry is
+    /// counted with `confirmedNew`, so the total includes what the lost try saved.
     func commit(api: APIClient) async -> Bool {
         let all = rows
         phase = .importing
         error = nil
-        if committedChunks == 0 { imported = 0 }
+        if committedChunks == 0 { imported = 0; createdCustomerIDs = [] }
         let parts = CustomerImportRow.chunks(all)
         progress = committedChunks > 0 && parts.indices.contains(committedChunks - 1)
             ? Double(parts[committedChunks - 1].upperBound) / Double(max(all.count, 1)) : 0
+        // The chunk whose request is out; nil while nothing is in flight.
+        var sending: Int?
         do {
             for index in parts.indices where index >= committedChunks {
                 try Task.checkCancellation()
+                sending = index
                 let result = try await api.importCustomers(Array(all[parts[index]]), dryRun: false)
-                imported += result.summary.new
+                sending = nil
+                let confirmed = Self.confirmedNew(preview: previewOutcomes[index], answer: result,
+                                                  uncertain: uncertainChunk == index, alreadyCounted: createdCustomerIDs)
+                imported += confirmed.count
+                createdCustomerIDs.formUnion(confirmed.created)
+                if uncertainChunk == index { uncertainChunk = nil }
                 committedChunks = index + 1
                 progress = Double(parts[index].upperBound) / Double(all.count)
             }
             phase = .done
             return true
-        } catch is CancellationError {
-            // Rows already added stay; importing again carries on from where it stopped.
-            if imported > 0 {
-                self.error = imported == 1
-                    ? "Import stopped. 1 customer was already added."
-                    : "Import stopped. \(imported) customers were already added."
-            }
-            phase = .preview
-            return false
         } catch {
-            self.error = "Imported \(imported) before an error: \(error.localizedDescription) Try again to import the rest."
+            let lost = sending != nil && Self.answerWasLost(error)
+            if lost, let sending { uncertainChunk = sending }
+            // An earlier try of a chunk lost its answer and may have saved it: until an answer for
+            // that chunk arrives, no message may say nothing was saved.
+            let pending = uncertainChunk != nil
+            let customers = imported == 1 ? "1 customer is" : "\(imported) customers are"
+            if error is CancellationError {
+                // Rows already added stay; importing again carries on from where it stopped.
+                if lost {
+                    self.error = "Import stopped while saving. \(customers) confirmed so far. Try again to finish; nobody already added is added twice."
+                } else if imported > 0 {
+                    self.error = imported == 1
+                        ? "Import stopped. 1 customer was already added."
+                        : "Import stopped. \(imported) customers were already added."
+                }
+            } else if lost {
+                self.error = "The last save could not be confirmed. \(customers) confirmed so far. Try again to finish; nobody already added is added twice."
+            } else if pending {
+                self.error = "\(Self.message(for: error)) \(customers) confirmed so far. Try again to finish; nobody already added is added twice."
+            } else if imported == 0, Self.isRoleRefusal(error) {
+                self.error = Self.message(for: error)
+            } else {
+                self.error = "Imported \(imported) before an error: \(Self.message(for: error)) Try again to import the rest."
+            }
             phase = .preview
             return false
         }
@@ -342,7 +476,8 @@ final class CustomerImportModel: ObservableObject {
 
     func reset() {
         phase = .choose; fileName = ""; headers = []; records = []; firstRecordLine = 2; mapping = .init()
-        preview = nil; problems = []; imported = 0; progress = 0; error = nil; committedChunks = 0
+        preview = nil; problems = []; warnings = []; warningCount = 0; imported = 0; progress = 0; error = nil
+        forgetRun()
     }
 }
 
@@ -572,8 +707,15 @@ struct CustomerImportPanel: View {
                         if preview.invalid > 0 {
                             countRow("Can’t be read", preview.invalid, note: "Left out", warning: true)
                         }
+                        if model.warningCount > 0 {
+                            countRow("Added without some details", model.warningCount, note: "Reasons below", warning: true)
+                        }
                     }
                     ForEach(model.problems, id: \.self) {
+                        Text($0).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 4)
+                    }
+                    // The server's own words for what each row leaves out.
+                    ForEach(model.warnings, id: \.self) {
                         Text($0).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 4)
                     }
                 }
@@ -653,8 +795,7 @@ struct CustomerImportCommit: View {
             }
         case .preview:
             let new = model.preview?.new ?? 0
-            actionButton(new == 1 ? "Import 1 customer" : "Import \(new) customers",
-                         symbol: "square.and.arrow.down", enabled: new > 0) {
+            actionButton(model.commitTitle, symbol: "square.and.arrow.down", enabled: new > 0 || model.committedChunks > 0 || model.uncertainChunk != nil) {
                 model.running = Task {
                     if await model.commit(api: api) {
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
