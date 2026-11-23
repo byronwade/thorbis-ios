@@ -33,6 +33,8 @@ final class RowSwipeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         // iPad: the Jobs preview has already picked this job into the detail column beside the list,
         // so "the job opened" is read from the list staying put rather than from the job's controls.
+        // iPad: the detail column draws its job after the list's rows. Let it settle before the one look.
+        if app.usesTabletLayout { _ = app.buttons["job-status"].waitForExistence(timeout: 15) }
         let jobShownBefore = app.buttons["job-status"].exists
         // Right: Call and Directions, each a button with its word.
         drag(row, by: 200)

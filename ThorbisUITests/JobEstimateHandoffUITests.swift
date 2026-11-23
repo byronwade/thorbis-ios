@@ -1037,6 +1037,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         app.buttons["Check approval"].tap()
         XCTAssertTrue(app.buttons["Retry exact approval"].waitForExistence(timeout: 10)); app.buttons["Retry exact approval"].tap()
         XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 10), "Retry resolves retained exact context, not the cleared current selection")
+        // The bar takes the estimate's title as the push starts, while the list's own "Retry exact
+        // approval" is still on screen. The list leaves the tree once the estimate's page is in place.
+        _ = app.scrollViews["job-estimate-handoff"].waitForNonExistence(timeout: 10)
         let retry = app.buttons.matching(identifier: "Retry exact approval").allElementsBoundByIndex.filter { $0.isHittable }
         XCTAssertEqual(retry.count, 1); try XCTUnwrap(retry.first).tap()
         XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15)); app.buttons["See approvals"].tap()

@@ -84,8 +84,17 @@ extension XCUIApplication {
 
     /// Shows the iPad sidebar when it is hidden (portrait, or folded in landscape).
     func showSidebar(file: StaticString = #filePath, line: UInt = #line) {
-        if buttons["sidebar-search"].waitForExistence(timeout: 2), buttons["sidebar-search"].isHittable { return }
+        // The shell first: docked beside the columns (landscape from 1100pt) the layout draws no
+        // Show button, so a sidebar that is merely slow to become hittable (a sheet still leaving)
+        // must be waited for, not taken for a hidden one.
+        waitForShell(file: file, line: line)
         let show = buttons["sidebar-show"]
+        if !show.exists {
+            let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: buttons["sidebar-search"])
+            XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 30), .completed, "The docked sidebar is not reachable", file: file, line: line)
+            return
+        }
+        if buttons["sidebar-search"].waitForExistence(timeout: 2), buttons["sidebar-search"].isHittable { return }
         XCTAssertTrue(show.waitForExistence(timeout: 30), "No Show sidebar button", file: file, line: line)
         show.tap()
         XCTAssertTrue(buttons["sidebar-search"].waitForExistence(timeout: 5), "The sidebar did not show", file: file, line: line)
