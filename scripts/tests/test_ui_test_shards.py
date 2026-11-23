@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.ui_test_shards import _mask, shards, test_classes
+from scripts.ui_test_shards import _mask, shards, tablet_classes, test_classes
 
 
 class UITestShardTests(unittest.TestCase):
@@ -144,6 +144,54 @@ class UITestShardTests(unittest.TestCase):
                 "}\n"
             ),
         }), {"FlowUITests": 2})
+
+    def tablet_plan(self, files: dict[str, str]) -> dict[str, int]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, text in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text("import XCTest\n\n" + text)
+            return tablet_classes(root)
+
+    def test_tablet_classes_are_those_whose_code_mentions_the_ipad_layout(self):
+        self.assertEqual(self.tablet_plan({
+            "Support.swift": "extension XCUIApplication {\n    var usesTabletLayout: Bool { true }\n}\n",
+            "PhoneUITests.swift": "final class PhoneUITests: XCTestCase {\n    func testOpens() {}\n}\n",
+            "BothUITests.swift": (
+                "final class BothUITests: XCTestCase {\n"
+                "    func testOpens() { if app.usesTabletLayout { return } }\n"
+                "    func testCloses() {}\n"
+                "}\n"
+            ),
+        }), {"BothUITests": 2})
+
+    def test_a_mention_in_a_comment_or_a_string_is_not_an_ipad_path(self):
+        self.assertEqual(self.tablet_plan({
+            "TalkUITests.swift": (
+                "final class TalkUITests: XCTestCase {\n"
+                "    // usesTabletLayout is read elsewhere\n"
+                "    func testOpens() { print(\"usesTabletLayout\") }\n"
+                "}\n"
+            ),
+        }), {})
+
+    def test_an_extension_or_a_base_class_file_gives_its_class_the_ipad_path(self):
+        self.assertEqual(self.tablet_plan({
+            "Base.swift": "class BaseUITestCase: XCTestCase {\n    func open() { _ = app.usesTabletLayout }\n}\n",
+            "InheritedUITests.swift": "final class InheritedUITests: BaseUITestCase {\n    func testOpens() {}\n}\n",
+            "SplitUITests.swift": "final class SplitUITests: XCTestCase {\n    func testOne() {}\n}\n",
+            "SplitUITests+Pad.swift": (
+                "extension SplitUITests {\n    func testTwo() { _ = app.usesTabletLayout }\n}\n"
+            ),
+            "PlainUITests.swift": "final class PlainUITests: XCTestCase {\n    func testOpens() {}\n}\n",
+        }), {"InheritedUITests": 1, "SplitUITests": 2})
+
+    def test_the_tablet_share_of_this_repository_splits_like_any_other(self):
+        classes = tablet_classes()
+        self.assertGreater(len(classes), 0)
+        self.assertLessEqual(set(classes), set(test_classes()))
+        split = shards(classes, 2)
+        self.assertEqual(sorted(name for shard in split for name in shard), sorted(classes))
 
     def test_mask_keeps_offsets_and_lines(self):
         source = 'let a = "x\\"y" // }\nlet b = #"{"#\n'

@@ -38,6 +38,8 @@ while IFS= read -r line; do
   printf 'trigger: %s\nsampling from: %s\n' "$line" "$(date -u +%H:%M:%S)" >"$trigger"
   # 2 s at one stack per 10 ms. No -mayDie: it reads every image's symbols before the first
   # stack, which on a loaded runner can outlast the hold. Neither command may read the log pipe.
+  # The sidecar is this user's file on purpose; only the sample itself is written as root.
+  # shellcheck disable=SC2024
   sudo -n sample "$pid" 2 10 -file "$file" </dev/null >>"$trigger" 2>&1 ||
     sample "$pid" 2 10 -file "$file" </dev/null >>"$trigger" 2>&1 || true
   # Lines that arrived while sampling describe freezes that are already over. Drop them, and

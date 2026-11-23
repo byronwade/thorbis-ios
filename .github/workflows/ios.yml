@@ -28,7 +28,9 @@ jobs:
       - name: Guard against stock SwiftUI controls
         run: ./scripts/lint-stock-controls.sh
       - name: Check the UI test shards cover every class once
-        run: python3 scripts/ui_test_shards.py --shards 6 --check
+        run: |
+          python3 scripts/ui_test_shards.py --shards 6 --check
+          python3 scripts/ui_test_shards.py --tablet --shards 2 --check
       - name: Test the guard and the shard planner
         run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards
       - name: Check every text colour against the grounds it sits on
@@ -228,6 +230,127 @@ jobs:
         with:
           name: ios-ui-freeze-samples-${{ matrix.shard }}
           path: ${{ runner.temp }}/freeze-samples
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Which runs need the iPad layout's UI tests (BYR-1843): see scripts/ci-ipad-scope.sh.
+  ipad-scope:
+    name: iPad scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scope compares the pull request with its base, or a push to main with the head
+          # before it, so it needs the history.
+          fetch-depth: 0
+      - name: Does this push touch the iPad layout or a test with an iPad path
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! run=$(scripts/ci-ipad-scope.sh); then
+            echo "::warning::The iPad scope could not be read, so the iPad UI tests run"
+            run=true
+          fi
+          echo "The iPad run is needed: $run"
+          echo "run=$run" >>"$GITHUB_OUTPUT"
+
+  # The iPad layout (a sidebar, a list beside a detail column) is drawn by no iPhone test. This
+  # runs the UI test classes that have an iPad path on an iPad simulator, in two shards, when
+  # `ipad-scope` says the push can have changed their answer. It is its own check and is not yet
+  # part of `UI tests` below: these tests had never run in CI before BYR-1843, and the first
+  # runs are for reading. The warm-up is the iPhone job's, unchanged apart from the device.
+  ui-ipad:
+    name: iPad UI tests (${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: [build, ipad-scope]
+    if: needs.ipad-scope.outputs.run == 'true'
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # The split: scripts/ui_test_shards.py --tablet --shards 2 --list.
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
+      - name: Fetch the build
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-test-build
+          path: ${{ runner.temp }}
+      - name: Unpack the build and warm the simulator
+        run: |
+          mkdir -p "${{ runner.temp }}/ThorbisBuild"
+          tar -C "${{ runner.temp }}/ThorbisBuild" -xf "${{ runner.temp }}/ThorbisTestBuild.tar"
+          simulator_id=$(scripts/ci-simulator-id.sh iPad)
+          xcrun simctl bootstatus "$simulator_id" -b
+          booted=$SECONDS
+          app=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 2 -name 'Thorbis.app' | head -n 1)
+          if [[ -z "$app" ]]; then
+            echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
+            exit 0
+          fi
+          if ! xcrun simctl install "$simulator_id" "$app"; then
+            echo "::warning::The app could not be installed ahead of the tests"
+            exit 0
+          fi
+          # Nothing else bounds a simctl call that hangs, so each one runs under its own alarm.
+          bounded() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+          launch_log="${{ runner.temp }}/warm-launch.log"
+          ready=no
+          begun=$SECONDS
+          attempt=0
+          while (( SECONDS - begun < 240 )); do
+            # A launch reported as failed can still leave a copy running, and launching a running
+            # copy only brings it forward. End it first, so every attempt is a real start.
+            if bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1; then sleep 3; fi
+            attempt=$((attempt + 1))
+            started=$SECONDS
+            # The design preview: sample data, read only, no network. The UI tests launch it the same way.
+            if bounded 90 xcrun simctl launch "$simulator_id" com.thorbis.field --paper-preview >"$launch_log" 2>&1; then
+              took=$((SECONDS - started))
+              echo "Warm launch $attempt took ${took}s, $((SECONDS - booted))s after boot ($(tr '\n' ' ' <"$launch_log"))"
+              # Left running for ten seconds before it is stopped.
+              sleep 10
+              bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+              if (( took <= 8 && SECONDS - booted >= 180 )); then ready=yes; break; fi
+            else
+              echo "Warm launch $attempt did not start after $((SECONDS - started))s: $(tr '\n' ' ' <"$launch_log")"
+            fi
+            ps -Ao pcpu,comm -r | head -n 6 || true
+            sleep 3
+          done
+          bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+          echo "Ready for a quick launch: $ready after $((SECONDS - begun))s (load $(sysctl -n vm.loadavg))"
+          echo "Busiest processes:"
+          ps -Ao pcpu,comm -r | head -n 6 || true
+      - name: Run this shard's iPad UI tests
+        run: |
+          test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
+          [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
+          only_testing=$(python3 scripts/ui_test_shards.py --tablet --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
+          simulator_id=$(scripts/ci-simulator-id.sh iPad)
+          # $only_testing is a list of -only-testing: arguments and must split on spaces.
+          # shellcheck disable=SC2086
+          xcodebuild -xctestrun "$test_run" \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -resultBundlePath "${{ runner.temp }}/ThorbisiPadUITests-${{ matrix.shard }}.xcresult" \
+            -parallel-testing-enabled NO \
+            $only_testing test-without-building
+      - name: Save iPad UI test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipad-ui-test-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ThorbisiPadUITests-${{ matrix.shard }}.xcresult
           if-no-files-found: ignore
           retention-days: 14
 

@@ -7,6 +7,7 @@ Each matrix job asks this script which classes are its share:
     scripts/ui_test_shards.py --shards 8 --index 1      # -only-testing:ThorbisUITests/<Class> ...
     scripts/ui_test_shards.py --shards 8 --list          # every shard, with test counts
     scripts/ui_test_shards.py --shards 8 --check         # exit 1 unless every class is in one shard
+    scripts/ui_test_shards.py --tablet --shards 2 --index 1   # the iPad run's share (see below)
 
 A class weighs as many tests as it runs: its own, those in its extensions (in any file), and
 those it inherits from a base class declared here. Classes go to the lightest shard, heaviest
@@ -16,6 +17,10 @@ Only the classes named here run in CI, so the planner refuses to guess. It stops
 when a `func test...` is not inside a test class it can name, when a class with tests (or a
 class named ...Tests) inherits from a class it cannot see, when an extension of a type that is
 not a test class declares tests, and when a test class is nested in another type.
+
+`--tablet` narrows every mode to the classes with an iPad path: those where the class, one of its
+extensions or a base class it inherits tests from sits in a file whose code mentions
+`usesTabletLayout`. CI runs that share on an iPad simulator (BYR-1843).
 """
 from __future__ import annotations
 
@@ -29,6 +34,8 @@ ROOT = Path(__file__).resolve().parent.parent
 UI_TESTS = ROOT / "ThorbisUITests"
 TARGET = "ThorbisUITests"
 BASE = "XCTestCase"
+# What a test file's code mentions when it takes a different path on iPad.
+TABLET_MARK = "usesTabletLayout"
 
 # A class or extension header. Comments and strings are blanked first (`_mask`), so the header
 # and the braces read here are code.
@@ -279,6 +286,23 @@ def test_classes(directory: Path = UI_TESTS) -> dict[str, int]:
     return result
 
 
+def tablet_classes(directory: Path = UI_TESTS) -> dict[str, int]:
+    """The classes from `test_classes` that have an iPad path, with their test counts. A class has
+    one when its own file, a file holding one of its extensions, or the file of a base class it
+    inherits from mentions `TABLET_MARK` in code (comments and strings do not count)."""
+    counted = test_classes(directory)
+    classes, extensions, _, _ = _scan(directory)
+    marked = {path.relative_to(directory).as_posix() for path in directory.rglob("*.swift")
+              if re.search(rf"\b{TABLET_MARK}\b", _mask(path.read_text(encoding="utf-8")))}
+
+    def files(name: str) -> set[str]:
+        chain, _ = _chain(name, classes)
+        return ({classes[member].file for member in chain}
+                | {relative for member in chain for relative, _, _ in extensions.get(member, [])})
+
+    return {name: count for name, count in counted.items() if files(name) & marked}
+
+
 def shards(classes: dict[str, int], count: int) -> list[list[str]]:
     """Balanced shards: heaviest class first, onto whichever shard holds the fewest tests."""
     result: list[list[str]] = [[] for _ in range(count)]
@@ -296,13 +320,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--index", type=int, help="which shard to print, counting from 1")
     parser.add_argument("--list", action="store_true", help="print every shard with its test count")
     parser.add_argument("--check", action="store_true", help="verify the split covers every class once")
+    parser.add_argument("--tablet", action="store_true",
+                        help=f"only the classes with an iPad path (their files mention {TABLET_MARK})")
     args = parser.parse_args(argv)
 
     if args.shards < 1:
         parser.error("--shards must be at least 1")
-    classes = test_classes()
+    classes = tablet_classes() if args.tablet else test_classes()
     if not classes:
-        print(f"No XCTestCase classes with tests found in {UI_TESTS}", file=sys.stderr)
+        kind = f"XCTestCase classes with tests and a mention of {TABLET_MARK}" if args.tablet else "XCTestCase classes with tests"
+        print(f"No {kind} found in {UI_TESTS}", file=sys.stderr)
         return 1
     split = shards(classes, args.shards)
 
