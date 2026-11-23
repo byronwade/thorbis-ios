@@ -132,7 +132,8 @@ struct InvoiceLineEditorView: View {
                 unavailableReason: invoice.currency == "USD" ? nil : "Catalog selection requires a USD invoice.",
                 searchIdentifier: "invoice-catalog-search",
                 quantityInDraft: { editor.quantity(ofPriceBookItem: $0) },
-                secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
+                // The server never member prices an invoice line, so no member price is shown here.
+                secondaryPriceText: { _ in nil },
                 addItem: addCatalogItem,
                 addCustomLine: addCustomLine,
                 refresh: { await refreshCatalog(force: $0) },
@@ -144,14 +145,6 @@ struct InvoiceLineEditorView: View {
             )
             .environmentObject(session).environmentObject(api)
         } }
-        .task(id: "\(catalogContext.organizationID ?? "")|\(catalogContext.sessionGeneration)|\(invoice.customerId)") {
-            memberPricing = nil
-            guard canUsePriceBook else { return }
-            let expected = catalogContext
-            let pricing = try? await api.memberPricing(invoice.customerId)
-            guard !Task.isCancelled, catalogContext == expected else { return }
-            memberPricing = pricing
-        }
         .thorbisConfirm("Reload the latest invoice?",
                         message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines and discards your edits.",
                         isPresented: $confirmReload,
@@ -162,8 +155,6 @@ struct InvoiceLineEditorView: View {
         }
         #endif
     }
-
-    @State private var memberPricing: MemberPricing?
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 18) {

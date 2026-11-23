@@ -73,9 +73,6 @@ struct EstimateRevisionLineDraft: Identifiable, Equatable {
     /// True once the person drags or moves this line to a group, so a move on a line saved
     /// before groups were stored still counts as a change to save.
     var movedByPerson = false
-    /// Loaded from a line the server already saved at the member price (`unit_price` overridden):
-    /// the member hint under the total must not discount it again.
-    var memberPriced = false
 
     init(id: UUID = UUID(), originalLineID: String? = nil, description: String,
          quantity: String, unitPrice: String, source: FieldEstimateLineSourceInput? = nil,
@@ -371,7 +368,7 @@ struct EstimateRevisionEditorState: Equatable {
             original = PriceBookLineOriginal(description: description, unitPrice: priceText(price.amount))
         }
         let storedGroup = line.group.flatMap(EstimateLineGroup.init(rawValue:))
-        var draft = EstimateRevisionLineDraft(
+        return EstimateRevisionLineDraft(
             originalLineID: line.id,
             description: line.description,
             quantity: String(line.quantity),
@@ -383,8 +380,6 @@ struct EstimateRevisionEditorState: Equatable {
             groupSettled: storedGroup != nil,
             showToCustomer: line.showToCustomer ?? true
         )
-        draft.memberPriced = MemberPricing.alreadyMemberPriced(line.source)
-        return draft
     }
 
     private static func blankLine() -> EstimateRevisionLineDraft {

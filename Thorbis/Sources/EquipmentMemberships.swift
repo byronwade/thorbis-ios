@@ -218,21 +218,23 @@ struct MemberPricing: Codable, Hashable {
         Int((Double(cents) * Double(100 - discountPercent) / 100).rounded())
     }
 
-    /// A saved line the server already charged at the member price: it stored the lower price and
-    /// marked `unit_price` overridden. Discounting it again would show a price nobody pays.
-    static func alreadyMemberPriced(_ source: FieldLineSource?) -> Bool {
-        source?.overriddenFields?.contains("unit_price") == true
+    /// The server charges the member price only on an estimate's price book line sent at the list
+    /// price it came from. A typed line, a credit and an edited price are charged as saved. A line
+    /// the server already charged at the member price is saved below its list price, with
+    /// `unit_price` marked overridden, so it is not discounted a second time.
+    static func chargesMemberPrice(_ line: FieldLine) -> Bool {
+        guard let source = line.source, source.kind == "price_book", line.unitPrice.amount > 0,
+              source.overriddenFields?.contains("unit_price") != true,
+              let list = source.originalUnitPrice else { return false }
+        return list.amount == line.unitPrice.amount && list.currency == line.unitPrice.currency
     }
 
-    /// What a member pays for saved lines, for the hint under a total: nil when this is not a
-    /// member, or when the total already is the member price (every priced line member-priced).
+    /// What a member pays for saved estimate lines, for the hint under a total: nil when this is
+    /// not a member, or when no line would be charged the member price.
     func memberTotal(of lines: [FieldLine]) -> Int? {
-        guard isMember, discountPercent > 0, !lines.isEmpty else { return nil }
-        let open = lines.filter { $0.unitPrice.amount > 0 && !Self.alreadyMemberPriced($0.source) }
-        guard !open.isEmpty else { return nil }
+        guard isMember, discountPercent > 0, lines.contains(where: { Self.chargesMemberPrice($0) }) else { return nil }
         return lines.reduce(0) { sum, line in
-            let price = Self.alreadyMemberPriced(line.source) || line.unitPrice.amount <= 0
-                ? line.unitPrice.amount : memberPrice(line.unitPrice.amount)
+            let price = Self.chargesMemberPrice(line) ? memberPrice(line.unitPrice.amount) : line.unitPrice.amount
             return sum.addingClamped(line.quantity, times: price)
         }
     }
