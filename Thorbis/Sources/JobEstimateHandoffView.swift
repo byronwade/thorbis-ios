@@ -224,6 +224,10 @@ struct JobEstimateHandoffView: View {
     @State private var preparingBatch = false
     @State private var batchError: String?
     private var signsTogether: Bool { reviewing && model.reviewed.count > 1 }
+    #if DEBUG
+    /// Whether one of this page's two destinations is presented (BYR-1842 evidence only).
+    private var coveredByDestination: Bool { detailsID != nil || checkpointID != nil }
+    #endif
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -256,6 +260,22 @@ struct JobEstimateHandoffView: View {
         .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("Estimates").navigationBarTitleDisplayMode(.inline)
         .task { await model.refresh() }
+        #if DEBUG
+        // Evidence for BYR-1842, DEBUG only. The reload above also runs when this page appears
+        // under a swipe back that is still in flight. Before it can be moved to "the person has
+        // returned", three things must be known on a real run: when this page appears, when its
+        // destinations clear, and how a task keyed on that restarts. These lines log them beside
+        // the pop probe's. They change nothing the screen does.
+        .onAppear { NSLog("%@", "[pop-gesture] overview appeared covered=\(coveredByDestination)") }
+        .onDisappear { NSLog("%@", "[pop-gesture] overview disappeared covered=\(coveredByDestination)") }
+        .onChange(of: coveredByDestination) { _, covered in NSLog("%@", "[pop-gesture] overview covered=\(covered)") }
+        .task(id: coveredByDestination) {
+            let covered = coveredByDestination
+            NSLog("%@", "[pop-gesture] keyed task started covered=\(covered)")
+            try? await Task.sleep(for: .seconds(600))
+            NSLog("%@", "[pop-gesture] keyed task ended covered=\(covered) cancelled=\(Task.isCancelled)")
+        }
+        #endif
         .onChange(of: api.requestGeneration) { _, _ in
             if !model.isCurrent { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
         }
