@@ -233,7 +233,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         // The review sheet slides away after Done, and on a loaded iPad in landscape it was still in
         // the tree almost a second after the tap (CI bad4e32, iPad 1). Wait for it to leave, as the
         // retirement tests in this class do.
-        XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 5), "Done closes the review")
+        XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 15), "Done closes the review")
     }
     func testLargeTextDarkReviewHasReachableRecoveryAndDone() {
         let app = open(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-thorbis.appearance", "dark"])

@@ -68,9 +68,10 @@ log, no unexpected failure). The same rule covers one more thing the simulator d
 key commands with the input server, and on the iPad that registration now and then comes only after
 a test has pressed twice. The script follows backboardd's lines about that too, and a test that
 failed on the wait right after a chord counts only when every chord of the test went to the app's
-pid as a bare key, no key command was ever matched against the app, the app had registered nothing
-before its last chord, and its first registration after it lists that chord. Every failed test in
-the shard must qualify under one of the two rules. The shard passes only if each re-run shows that one test passing.
+pid as a bare key, no key command was matched against the app during the test, the app had
+registered nothing before its last chord, and its first registration after it lists that chord.
+Every failed test in the shard must qualify under one of the two rules. The shard passes only if
+each re-run shows that one test passing.
 Every such run is a warning on the job and is listed in its summary with the reasons, and its
 evidence is uploaded as `ios-ui-test-reruns-<shard>`, or `ios-ipad-ui-test-reruns-<shard>` for
 the iPad shards (BYR-1835). A failure without that evidence is never run again.

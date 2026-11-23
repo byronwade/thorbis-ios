@@ -206,9 +206,16 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         let keyboardDone = app.keyboardDoneButton
         XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
         // The price field takes focus a moment after the picker closes, so Done is there while the
-        // keyboard is still coming up. Save rides up with it; compare the frames once it has arrived.
-        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: save)
-        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed, "Save must be reachable once the keyboard is up")
+        // keyboard is still coming up, and Save rides up with it. Compare the frames once both have
+        // stopped moving; an overlap at rest still fails below.
+        var previous: (CGRect, CGRect)?
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frames = (save.frame, keyboardDone.frame)
+            defer { previous = frames }
+            guard let last = previous else { return false }
+            return save.isHittable && last == frames
+        }, object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed, "Save and the keyboard must come to rest")
         XCTAssertFalse(save.frame.intersects(keyboardDone.frame), "The keyboard Done control must not cover any part of Save")
         save.tap()
         let warning = app.waitForDescriptionLengthWarning()

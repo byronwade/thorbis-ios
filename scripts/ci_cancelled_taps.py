@@ -107,7 +107,7 @@ KEY_LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)(\.\d+)?\S*\s+\S+\s+bac
                       r"(?:\[[^\]\s]*\]\s+)?(\S.*)$")
 # What backboardd says about a key, as logged in runs 45133610900 and 45148171838.
 CONNECTED = re.compile(r"^Connection added: IOHIDEventSystemConnection\b.*?\bpid:(\d+) process:Thorbis\s")
-MATCHING = re.compile(r"^KCMD: (?:no )?match in pid:(\d+)\b")
+MATCHING = re.compile(r"^KCMD: .*?\bin pid:(\d+)\b")
 MISSED = re.compile(r"^cache miss for Keyboard event\b")
 ROUTED = re.compile(r"^sequence starting with Keyboard event: ")
 ROUTED_TO = re.compile(r"\bpid: (\d+);")

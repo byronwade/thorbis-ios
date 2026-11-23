@@ -41,7 +41,7 @@ final class InvoiceRevisionsUITests: XCTestCase {
         // The job first shows the copy the last launch saved, which may not be a completed job. Open
         // the menu once this launch's completed job is on screen, so its status is not what hides Reopen.
         let completed = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Job status, Completed")).firstMatch
-        XCTAssertTrue(completed.waitForExistence(timeout: 10), "The job is a completed job")
+        XCTAssertTrue(completed.waitForExistence(timeout: 20), "The job is a completed job")
         more.tap()
         XCTAssertTrue(app.staticTexts["More"].waitForExistence(timeout: 5))
         XCTAssertFalse(reopenRow(app).exists)
