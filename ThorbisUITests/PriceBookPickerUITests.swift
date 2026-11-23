@@ -113,9 +113,10 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
         revalidate.tap()
         XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        // The rows return once the catalog adopts the refreshed authority, so the search and the count are read after that.
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "Catalog items must return after authority refresh")
         XCTAssertEqual(search.value as? String, sentinel)
         XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
-        XCTAssertTrue(item.waitForExistence(timeout: 10), "Catalog items must return after authority refresh")
         // The refreshed notice pushes the match down again.
         clearOfDone()
         item.tap()

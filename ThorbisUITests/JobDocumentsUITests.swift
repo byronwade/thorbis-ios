@@ -703,6 +703,9 @@ final class JobDocumentsUITests: XCTestCase {
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
         XCTAssertTrue(pay.waitForExistence(timeout: 5))
         pay.tap()
+        // The invoice is read again before the owner is asked. The banner says the decline has landed.
+        XCTAssertTrue(app.staticTexts["Your technician needs to unlock before taking payment."].waitForExistence(timeout: 10),
+                      "The declined owner authentication must be answered before the screen is read")
         XCTAssertTrue(app.navigationBars["INV-2209"].exists)
         XCTAssertFalse(app.buttons["received-payment-methods"].exists)
         XCTAssertTrue(pay.isEnabled)

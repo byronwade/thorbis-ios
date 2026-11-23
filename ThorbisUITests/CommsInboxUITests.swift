@@ -187,6 +187,9 @@ final class CommsInboxUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 20), app.debugDescription)
         more(app, "Mark all notices read")
+        // The sample server refuses the write, and this banner is its answer. Before it lands the
+        // list is simply unchanged, so the filter and the notices are read after it.
+        XCTAssertTrue(app.staticTexts["Sample data cannot be changed. No request was sent to a server."].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.buttons["inbox-filter-all"].isSelected, "Marking read does not change the filter")
         XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 10), "The notices stay listed")
     }

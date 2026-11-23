@@ -323,6 +323,17 @@ final class JobEstimateHandoffUITests: XCTestCase {
         attachment.name = "Anonymized canonical approval receipt"; attachment.lifetime = .keepAlways; add(attachment)
         return result
     }
+    /// Waits until the sample owner authentication has answered `attempts` times. The sample counts an
+    /// attempt in the same step that answers it, so a read after this one sees what that answer did.
+    private func waitForOwnerAuthentication(_ app: XCUIApplication, attempts: Int) {
+        let ledger = app.descendants(matching: .any).matching(identifier: "handoff-canonical-receipt").firstMatch
+        let answered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let data = (ledger.value as? String)?.data(using: .utf8),
+                  let proof = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+            return proof["ownerAuthenticationAttempts"] as? Int == attempts
+        }, object: ledger)
+        XCTAssertEqual(XCTWaiter.wait(for: [answered], timeout: 10), .completed, "The owner authentication must be answered before the screen is read")
+    }
     private func selectEstimate(_ app: XCUIApplication, _ element: XCUIElement) {
         visible(app, element)
         thorbisStableButton(app, element.identifier).tap()
@@ -525,6 +536,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         returnFromRejectedSecondEstimate(app)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(second.waitForExistence(timeout: 30))
+        // Back reads the overview's prices again. Its retry says this estimate's issued read was refused.
+        XCTAssertTrue(app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"].waitForExistence(timeout: 45),
+                      "The overview's issued read must finish and reject these terms")
         XCTAssertFalse((second.value as? String ?? "").contains("$320.00"), "The accessible selection must not describe the unverified record amount")
         capture(app, "Unverified sent estimate price is withheld")
         let card = app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"]
@@ -1291,6 +1305,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = open(["--paper-preview-handoff-denied-unlock"])
         reachSignTogether(app)
         ownerExit(app).tap()
+        waitForOwnerAuthentication(app, attempts: 1)
         XCTAssertTrue(app.textFields["Your full name"].exists, "Staff screens stay locked until Technician: unlock succeeds")
         thorbisAssertStaffPageCovered(app)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1)
@@ -1367,6 +1382,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         _ = waitForBatchStop(app)
         let before = try receipt(app)
         ownerExit(app).tap()
+        waitForOwnerAuthentication(app, attempts: 1)
         XCTAssertTrue(app.buttons["handoff-batch-retry"].exists)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1, "A visible protected child exit must invoke the real owner boundary, not no-op")
         thorbisAssertStaffPageCovered(app)
@@ -1454,6 +1470,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Estimates"].exists)
         XCTAssertFalse(app.staticTexts["Welcome back"].isHittable)
         ownerExit(app).tap()
+        waitForOwnerAuthentication(app, attempts: 1)
         XCTAssertTrue(app.navigationBars["Estimates"].exists, "Denied owner authentication must never reveal login or staff content")
         XCTAssertFalse(app.staticTexts["Welcome back"].isHittable)
         capture(app, "Actual signed-out branch stays protected after denied owner authentication")

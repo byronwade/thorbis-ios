@@ -117,9 +117,10 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         assertMoneyRow("Total", "$300.00", in: app)
         assertMoneyRow("Paid", "$150.00", in: app)
         assertMoneyRow("Amount due", "$150.00", in: app)
-        XCTAssertFalse(text("Paid in full", in: app).exists)
         // A short payment history is visible without requiring a second tap.
         assertText("Card", in: app)
+        // The payments can change the headline, so it is read once they have arrived.
+        XCTAssertFalse(text("Paid in full", in: app).exists)
         let expanded = XCTAttachment(screenshot: app.screenshot())
         expanded.name = "Payment history visible by default"
         expanded.lifetime = .keepAlways
@@ -244,6 +245,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
     func testDraftInvoiceShowsDraftTotalRatherThanAClaimOfPayment() {
         let app = openPrimary(extra: ["--paper-preview-job-invoice-draft"])
         assertText("Draft total", in: app)
+        // The payments can change the headline, so it is read once they have arrived.
+        XCTAssertTrue(text("No payments yet.", in: app).waitForExistence(timeout: 10))
         XCTAssertFalse(text("Paid in full", in: app).exists)
         assertMoneyRow("Total", "$340.00", in: app)
     }
@@ -251,6 +254,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
     func testZeroDollarInvoiceDoesNotClaimPayment() {
         let app = openPrimary(extra: ["--paper-preview-job-invoice-zero"])
         assertText("No balance due", in: app)
+        // The payments can change the headline, so it is read once they have arrived.
+        XCTAssertTrue(text("No payments yet.", in: app).waitForExistence(timeout: 10))
         XCTAssertFalse(text("Paid in full", in: app).exists)
         assertMoneyRow("Total", "$0.00", in: app)
         assertMoneyRow("Amount due", "$0.00", in: app)
