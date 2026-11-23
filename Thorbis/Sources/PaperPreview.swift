@@ -110,6 +110,8 @@ enum PaperPreview {
     }
     /// Set once a document's Description sheet has opened; the preview's document changes wait for it.
     @MainActor static var descriptionOpened = false
+    /// Set once the price book's local item sheet has opened; `--paper-preview-pricebook-from-detail` waits for it.
+    @MainActor static var priceBookDetailOpened = false
     @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
         let args = ProcessInfo.processInfo.arguments
         guard isJobDocumentsPreview || (screen == "present-estimate" && args.contains("--paper-preview-option-long-description")),

@@ -370,6 +370,13 @@ struct WorkspacePriceBookView: View {
                         ThorbisToolbarItem(placement: .topBarTrailing) {
                             Button("Change sample access shortly") {
                                 Task { @MainActor in
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-from-detail") {
+                                        // Count from the open item, as CustomerJobDocumentBook does from an open
+                                        // Description: on a slow simulator the tap that opens it can't use up the delay.
+                                        for _ in 0..<600 where !PaperPreview.priceBookDetailOpened {
+                                            try? await Task.sleep(for: .milliseconds(100))
+                                        }
+                                    }
                                     try? await Task.sleep(for: .seconds(5))
                                     guard !Task.isCancelled else { return }
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-switch") {
@@ -605,6 +612,10 @@ private struct PriceBookLocalDetail: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        #if DEBUG
+        // `--paper-preview-pricebook-from-detail` counts the sample access change from here.
+        .task { PaperPreview.priceBookDetailOpened = true }
+        #endif
     }
 }
 
