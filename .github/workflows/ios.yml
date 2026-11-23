@@ -101,6 +101,9 @@ jobs:
   # ships, so a reference to a debug-only symbol passed every check and would fail only when
   # someone archived for TestFlight (scripts/testflight.sh). This compiles the app and its widget
   # extension as Release, for the simulator and unsigned. It runs beside `build` and tests nothing.
+  # The optimiser is off and files compile side by side, as in Debug: the question here is which
+  # code compiles, and the optimising build held a runner for 28 minutes (run 45166212892), 16 of
+  # them while UI shards waited for it. The archive is still the fully optimised build.
   release-build:
     name: Release build
     runs-on: macos-15
@@ -120,14 +123,16 @@ jobs:
           key: swift-packages-${{ hashFiles('project.yml') }}
       - name: Compile the Release configuration
         # One architecture, as the test build has: the point is that Release compiles, and the
-        # simulator's second architecture would only double the time.
+        # simulator's second architecture would only double the time. Nothing else is changed from
+        # Release: DEBUG is not defined and testability is off.
         run: |
           simulator_id=$(scripts/ci-simulator-id.sh)
           xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -configuration Release \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "${{ runner.temp }}/ThorbisReleaseDerivedData" \
             -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
-            CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES build
+            CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+            SWIFT_OPTIMIZATION_LEVEL=-Onone SWIFT_COMPILATION_MODE=incremental build
 
   ui:
     name: UI tests (${{ matrix.shard }} of ${{ strategy.job-total }})

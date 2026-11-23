@@ -47,7 +47,8 @@ drops out of the split unnoticed.
 
 The tests run a Debug build. `Release build` compiles the app and its widgets as Release, for
 the simulator and unsigned, so a debug-only symbol used in shipping code fails here and not at
-archive time. It tests nothing and is its own check.
+archive time. It compiles without the optimiser, which is what makes it quick, so it does not
+stand in for the archive. It tests nothing and is its own check.
 
 The shards run on an iPhone simulator. The iPad layout has its own run, `iPad UI tests`, on an
 iPad simulator: the test classes with an iPad path (`scripts/ui_test_shards.py --tablet --shards 2
