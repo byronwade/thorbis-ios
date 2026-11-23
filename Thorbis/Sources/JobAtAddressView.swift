@@ -14,30 +14,56 @@ struct JobAtAddressView<Extras: View>: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
+    /// Nil until the read answers; left nil when there is no connection, so the saved copy shows.
     @State private var equipment: [EquipmentRecord]?
+    @State private var cached: JobDetailCache.SavedHistory?
     @State private var notices: [JobNoticeStatus] = []
     @State private var editing: EquipmentEditorItem?
 
-    private var history: JobPropertyHistory {
-        JobPropertyHistory.make(job: job, locations: [], equipment: equipment ?? [], visits: visits,
+    private var ready: Bool { visitsLoaded && equipment != nil }
+
+    private var live: JobPropertyHistory {
+        JobPropertyHistory.make(job: job, locations: locations, equipment: equipment ?? [], visits: visits,
                                 listedJobs: store.jobs, currentUserID: session.user?.id)
     }
 
+    /// Fresh when every source answered; else the copy saved on this phone for this company, job
+    /// and customer (offline); else whatever has loaded so far.
+    private var shown: (history: JobPropertyHistory, savedAt: Date?) {
+        if ready { return (live, nil) }
+        if let cached, cached.history.organizationId == session.activeOrganization?.id,
+           cached.history.jobId == job.id, cached.history.customerId == job.customerId {
+            return (cached.history, cached.savedAt)
+        }
+        return (live, nil)
+    }
+
     var body: some View {
-        let history = history
+        let (history, savedAt) = shown
         let count = history.visits.count
-        let subtitle = [street, visitsLoaded ? "\(count) \(count == 1 ? "visit" : "visits")" : nil].compactMap { $0 }
+        let subtitle = [street, visitsLoaded || savedAt != nil ? "\(count) \(count == 1 ? "visit" : "visits")" : nil].compactMap { $0 }
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 PaperPageTitle(title: "At this address", subtitle: subtitle.joined(separator: " \u{00B7} "), columnInset: PaperCardMetrics.margin)
+                if let savedAt {
+                    Text("Saved on this phone \(savedAt.formatted(.relative(presentation: .named)))")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                        .accessibilityIdentifier("job-at-address-saved")
+                }
                 if !history.visits.isEmpty {
                     section("Past visits") {
                         ForEach(Array(history.visits.enumerated()), id: \.element.id) { index, visit in
-                            row(title: visit.title,
-                                subtitle: [visit.date?.formatted(.dateTime.month(.abbreviated).day().year()), visit.technician]
-                                    .compactMap { $0 }.joined(separator: " \u{00B7} "),
-                                first: index == 0)
-                                .accessibilityElement(children: .combine)
+                            // Each past visit opens that job, as it did on the Overview's history.
+                            NavigationLink(value: PaperRoute.job(visit.id)) {
+                                row(title: visit.title,
+                                    subtitle: [visit.date?.formatted(.dateTime.month(.abbreviated).day().year()), visit.technician]
+                                        .compactMap { $0 }.joined(separator: " \u{00B7} "),
+                                    first: index == 0, chevron: true)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityIdentifier("job-property-visit-\(visit.id)")
+                            .accessibilityHint("Opens that job")
                         }
                     }
                 }
@@ -77,7 +103,15 @@ struct JobAtAddressView<Extras: View>: View {
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.canvas, for: .navigationBar)
-        .task(id: session.generation) { await load() }
+        .task(id: session.generation) {
+            cached = JobDetailCache.history(job.id)
+            await load()
+        }
+        // Every source answered: keep this copy for the next time there is no connection.
+        .task(id: ready ? live : nil) {
+            guard ready else { return }
+            JobDetailCache.save(history: live)
+        }
         .sheet(item: $editing) { item in SheetSurface {
             EquipmentEditor(customerID: job.customerId, locations: locations, existing: item.record) { await load() }
         } }
@@ -131,10 +165,17 @@ struct JobAtAddressView<Extras: View>: View {
             equipment = context.equipmentRecords.filter { $0.customerId == job.customerId }
             return
         }
-        if let loaded = try? await api.customerEquipment(job.customerId), session.generation == generation {
+        do {
+            // An older server without the job read, or a failed request: the customer read still serves office staff.
+            let loaded = try await api.customerEquipment(job.customerId)
+            guard session.generation == generation else { return }
             equipment = loaded.filter { $0.customerId == job.customerId }
-        } else if session.generation == generation, equipment == nil {
-            equipment = []
+        } catch is CancellationError {
+        } catch {
+            guard session.generation == generation else { return }
+            // 403 (role can't read equipment) or 404 (older server): nothing to show, not a failure.
+            // No connection: leave it unread so the saved copy stays on screen.
+            if !error.isConnectivityFailure, equipment == nil { equipment = [] }
         }
     }
 }

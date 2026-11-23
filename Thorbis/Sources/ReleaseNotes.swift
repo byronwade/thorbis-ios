@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-23-at-address-kept-answers",
+            date: "2026-11-23",
+            highlights: [
+                .init(symbol: "clock.arrow.circlepath", title: "Open a past visit from At this address",
+                      detail: "Each past visit under At this address opens that job again, as it did before the new design."),
+                .init(symbol: "wifi.slash", title: "Equipment shows with no signal",
+                      detail: "At this address shows the equipment saved on this phone when it can\u{2019}t reach Thorbis."),
+                .init(symbol: "checklist", title: "Checklist answers stay on your phone",
+                      detail: "If a teammate finishes a checklist before your answers send, yours stay on this phone to copy."),
+            ]),
+        ReleaseNote(
             id: "2026-11-22-access-that-follows",
             date: "2026-11-22",
             highlights: [

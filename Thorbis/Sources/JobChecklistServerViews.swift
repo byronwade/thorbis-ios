@@ -100,6 +100,7 @@ struct JobServerChecklistSheet: View {
     @State private var said: String?
     @State private var photoFor: ServerChecklistItem?
     @State private var confirmRemove = false
+    @State private var confirmLetGo = false
     @FocusState private var focused: String?
 
     private var entry: ChecklistEntry? { openRun.flatMap(model.entry) }
@@ -109,6 +110,8 @@ struct JobServerChecklistSheet: View {
     private var runKey: String? { entry?.id ?? openRun }
     private var note: String? { [openRun, entry?.id].compactMap { $0 }.compactMap { model.notes[$0] ?? model.draft($0).flatMap { model.notes[$0.runID] } }.first }
     private var onlyOnPhone: Bool { openRun.flatMap { model.draft($0) }.map { !$0.started } ?? false }
+    /// Answers kept on this phone for a run someone else finished first.
+    private var keptAnswers: String? { openRun.flatMap { model.keptText($0) } }
 
     var body: some View {
         NavigationStack {
@@ -147,6 +150,11 @@ struct JobServerChecklistSheet: View {
                             actions: [ThorbisConfirmAction("Remove", role: .destructive) {
                                 if let openRun { model.discard(openRun) }
                                 openRun = nil
+                            }])
+            .thorbisConfirm("Let go of your answers?", message: "This checklist was finished before they were sent. They\u{2019}re cleared from this phone.",
+                            isPresented: $confirmLetGo,
+                            actions: [ThorbisConfirmAction("Let go", role: .destructive) {
+                                if let openRun { model.discardKept(openRun) }
                             }])
             .fullScreenCover(item: $photoFor) { item in
                 CameraCapture { image in
@@ -187,6 +195,13 @@ struct JobServerChecklistSheet: View {
         ]
         if onlyOnPhone {
             items.append(ThorbisMenuItem("Remove this checklist", icon: "trash", role: .destructive) { confirmRemove = true })
+        }
+        if let keptAnswers {
+            items.append(ThorbisMenuItem("Copy my answers", icon: "doc.on.doc") {
+                UIPasteboard.general.string = keptAnswers
+                said = "Your answers are copied."
+            })
+            items.append(ThorbisMenuItem("Let go of my answers", icon: "trash", role: .destructive) { confirmLetGo = true })
         }
         return items
     }
