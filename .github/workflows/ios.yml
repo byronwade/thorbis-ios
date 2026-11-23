@@ -42,7 +42,11 @@ jobs:
   # tests run from the same build in the `ui` shards below.
   build:
     runs-on: macos-15
-    timeout-minutes: 45
+    # BYR-1841: a pull request labelled ci-optimized-build when it is pushed builds with the
+    # optimiser on (see the build step), and an optimising build once held a runner for 28 minutes
+    # (run 45166212892). The label is read here and in the build step because this limit cannot
+    # read env.
+    timeout-minutes: ${{ contains(github.event.pull_request.labels.*.name, 'ci-optimized-build') && 90 || 45 }}
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
@@ -60,14 +64,50 @@ jobs:
         # Signed to run locally (ad hoc, no team or profile): an unsigned test host has no keychain
         # access in the simulator (errSecMissingEntitlement, -34018), and the price book's denial
         # marker lives in the keychain.
+        #
+        # Evidence for BYR-1841, not a setting to keep: with the ci-optimized-build label on the pull
+        # request when it is pushed, this Debug build also turns the optimiser on, whole module as in
+        # Release. DEBUG stays defined and testability stays on, so the unit tests and the UI shards
+        # run on it without changes, though assert() is compiled out. Take the label off once the
+        # run has started, so the next push is an ordinary build.
+        env:
+          OPTIMIZED_BUILD: ${{ contains(github.event.pull_request.labels.*.name, 'ci-optimized-build') }}
         run: |
           simulator_id=$(scripts/ci-simulator-id.sh)
+          # The default shell is macOS's bash 3.2 with -e and without -u, and an empty "$@" adds
+          # nothing, so the unlabelled command is the ordinary one.
+          set --
+          if [[ "$OPTIMIZED_BUILD" == "true" ]]; then
+            set -- SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule
+            echo "::notice title=Optimised build (BYR-1841)::Build: Debug configuration with the optimiser on (SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule) from the ci-optimized-build label. Not an ordinary run."
+          fi
           xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
             -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
-            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= build-for-testing
+            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= "$@" build-for-testing
+          if [[ "$OPTIMIZED_BUILD" == "true" ]]; then
+            # Proof from the binary, not from the settings asked for: an optimised Swift build holds
+            # many generic specializations and an unoptimised one almost none. Under -O the app is
+            # expected to be one binary, as in Release, with no Thorbis.debug.dylib. Nothing here can
+            # fail the step.
+            echo "Optimised build step so far, simulator lookup included: ${SECONDS}s"
+            app="${{ runner.temp }}/ThorbisDerivedData/Build/Products/Debug-iphonesimulator/Thorbis.app"
+            if [[ ! -d "$app" ]]; then
+              echo "::warning title=Optimised build (BYR-1841)::Thorbis.app was not found where the build puts it, so the binary could not be checked"
+            elif [[ -e "$app/Thorbis.debug.dylib" ]]; then
+              echo "::warning title=Optimised build (BYR-1841)::Thorbis.app still has Thorbis.debug.dylib"
+            else
+              echo "Thorbis.app has no Thorbis.debug.dylib, as in Release"
+            fi
+            for bin in "$app/Thorbis" "$app/Thorbis.debug.dylib"; do
+              if [[ -f "$bin" ]]; then
+                count=$(xcrun nm "$bin" 2>/dev/null | xcrun swift-demangle | grep -c 'generic specialization' || true)
+                echo "$(basename "$bin"): ${count:-0} generic specialization symbols"
+              fi
+            done
+          fi
       - name: Unit tests
         run: |
           simulator_id=$(scripts/ci-simulator-id.sh)

@@ -50,6 +50,15 @@ the simulator and unsigned, so a debug-only symbol used in shipping code fails h
 archive time. It compiles without the optimiser, which is what makes it quick, so it does not
 stand in for the archive. It tests nothing and is its own check.
 
+A pull request that carries the `ci-optimized-build` label when it is pushed gets a test build
+with the optimiser on (`-O`, whole module). It is still the Debug configuration, with DEBUG
+defined and testability on, so it is not the build that ships. The unit tests and every UI shard
+run on it. The build alone can take half an hour or more, so the build job's limit rises to 90
+minutes. A notice on the run says it is not an ordinary run, and a re-run of it builds the same
+way. It is evidence for BYR-1841. Add the label before the push and take it off once the run has
+started. While the label is on, every push builds this way and the ordinary build goes untested.
+Push nothing more until the run's UI shards have finished, because a new push cancels the run.
+
 The shards run on an iPhone simulator. The iPad layout has its own run, `iPad UI tests`, on an
 iPad simulator: the test classes with an iPad path (`scripts/ui_test_shards.py --tablet --shards 2
 --list`), in two shards. It starts only for a pull request that changes the iPad layout, a test
