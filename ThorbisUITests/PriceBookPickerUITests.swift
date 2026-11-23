@@ -151,6 +151,8 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
         revalidate.tap()
         XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        // The list can be mid-refresh when that text appears; the range is read once it is back.
+        XCTAssertTrue(range.waitForExistence(timeout: 5))
         XCTAssertEqual(range.label, "51–73 of 73", "A harmless authority refresh should preserve the current page")
         XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"].exists)
     }

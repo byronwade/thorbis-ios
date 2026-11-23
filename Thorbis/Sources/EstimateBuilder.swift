@@ -455,14 +455,16 @@ struct PriceBookResultsList: View {
         .onChange(of: kind) { _, _ in resetPage() }
         .onChange(of: context) { previous, current in
             if !previous.hasSameVerifiedScope(as: current) ||
-                !(catalog.isCurrent(previous, api: api) || catalog.isCurrent(current, api: api)) || catalog.isPartial || catalog.loading {
+                !(catalog.isCurrent(previous, api: api) || catalog.isCurrent(current, api: api)) || catalog.isPartial ||
+                (catalog.loading && !catalog.keptSnapshot) {
                 resetPage()
             }
         }
         .onChange(of: api.requestGeneration) { _, _ in resetPage() }
         .onChange(of: catalog.context) { previous, current in
             guard let current, current == context else { return }
-            if previous?.hasSameVerifiedScope(as: current) != true || !catalog.isCurrent(current, api: api) || catalog.isPartial || catalog.loading {
+            if previous?.hasSameVerifiedScope(as: current) != true || !catalog.isCurrent(current, api: api) || catalog.isPartial ||
+                (catalog.loading && !catalog.keptSnapshot) {
                 resetPage()
             }
         }

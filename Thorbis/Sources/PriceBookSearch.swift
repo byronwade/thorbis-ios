@@ -468,6 +468,10 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var items: [PriceBookListItem] = []
     @Published private(set) var index = PriceBookSearchIndex(items: [])
     @Published private(set) var loading = false
+    /// True when the current context was adopted over the same verified scope and the complete
+    /// snapshot was kept. Its reload (when the 60 s window has passed) replaces no visible item
+    /// until it finishes, so a list keeps its page while that reload runs.
+    @Published private(set) var keptSnapshot = false
     /// True when the visible snapshot has more server pages that have not loaded.
     @Published private(set) var isPartial = false
     @Published private(set) var origin: String?
@@ -510,8 +514,10 @@ final class PriceBookCatalog: ObservableObject {
            loadingRequest == nil, !loading, lastAPIGeneration == apiGeneration {
             // The server reverified the same scope. Adopt its local revision without
             // discarding an idle complete catalog or its existing freshness window.
+            keptSnapshot = true
             context = requested
         } else if context != requested || origin != requestedOrigin {
+            keptSnapshot = false
             context = requested
             origin = requestedOrigin
             self.organizationID = organizationID
@@ -541,6 +547,7 @@ final class PriceBookCatalog: ObservableObject {
             // The generation may reflect changed credentials or revoked authority.
             // Hide even a complete snapshot until a fresh request succeeds.
             lastRefresh = nil
+            keptSnapshot = false
             hasCompleteSnapshot = false
             isPartial = false
             partialAPIGeneration = nil
@@ -747,6 +754,7 @@ final class PriceBookCatalog: ObservableObject {
     func clear() {
         organizationID = nil
         lastRefresh = nil
+        keptSnapshot = false
         context = nil
         origin = nil
         needsScopedRefresh = false
