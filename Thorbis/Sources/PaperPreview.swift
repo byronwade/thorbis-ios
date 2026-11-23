@@ -279,7 +279,9 @@ enum PaperPreview {
     }
     /// Synthetic long lists for catalog-entry navigation checks; no writes or real records.
     private static func longCatalogLines(offset: Int = 0) -> [FieldLine] {
-        let count = ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") ? 500 : 12
+        // At the limit only the first list holds 500 (the invoice, the estimate's first option): a second
+        // 500-line option doubles every accessibility read of the screen and tests nothing more.
+        let count = offset == 0 && ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") ? 500 : 12
         return (0..<count).map { index in
             FieldLine(id: String(format: "00000000-0000-4000-8000-%012d", 88000 + offset + index),
                       description: "Sample work item \(index + 1)", quantity: 1,
