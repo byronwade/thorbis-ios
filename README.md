@@ -61,5 +61,5 @@ that tap by XCTest's own clock, no failure speaks of a crash or a launch, there 
 of them, and the run is otherwise fully accounted for (xcodebuild exited 65, its counts match the
 log, no unexpected failure). The shard passes only if each re-run shows that one test passing.
 Every such run is a warning on the job and is listed in its summary with the reasons, and its
-evidence is uploaded as `ios-ui-test-reruns-<shard>` (BYR-1835). A failure without that evidence
-is never run again.
+evidence is uploaded as `ios-ui-test-reruns-<shard>`, or `ios-ipad-ui-test-reruns-<shard>` for
+the iPad shards (BYR-1835). A failure without that evidence is never run again.

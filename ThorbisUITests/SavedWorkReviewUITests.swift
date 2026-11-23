@@ -158,7 +158,10 @@ final class SavedWorkReviewUITests: XCTestCase {
         app.buttons["Revoke sample editing shortly"].tap()
         dismiss.tap()
         XCTAssertTrue(app.discardQuestion.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.discardQuestion.waitForNonExistence(timeout: 12))
+        // 16 s: the revocation is five seconds after the question opens, then the access check's
+        // requests and the question's own exit. Counting from the question took away the time
+        // between the two taps (up to 4 s on a loaded simulator), which this limit gives back.
+        XCTAssertTrue(app.discardQuestion.waitForNonExistence(timeout: 16))
         XCTAssertTrue(app.savedWorkReview.exists)
         XCTAssertFalse(app.buttons["saved-work-sync"].isEnabled)
         XCTAssertFalse(dismiss.isEnabled)
