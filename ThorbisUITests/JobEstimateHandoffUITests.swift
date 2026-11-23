@@ -374,9 +374,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
 
     /// A swipe back let go a fifth of the way across, after a hold, must roll back (BYR-1842).
-    /// The finger stops before it lifts, so it lifts with no speed, far short of half way. The
-    /// estimate stays open, and Back still reaches a loaded overview. The test cannot see the
-    /// swipe begin: the app log's "[pop-gesture] began" line for this test shows that it did.
+    /// The finger stops for half a second before it lifts, far short of half way. In CI the pop
+    /// probe still logged about 130 pt/s at the lift, and the system rolled the swipe back at 18%
+    /// of the way (run 45148171838). The estimate stays open, and Back still reaches a loaded
+    /// overview. The test cannot see the swipe begin: the app log's "[pop-gesture] began" line
+    /// for this test shows that it did.
     func testAbandonedEdgeBackKeepsTheEstimateOpen() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()

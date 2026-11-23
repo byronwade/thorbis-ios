@@ -224,10 +224,9 @@ struct JobEstimateHandoffView: View {
     @State private var preparingBatch = false
     @State private var batchError: String?
     private var signsTogether: Bool { reviewing && model.reviewed.count > 1 }
-    #if DEBUG
-    /// Whether one of this page's two destinations is presented (BYR-1842 evidence only).
+    /// Whether an estimate or an approval step is pushed over this page. A swipe back shows the
+    /// page while one still is, and SwiftUI clears it only when the pop commits.
     private var coveredByDestination: Bool { detailsID != nil || checkpointID != nil }
-    #endif
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -259,22 +258,24 @@ struct JobEstimateHandoffView: View {
         }
         .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("Estimates").navigationBarTitleDisplayMode(.inline)
-        .task { await model.refresh() }
+        // Reload when the person has come back, not when a swipe back begins. The swipe shows this
+        // page while the estimate is still pushed over it, and a swipe the person lets go of without
+        // going back leaves it there. The task starts again when the page first appears and when what
+        // was pushed is cleared: by Back, by a finished swipe or by the page itself. A reload still
+        // running when something is pushed stops then, as it stopped before when the page left.
+        .task(id: coveredByDestination) {
+            #if DEBUG
+            NSLog("%@", "[pop-gesture] keyed task started covered=\(coveredByDestination)")
+            #endif
+            guard !coveredByDestination else { return }
+            await model.refresh()
+        }
         #if DEBUG
-        // Evidence for BYR-1842, DEBUG only. The reload above also runs when this page appears
-        // under a swipe back that is still in flight. Before it can be moved to "the person has
-        // returned", three things must be known on a real run: when this page appears, when its
-        // destinations clear, and how a task keyed on that restarts. These lines log them beside
-        // the pop probe's. They change nothing the screen does.
+        // BYR-1842, DEBUG only: when this page appears, leaves and is uncovered, read in the app log
+        // beside the pop probe's lines and the task's line above. They change nothing on screen.
         .onAppear { NSLog("%@", "[pop-gesture] overview appeared covered=\(coveredByDestination)") }
         .onDisappear { NSLog("%@", "[pop-gesture] overview disappeared covered=\(coveredByDestination)") }
         .onChange(of: coveredByDestination) { _, covered in NSLog("%@", "[pop-gesture] overview covered=\(covered)") }
-        .task(id: coveredByDestination) {
-            let covered = coveredByDestination
-            NSLog("%@", "[pop-gesture] keyed task started covered=\(covered)")
-            try? await Task.sleep(for: .seconds(600))
-            NSLog("%@", "[pop-gesture] keyed task ended covered=\(covered) cancelled=\(Task.isCancelled)")
-        }
         #endif
         .onChange(of: api.requestGeneration) { _, _ in
             if !model.isCurrent { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
