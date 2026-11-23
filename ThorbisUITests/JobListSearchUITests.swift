@@ -24,7 +24,13 @@ final class JobListSearchUITests: XCTestCase {
         let kitchen = NSPredicate(format: "label CONTAINS %@", "Kitchen sink backup")
         let notCooling = NSPredicate(format: "label CONTAINS %@", "AC not cooling")
         if app.usesTabletLayout {
-            // iPad search is a sheet over the columns (the Jobs list stays behind it).
+            // iPad search is a sheet over the columns (the Jobs list stays behind it). Until the
+            // typing lands, the sheet shows its empty state (Recently viewed, Open jobs), which
+            // lists both jobs; the first keyboard of a fresh iPad simulator can deliver it seconds
+            // after typeText returns, so the results are read once the field holds the words.
+            let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Kitchen"), object: field)
+            XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 20), .completed,
+                           "The search field reads \((field.value as? String) ?? "nothing"), expected Kitchen")
             let results = app.scrollViews["search-results"]
             XCTAssertTrue(results.waitForExistence(timeout: 10))
             XCTAssertTrue(results.buttons.matching(kitchen).firstMatch.waitForExistence(timeout: 10))
