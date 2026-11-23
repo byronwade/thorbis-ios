@@ -34,6 +34,17 @@
 # key command match and each bare key it hands on. It reads the log; it does not touch the app.
 # Evidence (the times, the log lines, the decision, each re-run's times and result bundle) goes
 # to <evidence-dir>, which is created only when a test failed.
+#
+# When THORBIS_HOLD_SAMPLES names a directory, scripts/ci_hold_sampler.py also runs beside the
+# first run of the tests: evidence for BYR-1841, not a test. It takes a stack sample of the app
+# when its main thread has been held for 5 s, writes the samples to that directory and prints one
+# summary line to the job log. It follows its own log stream, which it starts in a process group
+# of its own, at the default level and louder only when that delivers nothing. The sampler
+# itself is stopped by its own pid. It never touches the filter above. It does not change how a
+# test passes or fails, this script's exit status, or which test is run once more. It does add
+# some load while it runs: a filtered log stream for the first run, and, during a hold that has
+# already lasted 5 s, a 3 s stack sample. It does not watch a test that is run once more by
+# itself. Unset, nothing of it runs.
 set -uo pipefail
 
 if [[ $# -lt 5 ]]; then
@@ -63,7 +74,33 @@ if ! scratch=$(mktemp -d "${TMPDIR:-/tmp}/ui-tests.XXXXXX"); then
   run_tests "$result_bundle" "$@"
   exit
 fi
-trap 'rm -rf "$scratch"' EXIT
+# The hold sampler's pid, while it runs. Only ever signalled by this exact pid.
+hold_sampler=
+# Ask it to stop. Never waits: the tests' own decision follows at once.
+stop_hold_sampler() {
+  if [[ -n "$hold_sampler" ]]; then
+    kill -TERM "$hold_sampler" 2>/dev/null || true
+  fi
+}
+# On the way out, give it up to 30 s to finish a sample and write its summary, so its files are
+# whole for the upload step, and then end it. Runs from the EXIT trap, after every decision and
+# re-run; it calls no `exit`, so the script's own exit status stands.
+# shellcheck disable=SC2329 # called from the EXIT trap
+end_hold_sampler() {
+  local waited=0
+  [[ -n "$hold_sampler" ]] || return 0
+  kill -TERM "$hold_sampler" 2>/dev/null || true
+  while kill -0 "$hold_sampler" 2>/dev/null && ((waited < 150)); do
+    sleep 0.2
+    waited=$((waited + 1))
+  done
+  if kill -0 "$hold_sampler" 2>/dev/null; then
+    kill -KILL "$hold_sampler" 2>/dev/null || true
+    echo "Hold sampler (BYR-1841): it did not stop within 30 s and was ended; its files may be incomplete." >&2
+  fi
+  hold_sampler=
+}
+trap 'end_hold_sampler; rm -rf "$scratch"' EXIT
 times="$scratch/test-times.tsv"
 taps="$scratch/cancelled-taps.log"
 : >"$times"
@@ -76,6 +113,15 @@ xcrun simctl spawn "$simulator_id" log stream --style compact --level default \
   --predicate 'process == "backboardd" AND (eventMessage CONTAINS "unknown digitizer" OR eventMessage CONTAINS "KCMD: " OR eventMessage CONTAINS "cache miss for Keyboard event" OR eventMessage CONTAINS "sequence starting with Keyboard event" OR eventMessage CONTAINS "new key command registrations for pid:" OR (eventMessage CONTAINS "Connection added: " AND eventMessage CONTAINS " process:Thorbis "))' </dev/null 2>/dev/null |
   cat >"$taps" &
 watcher=$!
+
+# Evidence for BYR-1841 (scripts/ci_hold_sampler.py), only when asked for. Its own stream has its
+# own predicate, so stop_watcher's pkill pattern never matches it, and it never signals the
+# filter above. It reads nothing of ours and writes nothing to standard output; its standard
+# error is the job's log.
+if [[ -n "${THORBIS_HOLD_SAMPLES:-}" ]]; then
+  python3 "$here/ci_hold_sampler.py" watch "$simulator_id" "$THORBIS_HOLD_SAMPLES" </dev/null >/dev/null &
+  hold_sampler=$!
+fi
 
 # Stop the reader and the stream. Never wait for either: a stream that outlived both signals
 # would hold the step until the job's time ran out, and it holds nothing of the step's.
@@ -112,6 +158,7 @@ stamped() { # <times file> <result bundle> <-only-testing:...>...
 stamped "$times" "$result_bundle" "$@"
 status=$ran
 stop_watcher
+stop_hold_sampler
 
 # Say on every run whether that filter started. The log tool prints the filter it accepted as
 # its first line, so a filter it refused shows on a green run too, not only when a test failed.

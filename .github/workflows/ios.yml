@@ -31,8 +31,8 @@ jobs:
         run: |
           python3 scripts/ui_test_shards.py --shards 6 --check
           python3 scripts/ui_test_shards.py --tablet --shards 2 --check
-      - name: Test the guard, the shard planner and the cancelled-tap rule
-        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests
+      - name: Test the guard, the shard planner, the cancelled-tap rule and the hold sampler
+        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests scripts.tests.test_ci_hold_sampler
       - name: Check every text colour against the grounds it sits on
         run: python3 scripts/tests/contrast.py
 
@@ -221,6 +221,14 @@ jobs:
           echo "Busiest processes:"
           ps -Ao pcpu,comm -r | head -n 6 || true
       - name: Run this shard's UI tests
+        # Evidence for BYR-1841, not a test: scripts/ci_hold_sampler.py samples the app's stack when
+        # its main thread has been held for 5 s. Its log stream starts at the default level and
+        # steps up to info, then debug, only after 300 s with no request line. It does not change
+        # how a test passes or fails, or which test is run once more. It adds some load: a
+        # filtered log stream for the first run, and a 3 s sample in a hold already 5 s long. It
+        # does not watch a test run once more by itself. Remove it once BYR-1841 has its stack.
+        env:
+          THORBIS_HOLD_SAMPLES: ${{ runner.temp }}/hold-samples
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
@@ -252,6 +260,15 @@ jobs:
         with:
           name: ios-ui-test-reruns-${{ matrix.shard }}
           path: ${{ runner.temp }}/ui-test-reruns
+          if-no-files-found: ignore
+          retention-days: 14
+      # BYR-1841: the hold sampler's summary and any stack samples it took.
+      - name: Save hold samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-hold-samples-${{ matrix.shard }}
+          path: ${{ runner.temp }}/hold-samples
           if-no-files-found: ignore
           retention-days: 14
 
@@ -355,6 +372,10 @@ jobs:
           echo "Busiest processes:"
           ps -Ao pcpu,comm -r | head -n 6 || true
       - name: Run this shard's iPad UI tests
+        # As on the iPhone: stack samples of long main-thread holds for BYR-1841. It does not change
+        # how a test passes or fails, or which test is run once more; it adds the same load.
+        env:
+          THORBIS_HOLD_SAMPLES: ${{ runner.temp }}/hold-samples
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
@@ -382,6 +403,14 @@ jobs:
         with:
           name: ios-ipad-ui-test-reruns-${{ matrix.shard }}
           path: ${{ runner.temp }}/ui-test-reruns
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Save hold samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipad-ui-hold-samples-${{ matrix.shard }}
+          path: ${{ runner.temp }}/hold-samples
           if-no-files-found: ignore
           retention-days: 14
 
