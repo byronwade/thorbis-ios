@@ -44,3 +44,14 @@ tests, and then runs the UI tests from that build in parallel shards
 says every shard passed. The planner counts tests a class inherits or declares in an extension, and
 stops with an error for any `func test…` it cannot place in a class it names, so a test never
 drops out of the split unnoticed.
+
+The shards run on an iPhone simulator. The iPad layout has its own run, `iPad UI tests`, on an
+iPad simulator: the test classes with an iPad path (`scripts/ui_test_shards.py --tablet --shards 2
+--list`), in two shards. It starts only for a pull request that changes the iPad layout, a test
+with an iPad path, or the workflow and scripts that plan it (`scripts/ci-ipad-scope.sh` holds the
+rule). It is its own check and not yet part of `UI tests` (BYR-1843).
+
+One shard also carries a temporary probe, `scripts/ci-freeze-sampler.sh`. It takes a few stack
+samples of the app when the simulator reports a frozen animation, and uploads them as
+`ios-ui-freeze-samples-<shard>`. It is evidence for BYR-1841 and goes when that issue has its
+answer.
