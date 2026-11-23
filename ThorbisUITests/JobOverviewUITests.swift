@@ -320,6 +320,13 @@ final class JobOverviewUITests: XCTestCase {
         address.tap()
         let locations = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Service addresses")).firstMatch
         XCTAssertTrue(locations.waitForExistence(timeout: 20))
+        // The page's own reads land above the row after Service addresses shows: the equipment, who
+        // was notified and the plan push it down a page. Asked for its hittability while they land,
+        // XCTest reads a point that was on screen and a frame that no longer is, and throws.
+        for section in ["Equipment", "Who was notified", "Maintenance plan"] {
+            let title = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", section)).firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 20), "\(section) has not loaded on At this address")
+        }
         let details = app.buttons["More job details"]
         for _ in 0..<12 where !details.isHittable { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(details.waitForExistence(timeout: 5))
