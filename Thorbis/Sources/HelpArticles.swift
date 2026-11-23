@@ -48,7 +48,13 @@ enum HelpCatalog {
 
     static func related(to article: HelpArticle) -> [HelpArticle] { article.related.compactMap(HelpCatalog.article) }
 
-    static let articles: [HelpArticle] = [
+    /// The articles for this build. Tap to Pay is named only when the build may take it
+    /// (TapToPayReadiness.buildEnabled, the ThorbisTapToPayEnabled key in Info.plist).
+    static let articles: [HelpArticle] = allArticles(tapToPayEnabled: TapToPayReadiness.buildEnabled)
+
+    /// Every article. With `tapToPayEnabled` false, "Collect payment on site" and "Work with no
+    /// signal" name only the ways the collect screen offers without it, in that screen's words.
+    static func allArticles(tapToPayEnabled: Bool) -> [HelpArticle] { [
         HelpArticle(
             id: "schedule-day", category: "Schedule and jobs", title: "See your day on Schedule",
             summary: "Today, Week and Map, and what the next stop offers.",
@@ -111,15 +117,23 @@ enum HelpCatalog {
             related: ["payment-collect", "payment-link"]),
         HelpArticle(
             id: "payment-collect", category: "Getting paid", title: "Collect payment on site",
-            summary: "Tap to Pay, a code to scan, check, cash or a bank transfer.",
+            summary: tapToPayEnabled
+                ? "Tap to Pay, a code to scan, check, cash or a bank transfer."
+                : "A code to scan, check, cash or a bank transfer.",
             steps: [
                 HelpStep(symbol: "creditcard", text: "Open the invoice and tap Collect payment."),
                 HelpStep(symbol: "dollarsign.circle", text: "Check the amount."),
-                HelpStep(symbol: "wave.3.right", text: "Choose how: Tap to Pay on iPhone when your business has it set up, Show a code to scan, Check, Cash, or Bank transfer or other."),
+                tapToPayEnabled
+                    ? HelpStep(symbol: "wave.3.right", text: "Choose how: Tap to Pay on iPhone when your business has it set up, Show a code to scan, Check, Cash, or Bank transfer or other.")
+                    : HelpStep(symbol: "qrcode", text: "Choose how: Show a code to scan, Check, Cash, or Bank transfer or other."),
                 HelpStep(symbol: "checkmark.circle", text: "Finish on the phone. The invoice shows the new balance."),
             ],
-            note: "Cards, payment links and Tap to Pay need signal. Cash and checks can be recorded with no signal and send when you are back online.",
-            keywords: ["pay", "paid", "card", "tap to pay", "cash", "check", "cheque", "ach", "charge", "money"],
+            note: tapToPayEnabled
+                ? "Cards, payment links and Tap to Pay need signal. Cash and checks can be recorded with no signal and send when you are back online."
+                : "Cards and payment links need signal. Cash and checks can be recorded with no signal and send when you are back online.",
+            keywords: tapToPayEnabled
+                ? ["pay", "paid", "card", "tap to pay", "cash", "check", "cheque", "ach", "charge", "money"]
+                : ["pay", "paid", "card", "cash", "check", "cheque", "ach", "charge", "money"],
             related: ["payment-link", "offline"]),
         HelpArticle(
             id: "payment-link", category: "Getting paid", title: "Let a customer scan to pay",
@@ -188,7 +202,7 @@ enum HelpCatalog {
                 HelpStep(symbol: "icloud.and.arrow.up", text: "When signal returns, they send on their own."),
                 HelpStep(symbol: "tray.full", text: "Tap that line to review saved work. Send now sends it; Retry or Dismiss deals with anything that could not be saved."),
             ],
-            note: "Cards, payment links and Tap to Pay need signal.",
+            note: tapToPayEnabled ? "Cards, payment links and Tap to Pay need signal." : "Cards and payment links need signal.",
             keywords: ["offline", "wifi", "no service", "sync", "queued", "saved work", "basement", "airplane"],
             related: ["on-this-phone", "payment-collect"]),
         HelpArticle(
@@ -260,7 +274,7 @@ enum HelpCatalog {
             ],
             keywords: ["find", "look up", "lookup", "address", "phone number"],
             related: ["schedule-day"]),
-    ]
+    ] }
 }
 
 /// Search over the built-in articles. Every typed word must appear somewhere in the article;
@@ -324,14 +338,21 @@ enum HelpTours {
                        message: "Wrap up lists what is left: photos, note, approval, signature and payment. Then tap Complete job."),
     ])
 
-    static let gettingPaid = GuidedTour(name: "Getting paid on site", steps: [
-        GuidedTourStep(id: "paid-invoice", target: nil, title: "Start from the invoice",
-                       message: "On the job, tap Create invoice, check the lines and tap Issue invoice."),
-        GuidedTourStep(id: "paid-collect", target: nil, title: "Tap Collect payment",
-                       message: "Check the amount, then choose Tap to Pay on iPhone, a code to scan, Check, Cash or a bank transfer."),
-        GuidedTourStep(id: "paid-offline", target: nil, title: "No signal?",
-                       message: "Cash and checks can be recorded offline and send later. Cards and payment links need signal."),
-    ])
+    /// The tour for this build: Tap to Pay is named only when the build may take it.
+    static let gettingPaid = gettingPaidTour(tapToPayEnabled: TapToPayReadiness.buildEnabled)
+
+    static func gettingPaidTour(tapToPayEnabled: Bool) -> GuidedTour {
+        GuidedTour(name: "Getting paid on site", steps: [
+            GuidedTourStep(id: "paid-invoice", target: nil, title: "Start from the invoice",
+                           message: "On the job, tap Create invoice, check the lines and tap Issue invoice."),
+            GuidedTourStep(id: "paid-collect", target: nil, title: "Tap Collect payment",
+                           message: tapToPayEnabled
+                               ? "Check the amount, then choose Tap to Pay on iPhone, a code to scan, Check, Cash or a bank transfer."
+                               : "Check the amount, then choose Show a code to scan, Check, Cash, or Bank transfer or other."),
+            GuidedTourStep(id: "paid-offline", target: nil, title: "No signal?",
+                           message: "Cash and checks can be recorded offline and send later. Cards and payment links need signal."),
+        ])
+    }
 
     static let estimate = GuidedTour(name: "Building an estimate", steps: [
         GuidedTourStep(id: "estimate-new", target: nil, title: "Start a new estimate",

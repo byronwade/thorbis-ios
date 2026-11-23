@@ -31,6 +31,12 @@ enum AppIntroCopy {
             ? "Tap to Pay, a code to scan, cash or check — collect payment before you leave the job."
             : "A code to scan, a texted pay link, cash or check — collect payment before you leave the job."
     }
+
+    /// The caption under the third page's illustration. With Tap to Pay off it names the collect
+    /// screen's code to scan, not a card held to the phone.
+    static func paymentCaption(tapToPayEnabled: Bool) -> String {
+        tapToPayEnabled ? "Hold card near your phone" : "Show a code to scan"
+    }
 }
 
 /// How the person left the intro. Every exit ends at Login; `getStarted` lets the host open
@@ -87,7 +93,7 @@ struct AppIntroView: View {
                 .tag(1)
                 IntroPage(title: "Get paid\non the spot",
                           message: AppIntroCopy.paymentMessage(tapToPayEnabled: TapToPayReadiness.buildEnabled)) {
-                    IntroPaymentCard()
+                    IntroPaymentCard(tapToPayEnabled: TapToPayReadiness.buildEnabled)
                 }
                 .tag(2)
             }
@@ -281,8 +287,11 @@ private struct IntroJobCard: View {
     }
 }
 
-/// Paper 03: the amount due over the tap-to-pay rings.
+/// Paper 03: the amount due over the tap-to-pay rings. With Tap to Pay off the same rings hold the
+/// collect screen's code glyph instead, so the page's layout does not move.
 private struct IntroPaymentCard: View {
+    let tapToPayEnabled: Bool
+
     var body: some View {
         IntroCard(alignment: .center, top: 32, bottom: 32) {
             VStack(spacing: 6) {
@@ -294,8 +303,12 @@ private struct IntroPaymentCard: View {
                 Circle().fill(Theme.brandSurface).frame(width: 104, height: 104)
                 Circle().fill(Theme.brand.opacity(0.18)).frame(width: 72, height: 72)
                 Circle().fill(Theme.brand).frame(width: 44, height: 44)
+                if !tapToPayEnabled {
+                    // The "Show a code to scan" row's glyph, white on the brand circle.
+                    PaperIcon(.payCode, size: 22, color: Color.white)
+                }
             }
-            Text("Hold card near your phone").font(Theme.font(14)).foregroundStyle(Theme.muted)
+            Text(AppIntroCopy.paymentCaption(tapToPayEnabled: tapToPayEnabled)).font(Theme.font(14)).foregroundStyle(Theme.muted)
                 .padding(.top, 20)
         }
     }
