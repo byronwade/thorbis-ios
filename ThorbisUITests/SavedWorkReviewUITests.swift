@@ -4,6 +4,8 @@ import XCTest
 final class SavedWorkReviewUITests: XCTestCase {
     private var cleanupArguments: [String]?
     override func tearDown() {
+        // The landscape test puts portrait back in a defer, which a failed assertion skips.
+        XCUIDevice.shared.orientation = .portrait
         if let base = cleanupArguments {
             let app = XCUIApplication(); app.terminate()
             app.launchArguments = base + ["--paper-preview-reset-saved-work"]

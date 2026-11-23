@@ -49,7 +49,9 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Activity", "job-section-chooser")).firstMatch.tap()
         let photos = app.buttons["activity-filter-photos"]
-        let content = app.scrollViews.firstMatch
+        // The job's own scroll view (on iPad the list column beside it comes first).
+        let content = app.usesTabletLayout ? app.scrollViews.containing(.button, identifier: "activity-filter-photos").firstMatch
+                                           : app.scrollViews.firstMatch
         XCTAssertTrue(photos.waitForExistence(timeout: 10))
         for _ in 0..<8 where !photos.isHittable { content.swipeUp() }
         XCTAssertTrue(photos.isHittable); photos.tap()
@@ -69,7 +71,9 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
         let notes = app.buttons["activity-filter-notes"]
         let photos = app.buttons["activity-filter-photos"]
-        let content = app.scrollViews.firstMatch
+        // The job's own scroll view (on iPad the list column beside it comes first).
+        let content = app.usesTabletLayout ? app.scrollViews.containing(.button, identifier: "activity-filter-notes").firstMatch
+                                           : app.scrollViews.firstMatch
         XCTAssertTrue(notes.waitForExistence(timeout: 10))
         for _ in 0..<6 where !notes.isHittable { content.swipeUp() }
         XCTAssertTrue(notes.isHittable); notes.tap()
@@ -518,7 +522,9 @@ final class JobOverviewUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview("job", accessibleText: true, working: true)
         let chooser = app.buttons["job-section-chooser"]
-        let content = app.scrollViews.firstMatch
+        // The job's own scroll view (on iPad the list column beside it comes first).
+        let content = app.usesTabletLayout ? app.scrollViews.containing(.button, identifier: "job-section-chooser").firstMatch
+                                           : app.scrollViews.firstMatch
         XCTAssertTrue(chooser.waitForExistence(timeout: 20))
         for _ in 0..<5 where !chooser.isHittable { content.swipeUp() }
         XCTAssertTrue(chooser.isHittable)

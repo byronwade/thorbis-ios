@@ -138,7 +138,8 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         search.typeText("plumbing\n")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        // On iPad a put-away keyboard can stay in the tree at zero height, so ask the helper there.
+        XCTAssertTrue(app.usesTabletLayout ? app.waitForKeyboardToHide(timeout: 5) : app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         let more = app.buttons["price-book-show-more"]
         expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", "23 remaining"), evaluatedWith: more)
         waitForExpectations(timeout: 15)
@@ -188,7 +189,7 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         chooseCategory("Materials", in: app)
         if app.keyboards.firstMatch.exists { search.typeText("\n") }
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.usesTabletLayout ? app.waitForKeyboardToHide(timeout: 5) : app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Showing materials"].waitForExistence(timeout: 5), "An active category must stay visible")
         XCTAssertEqual(app.buttons["Category"].value as? String, "Materials")
         chooseCategory("All", in: app)
