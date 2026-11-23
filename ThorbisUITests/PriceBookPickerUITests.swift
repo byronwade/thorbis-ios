@@ -87,7 +87,7 @@ final class PriceBookPickerUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
                                "--paper-preview-catalog-pages", "--paper-preview-picker-revalidation", "--paper-preview-picker-feature-change"]
         app.launch()
-        let before = lineCount(app)
+        let before = lineCount(app, timeout: 20)
         openPicker(in: app, addItem: "invoice-add-item")
         let search = app.textFields["invoice-catalog-search"]
         search.tap()
@@ -405,10 +405,12 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(clear(), "\(row.frame) is clear of Done at \(done.frame)")
     }
 
-    /// "Line items · N" read from its identifier, so additions are counted, not guessed.
-    private func lineCount(_ app: XCUIApplication) -> Int {
+    /// "Line items · N" read from its identifier, so additions are counted, not guessed. Straight
+    /// after launch the invoice editor is still on its way, so a launch passes the 20 s that
+    /// `launchInvoiceEditor()` gives the editor to appear.
+    private func lineCount(_ app: XCUIApplication, timeout: TimeInterval = 5) -> Int {
         let header = app.staticTexts["invoice-line-count"]
-        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        XCTAssertTrue(header.waitForExistence(timeout: timeout))
         return Int(header.label.components(separatedBy: "·").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
     }
 

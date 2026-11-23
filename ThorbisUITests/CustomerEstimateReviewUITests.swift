@@ -66,7 +66,7 @@ final class CustomerEstimateReviewUITests: XCTestCase {
 
     func testOpeningCannotApproveCallerTermsBeforeServerReadCompletes() {
         let app = preview(extra: ["--paper-preview-review-pending"])
-        XCTAssertTrue(app.descendants(matching: .any)["customer-estimate-opening"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["customer-estimate-opening"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Approve")).firstMatch.exists)
         XCTAssertFalse(app.staticTexts["You're approving"].exists)
         XCTAssertTrue(app.buttons["Not today"].exists)
@@ -75,7 +75,7 @@ final class CustomerEstimateReviewUITests: XCTestCase {
 
     func testReviewShowsCanonicalChoiceDescriptionAndPrice() {
         let app = preview(extra: ["--paper-preview-canonical-estimate"])
-        XCTAssertTrue(app.staticTexts["Reviewed protection"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Reviewed protection"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["Verified surge protection"].exists)
         XCTAssertTrue(approveButton(app, total: "$543.21").exists)
         XCTAssertFalse(app.staticTexts["Surge protector, installed"].exists)
@@ -85,7 +85,7 @@ final class CustomerEstimateReviewUITests: XCTestCase {
     func testFailedOpeningCanRetryWithoutApprovingStaleTerms() {
         let app = preview(extra: ["--paper-preview-canonical-estimate", "--paper-preview-review-failure"])
         let retry = app.buttons["Try again"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertTrue(retry.waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Approve")).firstMatch.exists)
         XCTAssertTrue(app.buttons["Not today"].exists)
         capture(app, "Estimate opening recovery")
