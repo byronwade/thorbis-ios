@@ -40,6 +40,9 @@ final class InvoicePaymentUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-overflow"]
         app.launch()
         XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30), "An invalid amount needs an explicit unavailable state")
+        // The amount can be drawn from the copy saved on this phone before the live invoice answers.
+        // The page's menu exists only once it has, and collection is decided from that same live invoice.
+        XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Get customer signature"].exists)
         XCTAssertFalse(app.buttons["Collect payment"].exists)
     }

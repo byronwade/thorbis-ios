@@ -47,6 +47,9 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
             app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail"] + arguments
             app.launch()
             XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+            // The title can be drawn from the copy saved on this phone, which never offers Edit. The
+            // page's menu exists only once the live invoice has answered, and Edit is decided from it.
+            XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 20))
             XCTAssertFalse(app.buttons["invoice-detail-edit-items"].exists)
             app.terminate()
         }
