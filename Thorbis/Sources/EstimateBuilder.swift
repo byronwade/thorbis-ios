@@ -218,6 +218,15 @@ extension EstimateRevisionLineDraft {
             EstimateRevisionEditorState.parsePrice(unitPrice) != EstimateRevisionEditorState.parsePrice(original.unitPrice)
     }
 
+    /// The server charges the member price only on a price book line sent at the list price it
+    /// came from. A typed line, a credit and an edited price are charged as entered. A line the
+    /// server already saved at the member price is below its list price, so it does not qualify.
+    var chargesMemberPrice: Bool {
+        guard case .priceBookSelection = source, let original = priceBookOriginal,
+              let cents = EstimateRevisionEditorState.parsePrice(unitPrice), cents > 0 else { return false }
+        return cents == EstimateRevisionEditorState.parsePrice(original.unitPrice)
+    }
+
     var lineTotal: Int? {
         guard let cents = EstimateRevisionEditorState.parsePrice(unitPrice),
               let quantity = Int(quantity.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -254,14 +263,14 @@ extension Array where Element == EstimateRevisionLineDraft {
     func memberTotal(_ pricing: MemberPricing?) -> Int? {
         guard let pricing, pricing.isMember, pricing.discountPercent > 0, !isEmpty else { return nil }
         var sum = 0
-        // Nothing left to discount (every priced line was saved at the member price): no hint.
+        // No line the server would charge the member price: no hint.
         var anyDiscounted = false
         for line in self {
             guard let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice),
                   let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)),
                   (1...100_000).contains(quantity) else { return nil }
             // Same bounds as `subtotal`: a long quantity must read as "not yet", never trap.
-            let discounts = cents > 0 && !line.memberPriced
+            let discounts = line.chargesMemberPrice
             if discounts { anyDiscounted = true }
             let (amount, overflow) = quantity.multipliedReportingOverflow(by: discounts ? pricing.memberPrice(cents) : cents)
             let (next, overflowSum) = sum.addingReportingOverflow(amount)
@@ -455,14 +464,16 @@ struct PriceBookResultsList: View {
         .onChange(of: kind) { _, _ in resetPage() }
         .onChange(of: context) { previous, current in
             if !previous.hasSameVerifiedScope(as: current) ||
-                !(catalog.isCurrent(previous, api: api) || catalog.isCurrent(current, api: api)) || catalog.isPartial || catalog.loading {
+                !(catalog.isCurrent(previous, api: api) || catalog.isCurrent(current, api: api)) || catalog.isPartial ||
+                (catalog.loading && !catalog.keptSnapshot) {
                 resetPage()
             }
         }
         .onChange(of: api.requestGeneration) { _, _ in resetPage() }
         .onChange(of: catalog.context) { previous, current in
             guard let current, current == context else { return }
-            if previous?.hasSameVerifiedScope(as: current) != true || !catalog.isCurrent(current, api: api) || catalog.isPartial || catalog.loading {
+            if previous?.hasSameVerifiedScope(as: current) != true || !catalog.isCurrent(current, api: api) || catalog.isPartial ||
+                (catalog.loading && !catalog.keptSnapshot) {
                 resetPage()
             }
         }
@@ -1438,10 +1449,11 @@ extension EstimateBuilderSection where Header == EmptyView {
 // MARK: - Member pricing
 
 extension MemberPricing {
-    /// "Member $123.00" beside a price book result, as the invoice editor shows it. Informational:
-    /// the line keeps the price book price; the server owns what a member is charged.
+    /// "Member $123.00" beside a price book result in the estimate builder. The line keeps the
+    /// price book price and the server charges a member the lower one when the estimate is saved.
+    /// Invoices are never member priced, so the invoice editor does not show it.
     func secondaryPriceText(_ item: PriceBookListItem) -> String? {
-        guard isMember, discountPercent > 0 else { return nil }
+        guard isMember, discountPercent > 0, item.sellPrice.amount > 0 else { return nil }
         return "Member \(money(memberPrice(item.sellPrice.amount), currency: item.sellPrice.currency))"
     }
 }

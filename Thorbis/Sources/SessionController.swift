@@ -50,6 +50,18 @@ private struct FeaturesPayload: Decodable {
     let features: [String: FeatureDecision]
 }
 
+/// What a revalidation compares. When any part (or the API origin) differs from what the session
+/// holds, `authorityRevision` changes before the new authority is published, retiring work captured
+/// under the old one, and reads the server refused under the old authority are asked again
+/// (`APIClient.forgetRefusedReads`). An identical answer changes neither; only
+/// `verificationRevision` ticks.
+struct SessionAuthority: Equatable {
+    let capabilities: Set<String>
+    let features: [String: FeatureDecision]
+    let policyVersion: Int?
+    let generation: String?
+}
+
 private struct SessionValidationError: LocalizedError {
     let reason: String
     var errorDescription: String? { reason }
@@ -91,11 +103,29 @@ final class SessionController: ObservableObject {
                                   generation: authorityGeneration, revision: authorityRevision)
     }
 
-    /// Changes before publishing new authority, even when the server policy version is unchanged.
-    /// Visible media must reauthorize when this value changes.
+    /// Changes before new authority is published: on sign-in, restore, a workspace switch and offline
+    /// adoption, and when a revalidation finds different capabilities, features, policy version,
+    /// authority generation or API origin (even at the same policy version). An identical revalidation
+    /// keeps it, so open work survives a foreground or reconnect check. Work captured under it must
+    /// stop or reauthorize when it changes. Visible per-job records (media, files) key on
+    /// `recheckRevision`; reloads that should follow every answered check use `verificationRevision`.
     @Published private(set) var authorityRevision = UUID() {
-        didSet { ScopedRecordFavorites.shared.retireSession(generation: generation, authority: oldValue) }
+        didSet {
+            recheckRevision = UUID()
+            ScopedRecordFavorites.shared.retireSession(generation: generation, authority: oldValue)
+        }
     }
+    /// Changes with `authorityRevision` and, before new authority is published, on every revalidation
+    /// the server answers, even an identical one. Which jobs a person is assigned to is not part of the
+    /// compared authority, so surfaces that show per-job records the server authorizes one by one
+    /// (visible media and files, a customer's record lists) key on this to re-check access on every
+    /// foreground and reconnect, as they always have.
+    @Published private(set) var recheckRevision = UUID()
+    /// Ticks after every check the server answered: each successful `revalidate()` (scene active,
+    /// reconnect, offline backoff, saved-copy fallback) and each authority load. It means only "the
+    /// server confirmed this session again", never "access changed". Reload data on it (`.task(id:)`,
+    /// freshness windows); never capture it to guard or retire in-flight work: that is `authorityRevision`.
+    @Published private(set) var verificationRevision = UUID()
     private(set) var generation = UUID() {
         didSet { ScopedRecordFavorites.shared.retireSession(generation: oldValue, authority: authorityRevision) }
     }
@@ -199,7 +229,20 @@ final class SessionController: ObservableObject {
             let exposure: FeaturesPayload = try await api.send("GET", "/v1/features", authed: false)
             guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
             guard exposure.organizationId == currentOrganization.id else { await restore(); return }
-            authorityRevision = UUID()
+            let held = SessionAuthority(capabilities: capabilities, features: features,
+                                        policyVersion: policyVersion, generation: authorityGeneration)
+            let fresh = SessionAuthority(capabilities: Set(catalog.capabilities), features: exposure.features,
+                                         policyVersion: binding.policyVersion, generation: binding.generation)
+            // An identical answer keeps the revision, so a foreground or reconnect check leaves open
+            // work (a customer's approval, an open document, a held create) as it was.
+            if held != fresh || authorityOrigin != api.normalizedOrigin {
+                api.forgetRefusedReads()
+                // Changed before the new authority is published, so work captured under the old one retires.
+                authorityRevision = UUID()
+            } else {
+                // Per-job records (media, a customer's lists) are re-checked on every answered check.
+                recheckRevision = UUID()
+            }
             capabilities = Set(catalog.capabilities)
             features = exposure.features
             sessionDeadline = sessionExpiry
@@ -212,6 +255,8 @@ final class SessionController: ObservableObject {
             expiryTask?.cancel()
             scheduleExpiry(generation: sessionGeneration, deadline: min(sessionExpiry, authorityExpiry ?? sessionExpiry))
             saveSnapshot()
+            // Last, so a subscriber sees the whole verified state it announces.
+            verificationRevision = UUID()
         } catch is CancellationError {
         } catch {
             guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
@@ -331,6 +376,8 @@ final class SessionController: ObservableObject {
         // Notifications for the old workspace stop before the switch.
         await onWillUnbindDevice?()
         snapshots.clear()
+        // The widgets drop the old workspace's jobs before the new one writes its own.
+        TodaySnapshot.clear()
         let requestGeneration = invalidate(next: .restoring)
         do {
             struct Selection: Encodable { let organizationId: String }
@@ -417,6 +464,8 @@ final class SessionController: ObservableObject {
             )
             guard generation == requestGeneration else { return }
             guard let payload else {
+                // The server says this session is gone: the offline copy must not reopen it.
+                snapshots.clear()
                 phase = .signedOut
                 onVerifiedIdentity?(nil, nil)
                 return
@@ -426,6 +475,7 @@ final class SessionController: ObservableObject {
                   let sessionExpiry = Self.date(payload.session.expiresAt)
             else { throw SessionValidationError(reason: "Invalid session identity.") }
             guard Date() < sessionExpiry else {
+                snapshots.clear()
                 phase = .signedOut
                 onVerifiedIdentity?(nil, nil)
                 return
@@ -434,12 +484,33 @@ final class SessionController: ObservableObject {
             if let knownOrganizations {
                 memberships = knownOrganizations
             } else {
-                memberships = try await api.send("GET", "/api/auth/organization/list", authed: false)
+                do {
+                    memberships = try await api.send("GET", "/api/auth/organization/list", authed: false)
+                } catch {
+                    // The server has just said whose session this is and which company it has open.
+                    // When that is not the offline copy's account and company, and the list cannot be
+                    // read to show the person still belongs there, the copy is forgotten. Otherwise
+                    // `fail` below, or the next launch without signal, would reopen a company the
+                    // person was removed from (removal nulls the active company).
+                    if generation == requestGeneration, let held = snapshots.load(),
+                       held.user.id != payload.user.id || held.organization.id != payload.session.activeOrganizationId {
+                        snapshots.clear()
+                    }
+                    throw error
+                }
                 guard generation == requestGeneration else { return }
             }
             guard Set(memberships.map(\.id)).count == memberships.count,
                   memberships.allSatisfy({ !$0.id.isEmpty && !$0.name.isEmpty })
             else { throw SessionValidationError(reason: "Invalid workspace list.") }
+            // A removed member's sessions come back with no active company (the server nulls it), so
+            // the offline copy is forgotten here, before the no-workspace and picker paths, whenever
+            // it names another account or a company this account no longer belongs to. Otherwise a
+            // later launch without signal would reopen the company the person was removed from.
+            if let held = snapshots.load(),
+               held.user.id != payload.user.id || !memberships.contains(where: { $0.id == held.organization.id }) {
+                snapshots.clear()
+            }
             user = payload.user
             organizations = memberships
             sessionDeadline = sessionExpiry
@@ -531,6 +602,7 @@ final class SessionController: ObservableObject {
             onVerifiedIdentity?(actor.id, organization.id)
             scheduleExpiry(generation: requestGeneration,
                            deadline: min(sessionExpiry, authorityExpiry ?? sessionExpiry))
+            verificationRevision = UUID()
         } catch {
             fail(error, generation: requestGeneration)
         }
@@ -552,6 +624,9 @@ final class SessionController: ObservableObject {
         if failure.isTransientServerFailure, !defaults.bool(forKey: Self.explicitSignOutKey),
            adoptSnapshot(generation: requestGeneration) { return }
         let description = failure.plainMessage()
+        // Only an answer that proves the session or membership is gone forgets the offline copy.
+        // A captive portal or a CDN page must not end a technician's offline access.
+        if failure is SessionValidationError || (failure as? Problem)?.status == 401 { snapshots.clear() }
         invalidate(next: .failed)
         error = description
     }
@@ -568,11 +643,5 @@ final class SessionController: ObservableObject {
     }
     #endif
 
-    private static func date(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
-    }
+    private static func date(_ value: String) -> Date? { JobFiltering.date(value) }
 }

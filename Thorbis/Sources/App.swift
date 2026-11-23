@@ -81,6 +81,11 @@ struct ThorbisApp: App {
             JobChecklistStore.clearAll()
             ChecklistDraftStore.clearAll()
             OfficeContact.clearAll()
+            PendingTeamGoalEdits().clearAll()
+            PendingOrganizationFacts().clearAll()
+            BillingMoneyIntents().clearAll()
+            TeamGoalsCache.clear()
+            ReviewRequestsCache.clear()
             Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox, weak pendingMedia, weak api] actorID, organizationID in
@@ -97,6 +102,8 @@ struct ThorbisApp: App {
             } else {
                 DayPrefetch.shared.cancel()
                 api?.savedCopyScope = nil
+                // Expired, signed out elsewhere, no workspace: the widgets stop showing customers.
+                TodaySnapshot.clear()
             }
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
@@ -110,6 +117,9 @@ struct ThorbisApp: App {
         }
         store.onRefreshed = { [weak session, weak api] jobs, customers in
             guard let session, session.phase == .ready else { return }
+            // An emptied list replaces the widgets' old rows; the writer skips an empty store so a
+            // cold launch does not flash "No more jobs today".
+            if jobs.isEmpty, session.can("job.view", feature: "jobs") { TodaySnapshot.save(TodaySnapshot(items: [], writtenAt: Date())) }
             if let api { DayPrefetch.shared.start(jobs: jobs, api: api, session: session) }
             SpotlightIndex.shared.replace(jobs: jobs, customers: customers,
                                           includeJobs: session.can("job.view", feature: "jobs"),
@@ -379,10 +389,17 @@ final class Store: ObservableObject {
         didSet { if requestedSearch != nil { openedForRecord = true } }
     }
     @Published var customers: [Customer] = [] {
-        didSet { customerNames = Dictionary(customers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
+        didSet {
+            customerNames = Dictionary(customers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+            customerAddresses = Dictionary(customers.compactMap { customer in customer.address.map { (customer.id, $0) } },
+                                           uniquingKeysWith: { first, _ in first })
+        }
     }
     /// Names by id, so each row's lookup does not walk the whole customer list.
     private var customerNames: [String: String] = [:]
+    /// Each customer's own address by id, from the same list: where a job with no site of its own
+    /// is shown (JobFallbackAddress), with no read of its own.
+    private(set) var customerAddresses: [String: String] = [:]
     @Published var error: String?
     @Published var loading = false
     /// When the shown jobs came from the on-device copy instead of the server.
@@ -499,6 +516,10 @@ final class Store: ObservableObject {
     func customerName(_ id: String?) -> String {
         id.flatMap { customerNames[$0] } ?? "Customer"
     }
+
+    func customerAddress(_ id: String?) -> String? {
+        id.flatMap { customerAddresses[$0] }
+    }
 }
 
 enum StoreRefreshResult: Equatable {
@@ -509,7 +530,7 @@ enum StoreRefreshResult: Equatable {
 
 /// iPad sidebar sections.
 enum TabletSection: Hashable {
-    case schedule, jobs, customers, more
+    case schedule, jobs, customers
     /// Any other place from the phone menu, so the sidebar lists the same places.
     case place(MenuItem)
     /// A record kept only on this device (Fleet, Equipment, Agreements, ...).

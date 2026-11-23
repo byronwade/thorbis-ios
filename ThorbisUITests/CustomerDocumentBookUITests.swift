@@ -95,7 +95,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         thorbisStableButton(app, "customer-book-review-sign").tap()
         XCTAssertTrue(app.scrollViews["customer-estimate-presentation-00000000-0000-4000-8000-000000002218"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Approve and sign")).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForNonExistence(timeout: 5), "The review must replace the document pages")
         XCTAssertTrue(app.buttons["Not today"].exists)
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 5))
@@ -107,7 +107,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 15), .completed)
         sign.tap()
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 15), "Invoice signing did not open: \(app.debugDescription)")
-        XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForNonExistence(timeout: 5), "The review must replace the document pages")
         XCTAssertTrue(app.navigationBars["INV-2209"].exists)
     }
 
@@ -544,7 +544,9 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Water heater add-ons"].exists)
         app.collectionViews["customer-document-pages"].swipeLeft()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 10))
-        XCTAssertEqual(position.label, "3 of 4 documents")
+        // A swipe chooses the page only when the paging scroll settles, after the next page is built.
+        let third = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "3 of 4 documents"), object: position)
+        XCTAssertEqual(XCTWaiter.wait(for: [third], timeout: 10), .completed, position.label)
         app.buttons["Next document"].tap()
         XCTAssertEqual(position.label, "4 of 4 documents")
         XCTAssertFalse(app.buttons["Next document"].isEnabled)

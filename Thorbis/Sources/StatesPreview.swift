@@ -219,7 +219,7 @@ private struct SheetStatesGallery: View {
             Text("412 Birchwood Ln").font(Theme.font(30, weight: .medium)).tracking(-0.4)
             ThorbisMenu(items: StatesPreviewFixtures.statusPickerItems, title: StatesPreviewFixtures.statusPickerTitle,
                         opensOnAppear: true) {
-                WrappingPropertyChip(text: "Dispatched", showsChevron: true) { AnyView(StatusMark(tone: .dispatched)) }
+                RecordStatusBadge(word: "Dispatched", tone: .dispatched, opensMenu: true)
             }
             Spacer()
         }

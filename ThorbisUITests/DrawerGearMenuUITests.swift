@@ -16,14 +16,19 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 30))
         var row = thorbisJobFavoriteRow(app)
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        if row.label == "Remove from favorites" { row.tap(); row = thorbisJobFavoriteRow(app) }
+        // Each choice closes the sheet; the closing sheet's row is still in the tree for a moment,
+        // and reading it would report the old state. Wait it out, then open the sheet again.
+        func choose(_ current: XCUIElement) -> XCUIElement {
+            current.tap()
+            XCTAssertTrue(current.waitForNonExistence(timeout: 5), "The Share sheet closes on each choice")
+            return thorbisJobFavoriteRow(app)
+        }
+        if row.label == "Remove from favorites" { row = choose(row) }
         XCTAssertEqual(row.label, "Add to favorites")
         XCTAssertGreaterThanOrEqual(row.frame.height, 43.99)
-        row.tap()
-        row = thorbisJobFavoriteRow(app)
+        row = choose(row)
         XCTAssertEqual(row.label, "Remove from favorites")
-        row.tap()
-        row = thorbisJobFavoriteRow(app)
+        row = choose(row)
         XCTAssertEqual(row.label, "Add to favorites")
     }
 
@@ -133,7 +138,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.launch(); app.openDrawer()
         let jobs = app.buttons["drawer-jobs"]
         XCTAssertTrue(jobs.waitForExistence(timeout: 15))
-        XCTAssertTrue(jobs.isHittable)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: jobs)], timeout: 15), .completed, "The Jobs row is reachable once the drawer has slid in")
         XCTAssertFalse(app.buttons["drawer-estimates"].exists)
         XCTAssertFalse(app.buttons["drawer-invoices"].exists)
         XCTAssertFalse(app.buttons["drawer-team"].exists)
@@ -243,7 +248,7 @@ final class DrawerGearMenuUITests: XCTestCase {
             XCTAssertFalse(app.buttons["sidebar-search"].exists)
             app.swipeInFromLeftEdge()
             XCTAssertTrue(app.buttons["sidebar-search"].waitForExistence(timeout: 5), "The edge swipe shows the sidebar")
-            XCTAssertTrue(app.buttons["sidebar-jobs"].isHittable)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: app.buttons["sidebar-jobs"])], timeout: 5), .completed, "The sidebar's Jobs row is reachable once it has slid in")
             return
         }
         XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 30))

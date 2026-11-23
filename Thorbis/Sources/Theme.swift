@@ -54,8 +54,8 @@ enum Theme {
     static let minimumSize: CGFloat = 12
     /// design.thorbis.com MF-02: four money sizes, nothing smaller. Hero is what the screen is
     /// about (balance due, the amount being collected, an estimate's total); total sits in cards
-    /// and Total / Paid rows; row is a list row's amount; line is a line item. Hero is 34 on a
-    /// phone and 40 on iPad (above the staff ramp, like customer mode); all scale with Dynamic Type.
+    /// and Total / Paid rows; row is a list row's amount; line is a line item. Hero is 30 on a
+    /// phone and 34 on iPad; all scale with Dynamic Type.
     enum MoneySize {
         case hero, total, row, line
     }
@@ -143,11 +143,16 @@ enum Theme {
     // a chip or a circle (Paper `muted`); `field` is the sunk well under a text field (Paper
     // `surface`, a step below the card); `sidebar` is the drawer and the iPad sidebar. Text holds
     // 4.5:1 and marks 3:1 in both themes and in Increase Contrast (`scripts/tests/contrast.py`).
-    // Seven Paper values sat just under that floor and are one shade off Paper (1-4%, not visible):
+    // Eight Paper values sat just under that floor and are one shade off Paper (1-4%, not visible):
     // light muted 6B6B6B→686868, AI 7C5BC2→7757BA, success text 15803D→157D3C, warning text B45309→B15209, the
-    // in-progress mark D97706→D07206 and the done mark 16A34A→159E48; dark brand text 5285FF→5587FF.
+    // in-progress mark D97706→D07206 and the done mark 16A34A→159E48; dark brand text 5285FF→5587FF;
+    // and brand 2F6BFF→2F6AFF, so the white words on every blue commit and pill hold 4.5:1.
+    // Coloured words also sit on a chip's fill and a field (a ••• sheet menu's rows, a select), so
+    // five more moved a step to hold 4.5:1 there: dark brand text 5587FF→6494FF, dark destructive
+    // text F15A5A→F46A6A, dark AI 9D7FD1→A688D8, light success text 157D3C→137333 (and the
+    // invoiced word with it), light warning text B15209→A44A08.
     static let card = adaptive(light: 0xFFFFFF, dark: 0x232323)
-    /// The panel grouped rows sit on (radius 14). Same as `card`, named for what it is.
+    /// The panel grouped rows sit on (radius 20, `cardRadius`). Same as `card`, named for what it is.
     static let well = card
     /// Body: Paper `secondary-foreground`, the grey of supporting lines.
     static let subtle = adaptive(light: 0x555555, dark: 0xB4B4B4, highLight: 0x1A1A1A, highDark: 0xFFFFFF)
@@ -166,8 +171,6 @@ enum Theme {
     /// The phone drawer's floating panel (Paper 29N / 57N / 58N "Panel": #1B1B1B on the dark
     /// frame, #FFFFFF in the Light copy), a step off the canvas the place behind it is drawn on.
     static let drawerPanel = adaptive(light: 0xFFFFFF, dark: 0x1B1B1B)
-    /// A neutral step (kept for call sites); never the electric blue, which is `brand`.
-    static let accent = adaptive(light: 0xECEAE5, dark: 0x2A2A2A)
     /// Type (Paper `foreground`).
     static let foreground = adaptive(light: 0x1A1A1A, dark: 0xEDEDED, highLight: 0x000000, highDark: 0xFFFFFF)
     /// The marker: times, counts, labels (Paper `muted-foreground`). Dimmer than body.
@@ -186,23 +189,28 @@ enum Theme {
     })
     /// The hairline between rows inside one grouped card. Same colour as the rim.
     static let hairline = border
-    /// MA-08: a commit is ink (the type colour) with inverse type, a 1px rim and a short bevel.
+    /// The type colour as a ground under inverse type (a step badge, today's date, the listening
+    /// mic). The commit itself is the brand pill (`.inkCommit()`).
     static let ink = foreground
     static let onInk = adaptive(light: 0xFFFFFF, dark: 0x1A1A1A, highLight: 0xFFFFFF, highDark: 0x000000)
-    /// Paper's electric blue #2F6BFF: selected, focus, switches, the one live thing. Never a wash.
-    static let brand = Color(hex: 0x2F6BFF)
+    /// Paper's electric blue (#2F6BFF, drawn one step darker as #2F6AFF, green 6B to 6A, so white
+    /// type on it holds 4.5:1): selected, focus, switches, the one live thing. Never a wash.
+    static let brand = Color(hex: 0x2F6AFF)
     /// Brand used as text or a link (Paper `brand-text`).
-    static let brandText = adaptive(light: 0x1F55E0, dark: 0x5587FF, highLight: 0x1A44B7, highDark: 0xBDD8FF)
+    static let brandText = adaptive(light: 0x1F55E0, dark: 0x6494FF, highLight: 0x1A44B7, highDark: 0xBDD8FF)
     static let brandSurface = adaptive(light: 0xE3ECFF, dark: 0x182642)
     /// Success as a word (Paper `success-text`); `statusDone` is the mark.
-    static let success = adaptive(light: 0x157D3C, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
+    static let success = adaptive(light: 0x137333, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
     /// Warning as a word (Paper `warning-text`); `statusInProgress` is the mark.
-    static let warning = adaptive(light: 0xB15209, dark: 0xFBBF24, highLight: 0x7E3E00, highDark: 0xFFD27A)
+    static let warning = adaptive(light: 0xA44A08, dark: 0xFBBF24, highLight: 0x7E3E00, highDark: 0xFFD27A)
     static let warningSurface = adaptive(light: 0xFCEFD2, dark: 0x2A2008)
     /// Error as a word (Paper `destructive-text`); `statusAttention` is the mark.
-    static let destructive = adaptive(light: 0xC81E1E, dark: 0xF15A5A, highLight: 0xA10015, highDark: 0xFFB1AC)
+    static let destructive = adaptive(light: 0xC81E1E, dark: 0xF46A6A, highLight: 0xA10015, highDark: 0xFFB1AC)
     /// Red as a fill under white type or a white glyph (a badge, a destructive commit): 4.5:1 or better.
     static let destructiveFill = adaptive(light: 0xDC2626, dark: 0xC81E1E)
+    /// Green as a fill under white type (a photo's After pill): 4.5:1 or better. One tone in both
+    /// themes, because the pill sits on the picture, not the page.
+    static let successFill = adaptive(light: 0x157D3C, dark: 0x157D3C)
     /// The chosen segment's raised pill. In dark it sits lighter than the panel so the choice shows.
     /// Paper: ink at 16% over the card track (#434343 dark, #DADADA light), with a short shadow.
     /// Segmented tabs (Today | Week | Map): a quiet track with the chosen segment raised on it,
@@ -211,7 +219,7 @@ enum Theme {
     static let segmentTrack = adaptive(light: 0xE7E5E0, dark: 0x262626)
     static let segmentShadow = Color.black.opacity(0.12)
     /// Paper's AI accent: the AI help button, suggestions and drafts. Never for status.
-    static let ai = adaptive(light: 0x7757BA, dark: 0x9D7FD1)
+    static let ai = adaptive(light: 0x7757BA, dark: 0xA688D8)
     static let aiSurface = adaptive(light: 0xEEE8FA, dark: 0x241B33)
     static let aiBorder = adaptive(light: 0xD6C9F0, dark: 0x3A2E52)
 
@@ -240,14 +248,8 @@ enum Theme {
     static let statusAttentionSurface = destructiveSurface
     /// Paid reads as success too; the word ("Paid", "Invoiced") tells it from Done.
     static let statusInvoiced = adaptive(light: 0x159E48, dark: 0x22C55E)
-    static let statusInvoicedText = adaptive(light: 0x157D3C, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
+    static let statusInvoicedText = adaptive(light: 0x137333, dark: 0x4ADE80, highLight: 0x005E00, highDark: 0x94E4A3)
     static let statusInvoicedSurface = adaptive(light: 0xDCF5E4, dark: 0x122B1C)
-
-    /// The toast: a dark capsule in both themes. In dark it sits a step above the panel so it
-    /// still reads as raised; `toastText` and `toastMuted` hold 4.5:1 on it.
-    static let toastFill = adaptive(light: 0x1A1A1A, dark: 0x333333, highLight: 0x000000, highDark: 0x3A3A3A)
-    static let toastText = adaptive(light: 0xFAF9F6, dark: 0xEDEDED, highLight: 0xFFFFFF, highDark: 0xFFFFFF)
-    static let toastMuted = adaptive(light: 0xB4B4B4, dark: 0xB4B4B4, highLight: 0xE0E0E0, highDark: 0xD4D4D4)
 
     /// Place marks (design.thorbis.com Color): olive, forest, pumpkin, burnt, and the accent mixed
     /// down. Quiet colour on chrome: the mark is outlined at rest and filled when it is the place;
@@ -274,7 +276,6 @@ enum Theme {
                            blue: CGFloat(value & 0xFF) / 255, alpha: 1)
         })
     }
-    static let mono = monoFont(12, weight: .medium)
 }
 
 extension Color {
@@ -343,11 +344,9 @@ extension SectionHeader where Trailing == EmptyView {
     }
 }
 
-/// Lift (design.thorbis.com Depth): the commit is ink with inverse type, radius 10, a 1px rim, a
-/// short bevel (1px light from above, 1px drop) and it sinks while pressed (the drop goes, it settles
-/// 1px). Disabled fades the ink; a disabled commit should carry a reason (`PaperActionBar`).
-/// Paper v2 commit: a brand-blue pill, 50 tall, white 16 Semibold words. The danger commit is the
-/// same pill in the red fill. Disabled fades the fill; a disabled commit should carry a reason.
+/// Paper v2 commit: a brand-blue pill, 50 tall, white 16 Semibold words; pressed, the fill dims.
+/// The danger commit is the same pill in the red fill. Disabled fades the fill; a disabled commit
+/// should carry a reason (`PaperActionBar`).
 private struct InkCommit: ViewModifier {
     let enabled: Bool?
     let height: CGFloat

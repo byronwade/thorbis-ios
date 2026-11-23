@@ -649,7 +649,7 @@ private struct LegacyCustomerPhotoImage: View {
               organization == record.organizationId, record.jobId == jobID,
               let policy = session.policyVersion else { return nil }
         return MediaThumbnailScope(actorID: actor, organizationID: organization, generation: session.generation,
-                                   authorityRevision: session.authorityRevision, policyVersion: policy, jobID: jobID, authorizationEpoch: epoch)
+                                   authorityRevision: session.recheckRevision, policyVersion: policy, jobID: jobID, authorizationEpoch: epoch)
     }
 
     var body: some View {

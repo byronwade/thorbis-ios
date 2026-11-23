@@ -82,6 +82,48 @@ final class SessionControllerTests: XCTestCase {
         withExtendedLifetime(subscription) {}
     }
 
+    /// A foreground or reconnect check that finds the same authority keeps open work (a customer's
+    /// approval, an open document); a renewed authority generation still retires it.
+    func testIdenticalRevalidationKeepsAuthorityRevisionAndTicksTheCheckRevisions() async {
+        let renewed = catalog.replacingOccurrences(of: #""generation":"fixture-generation""#, with: #""generation":"fixture-generation-2""#)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, renewed), .init(200, features)
+        ])
+        await session.restore()
+        let authority = session.authorityRevision
+        let verification = session.verificationRevision
+        let recheck = session.recheckRevision
+        await session.revalidate()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertTrue(session.can("job.view", feature: "jobs"))
+        XCTAssertEqual(session.authorityRevision, authority, "An identical answer must not retire open work")
+        XCTAssertNotEqual(session.verificationRevision, verification, "Every answered check ticks the reload signal")
+        XCTAssertNotEqual(session.recheckRevision, recheck, "Per-job records re-check access on every answered check")
+        let verifiedAgain = session.verificationRevision
+        let recheckedAgain = session.recheckRevision
+        await session.revalidate()
+        XCTAssertNotEqual(session.authorityRevision, authority, "A renewed authority generation retires work captured under the old one")
+        XCTAssertNotEqual(session.verificationRevision, verifiedAgain)
+        XCTAssertNotEqual(session.recheckRevision, recheckedAgain)
+    }
+
+    /// A feature decision that changes at the same policy version and generation is still a change.
+    func testSameVersionFeatureChangeStillChangesAuthorityRevision() async {
+        let released = features.replacingOccurrences(of: #""price_book":{"enabled":false"#, with: #""price_book":{"enabled":true"#)
+        XCTAssertNotEqual(released, features)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, released)
+        ])
+        await session.restore()
+        let authority = session.authorityRevision
+        await session.revalidate()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotEqual(session.authorityRevision, authority, "A changed feature decision retires work captured under the old one")
+    }
+
     func testCustomerRecordsScopeRejectsStaleCompletionAfterSameVersionRevokeAndRegrant() async {
         let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)

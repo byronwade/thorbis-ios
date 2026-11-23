@@ -492,7 +492,7 @@ struct CustomerRecordsScope: Equatable, Sendable {
         guard session.can("customer.view", feature: "core_crm"),
               let actorID = session.user?.id, let organizationID = session.activeOrganization?.id else { return nil }
         return CustomerRecordsScope(actorID: actorID, organizationID: organizationID, customerID: customerID,
-            generation: session.generation, authorityRevision: session.authorityRevision, policyVersion: session.policyVersion,
+            generation: session.generation, authorityRevision: session.recheckRevision, policyVersion: session.policyVersion,
             access: CustomerRecordAccess(jobs: session.can("job.view", feature: "jobs"),
                 estimates: session.can("estimate.view", feature: "estimates"),
                 invoices: session.can("invoice.view", feature: "invoicing")))

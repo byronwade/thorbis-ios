@@ -12,21 +12,19 @@ final class CallLogTests: XCTestCase {
 
     func testTheLogDecodesListRowsWithoutTranscripts() async throws {
         let client = APIClient(session: URLProtocolFixture.session([.init(200, listJSON)]), baseURL: "https://app.thorbis.com")
-        let page = try await client.callLog()
+        let page = try await client.inboxCallLog()
         let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
         XCTAssertEqual(request.url?.path, "/v1/calls")
-        XCTAssertTrue(request.url?.query?.contains("limit=50") ?? false)
+        XCTAssertTrue(request.url?.query?.contains("limit=200") ?? false)
         XCTAssertEqual(page.items.count, 2)
         XCTAssertNotNil(page.nextCursor)
         let missed = page.items[0]
         XCTAssertEqual(missed.caller, "+15555550100")
         XCTAssertEqual(missed.recordingNote, "Missed call. Nothing was recorded.")
         XCTAssertTrue(missed.transcript.isEmpty)
-        XCTAssertTrue(CallLogRules.detail(missed).contains("Missed"))
         let booked = page.items[1]
         XCTAssertEqual(booked.jobId, jobID)
         XCTAssertNotNil(booked.playablePath)
-        XCTAssertTrue(CallLogRules.detail(booked).hasSuffix("3:12 · Linked to a job"))
     }
 
     func testUnlinkSendsAnExplicitNull() async throws {

@@ -138,6 +138,14 @@ final class TechnicianFlowTests: XCTestCase {
                        .collect(invoiceID: "dep", due: 10_000, currency: "USD"))
     }
 
+    func testAPaidDepositAloneIsNotThePaidStage() {
+        let deposit = invoice("dep", "paid", total: 10_000, paid: 10_000, origin: "deposit")
+        XCTAssertFalse(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [deposit]),
+                       "money taken ahead of the work is not the job's bill")
+        let bill = invoice("i", "paid", total: 48_000, paid: 48_000)
+        XCTAssertTrue(TechJobFlow.paidStage(status: "in_progress", completedAt: nil, invoices: [deposit, bill]))
+    }
+
     func testAnOwedInvoiceThisRoleCannotCollectGoesToWrapUp() {
         var can = TechJobAbilities.all
         can.collectPayment = false
@@ -163,10 +171,17 @@ final class TechnicianFlowTests: XCTestCase {
 final class LargeQuantityTests: XCTestCase {
     func testMemberTotalIsNilInsteadOfOverflowing() {
         let pricing = MemberPricing(isMember: true, discountPercent: 15, membership: nil)
-        let huge = [EstimateRevisionLineDraft(description: "Coil", quantity: "999999999999", unitPrice: "1000000.00")]
+        let huge = [priceBookLine(quantity: "999999999999", price: "1000000.00")]
         XCTAssertNil(huge.memberTotal(pricing))
-        let real = [EstimateRevisionLineDraft(description: "Coil", quantity: "2", unitPrice: "100.00")]
+        let real = [priceBookLine(quantity: "2", price: "100.00")]
         XCTAssertEqual(real.memberTotal(pricing), 17_000)
+    }
+
+    /// A price book line still at its list price, the only kind the server member prices.
+    private func priceBookLine(quantity: String, price: String) -> EstimateRevisionLineDraft {
+        EstimateRevisionLineDraft(description: "Coil", quantity: quantity, unitPrice: price,
+                                  source: .priceBookSelection(itemID: "coil", revision: 1),
+                                  priceBookOriginal: PriceBookLineOriginal(description: "Coil", unitPrice: price))
     }
 }
 
@@ -175,20 +190,34 @@ final class LargeQuantityTests: XCTestCase {
 final class MemberPriceHintTests: XCTestCase {
     private let pricing = MemberPricing(isMember: true, discountPercent: 10, membership: nil)
 
-    private func line(_ cents: Int, quantity: Int = 1, overridden: [String]? = nil) -> FieldLine {
+    /// A saved price book line. `list` is the price book price it came from; it defaults to the
+    /// saved price, which is a line still at its list price.
+    private func line(_ cents: Int, quantity: Int = 1, list: Int? = nil, overridden: [String]? = nil) -> FieldLine {
         FieldLine(id: UUID().uuidString, description: "Coil", quantity: quantity,
                   unitPrice: FieldMoney(amount: cents, currency: "USD"),
-                  source: FieldLineSource(kind: "price_book", overriddenFields: overridden))
+                  source: FieldLineSource(kind: "price_book", priceBookItemId: "coil", priceBookRevision: 1,
+                                          originalDescription: "Coil",
+                                          originalUnitPrice: FieldMoney(amount: list ?? cents, currency: "USD"),
+                                          overriddenFields: overridden))
     }
+
+    private func typedLine(_ cents: Int, quantity: Int = 1) -> FieldLine {
+        FieldLine(id: UUID().uuidString, description: "Labor", quantity: quantity,
+                  unitPrice: FieldMoney(amount: cents, currency: "USD"), source: FieldLineSource(kind: "manual"))
+    }
+
+    private let coil = PriceBookListItem(id: "11111111-1111-4111-8111-111111111111", description: "Coil",
+                                         unit: "each", kind: "material", taxClassification: "taxable",
+                                         sellPrice: .init(amount: 10_000, currency: "USD"), revision: 3, archivedAt: nil)
 
     func testListPricedLinesGetTheMemberHint() {
         XCTAssertEqual(pricing.memberTotal(of: [line(10_000, quantity: 2)]), 18_000)
     }
 
     func testLinesTheServerAlreadyMemberPricedAreNotDiscountedAgain() {
-        XCTAssertNil(pricing.memberTotal(of: [line(17_739, overridden: ["unit_price"])]),
+        XCTAssertNil(pricing.memberTotal(of: [line(17_739, list: 19_710, overridden: ["unit_price"])]),
                      "The total already is the member price: no hint")
-        XCTAssertEqual(pricing.memberTotal(of: [line(9_000, overridden: ["unit_price"]), line(10_000)]), 18_000,
+        XCTAssertEqual(pricing.memberTotal(of: [line(9_000, list: 10_000, overridden: ["unit_price"]), line(10_000)]), 18_000,
                        "Only the list-priced line is discounted")
     }
 
@@ -197,10 +226,59 @@ final class MemberPriceHintTests: XCTestCase {
     }
 
     func testEditorDoesNotDiscountAMemberPricedDraftAgain() {
-        var saved = EstimateRevisionLineDraft(description: "Coil", quantity: "1", unitPrice: "90.00")
-        saved.memberPriced = true
+        // As the editor loads a line the server saved at the member price: below its list price.
+        let saved = EstimateRevisionLineDraft(description: "Coil", quantity: "1", unitPrice: "90.00",
+                                              source: .priceBookSelection(itemID: "coil", revision: 1),
+                                              priceBookOriginal: PriceBookLineOriginal(description: "Coil", unitPrice: "100.00"))
         XCTAssertNil([saved].memberTotal(pricing))
-        let added = EstimateRevisionLineDraft(description: "Filter", quantity: "1", unitPrice: "100.00")
-        XCTAssertEqual([saved, added].memberTotal(pricing), 18_000)
+        var lines = [saved]
+        lines.addPriceBookItem(coil)
+        XCTAssertEqual(lines.memberTotal(pricing), 18_000)
+    }
+
+    // The server charges a typed line as typed, so no member price is shown for it.
+    func testATypedLineGetsNoMemberPrice() throws {
+        XCTAssertNil(pricing.memberTotal(of: [typedLine(10_000)]))
+        var lines: [EstimateRevisionLineDraft] = []
+        let id = lines.addCustomLine("Labor", to: .work)
+        let index = try XCTUnwrap(lines.firstIndex { $0.id == id })
+        lines[index].unitPrice = "100.00"
+        XCTAssertNil(lines.memberTotal(pricing))
+    }
+
+    // The server charges an edited price as edited; putting the list price back qualifies again.
+    func testAnEditedPriceGetsNoMemberPrice() {
+        XCTAssertNil(pricing.memberTotal(of: [line(8_000, list: 10_000, overridden: ["unit_price"])]))
+        XCTAssertNil(pricing.memberTotal(of: [line(12_000, list: 10_000)]),
+                     "A price that differs from the list price never qualifies, marked or not")
+        var lines: [EstimateRevisionLineDraft] = []
+        lines.addPriceBookItem(coil)
+        lines[0].unitPrice = "80.00"
+        XCTAssertNil(lines.memberTotal(pricing))
+        lines[0].unitPrice = "100.00"
+        XCTAssertEqual(lines.memberTotal(pricing), 9_000)
+    }
+
+    // Only the price book line at its list price is discounted; the rest count at their price.
+    func testAMixedEstimateDiscountsOnlyTheListPricedLine() throws {
+        let saved = [typedLine(5_000), line(8_000, list: 10_000, overridden: ["unit_price"]), line(10_000, quantity: 2)]
+        XCTAssertEqual(pricing.memberTotal(of: saved), 5_000 + 8_000 + 18_000)
+        var lines: [EstimateRevisionLineDraft] = []
+        lines.addPriceBookItem(coil)
+        lines.addPriceBookItem(coil)
+        let id = lines.addCustomLine("Labor", to: .work)
+        let index = try XCTUnwrap(lines.firstIndex { $0.id == id })
+        lines[index].unitPrice = "50.00"
+        lines.addCreditLine("Courtesy", cents: 1_000)
+        XCTAssertEqual(lines.memberTotal(pricing), 18_000 + 5_000 - 1_000)
+    }
+
+    // A price book line left at its list price is charged the member price, saved or not.
+    func testAnUnchangedPriceBookLineGetsTheMemberPrice() {
+        XCTAssertEqual(pricing.memberTotal(of: [line(10_000)]), 9_000)
+        var lines: [EstimateRevisionLineDraft] = []
+        lines.addPriceBookItem(coil)
+        XCTAssertEqual(lines.memberTotal(pricing), 9_000)
+        XCTAssertEqual(pricing.secondaryPriceText(coil), "Member \(money(9_000, currency: "USD"))")
     }
 }

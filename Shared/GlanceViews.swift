@@ -16,18 +16,16 @@ enum WidgetInk {
     static let ink = adaptive(light: 0x1A1A1A, dark: 0xEDEDED)
     static let onInk = adaptive(light: 0xFFFFFF, dark: 0x1A1A1A)
     static let body = adaptive(light: 0x555555, dark: 0xA0A0A0)
-    static let accent = adaptive(light: 0x1F55E0, dark: 0x5587FF)
-    static let success = adaptive(light: 0x157D3C, dark: 0x4ADE80)
-    static let warning = adaptive(light: 0xB15209, dark: 0xFBBF24)
+    static let accent = adaptive(light: 0x1F55E0, dark: 0x6494FF)
+    static let success = adaptive(light: 0x137333, dark: 0x4ADE80)
+    static let warning = adaptive(light: 0xA44A08, dark: 0xFBBF24)
     /// Paper `secondary-foreground` (`Theme.subtle`): the line under a title.
     static let subtle = adaptive(light: 0x555555, dark: 0xB4B4B4)
-    /// Paper `brand` (`Theme.brand`).
-    static let brand = Color(hex6: 0x2F6BFF)
+    /// Paper `brand` (`Theme.brand`, one shade off Paper's #2F6BFF so white type on it holds 4.5:1).
+    static let brand = Color(hex6: 0x2F6AFF)
     /// The ground of a brand action pill (Paper brand at 16 to 24%, `Theme.brandSurface`); its
     /// label is `accent`.
     static let brandSurface = adaptive(light: 0xE3ECFF, dark: 0x182642)
-    /// The success mark (`Theme.statusDone`); `success` is the word.
-    static let successMark = adaptive(light: 0x159E48, dark: 0x22C55E)
     /// Kept for older callers: the muted line colour.
     static let muted = body
 

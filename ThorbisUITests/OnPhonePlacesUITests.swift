@@ -16,6 +16,11 @@ final class OnPhonePlacesUITests: XCTestCase {
         let app = launch("time-clock", role: "tech")
         XCTAssertTrue(app.staticTexts["timeclock-root"].waitForExistence(timeout: 30))
         let clockOut = app.buttons["timeclock-clock-out"]
+        // The bar that holds Clock in or Clock out is drawn once the hours are bound, a moment after
+        // the title, and until then neither button is there. Wait for whichever one the state
+        // offers, then read which it is.
+        let offered = app.buttons.matching(NSPredicate(format: "identifier == %@ OR identifier == %@", "timeclock-clock-out", "timeclock-clock-in")).firstMatch
+        XCTAssertTrue(offered.waitForExistence(timeout: 30), "The bar offers Clock in or Clock out once the hours are bound")
         // A run left clocked in by an earlier pass starts from clocked in.
         if !clockOut.exists {
             let clockIn = app.buttons["timeclock-clock-in"]
@@ -46,6 +51,7 @@ final class OnPhonePlacesUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("pipeline", role: "office")
         XCTAssertTrue(app.staticTexts["Pipeline"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'pipeline-stage-'")).firstMatch.exists)
+        // The stage pills are drawn once the workspace's leads are open, after the title.
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'pipeline-stage-'")).firstMatch.waitForExistence(timeout: 30))
     }
 }

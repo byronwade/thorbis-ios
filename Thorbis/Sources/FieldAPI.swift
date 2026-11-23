@@ -771,6 +771,12 @@ struct InvoiceRecord: Codable, Identifiable, Hashable, Sendable {
     var customerAuthorization: FieldSignatureRecord? = nil
 }
 
+extension InvoiceRecord {
+    /// A deposit billed ahead of the work. The server's `origin` for it is "deposit"; the others
+    /// are manual, job_completion, progress, retainage_release and legacy_unknown.
+    var isDeposit: Bool { origin == "deposit" }
+}
+
 enum FieldEstimateLineSourceInput: Hashable, Encodable {
     case manual
     case priceBookSelection(itemID: String, revision: Int)

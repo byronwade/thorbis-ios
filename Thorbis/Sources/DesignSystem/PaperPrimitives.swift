@@ -230,14 +230,12 @@ enum PaperHeaderMetrics {
     static var titleTopUnderBar: CGFloat { titleBelowStatusBar - barHeight }
     /// The space above a title that follows the header's own 44pt circle row.
     static let titleTopUnderCircles: CGFloat = 14
-    /// The first label or card under a title block (Paper 61A / 96); a search field or tabs sit 14 under.
-    static let firstContent: CGFloat = 22
 }
 
 /// The title block every page shares (Paper 20 "Jobs", 61A "Hours, tax and terms", 67, 39H): the
 /// 34/40 Bold title (-0.025em) 20 from the screen's edge and, 2 under it, one 15/20 muted line.
 /// A long title wraps; it never truncates. The block ends at its last line: a label or a card
-/// follows `PaperHeaderMetrics.firstContent` under it, a search field or tabs 14.
+/// follows 22 under it, a search field or tabs 14.
 ///
 ///     PaperPageTitle(title: "Time and profit", subtitle: "AC repair · 2h 10m")   // full-width column
 ///     PaperPageTitle(title: "Checklist", subtitle: line, columnInset: 16)         // inside a 16pt column
@@ -569,22 +567,6 @@ struct PaperPillLabel: View {
 struct PaperChevron: View {
     var body: some View {
         PaperIcon(.chevronRight, size: 16, color: Theme.muted).accessibilityHidden(true)
-    }
-}
-
-/// A small status word on a row or a card (Paper 84 "Low", 62 "Invite pending"): 26 tall, 13
-/// Semibold, the tone's word on the tone's surface. Not tappable.
-struct PaperStatusPill: View {
-    let text: String
-    var ink: Color = Theme.muted
-    var surface: Color = Theme.fill
-
-    var body: some View {
-        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(ink)
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .frame(minHeight: PaperControl.statusHeight)
-            .background(surface, in: Capsule())
     }
 }
 

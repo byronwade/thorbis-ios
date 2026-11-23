@@ -20,4 +20,4 @@ This is an incremental presentation beta, **not full Paper/TanStack parity**. Se
 
 ## Distribution
 
-`xcodebuild -exportArchive` uploaded build 4 successfully to App Store Connect at 11:02 PM EDT on 2026-10-26; log `../outputs/testflight-upload-4.log`. App Store Connect showed build 4 as **Processing** at the last check. The external `External Testers` group contains Hayley Wade (`hayleywoods15@gmail.com`) and has no build assigned yet. The external beta review record still needs an App Review contact phone and a demo login; no invitation has been sent.
+`xcodebuild -exportArchive` uploaded build 4 successfully to App Store Connect at 11:02 PM EDT on 2026-10-26; log `../outputs/testflight-upload-4.log`. App Store Connect showed build 4 as **Processing** at the last check. The external `External Testers` group contains an external tester and has no build assigned yet. The external beta review record still needs an App Review contact phone and a demo login; no invitation has been sent.

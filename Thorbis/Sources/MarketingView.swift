@@ -135,7 +135,8 @@ struct MarketingView: View {
     @State private var showReviewSettings = false
     @State private var actionError: String?
     @State private var copied = false
-    @State private var code: CGImage?
+    /// The review link's code, kept with the link it was drawn for.
+    @State private var code: (link: String, image: CGImage)?
 
     init() {}
 
@@ -198,8 +199,13 @@ struct MarketingView: View {
             await load()
         }
         .task(id: model.reviewLink ?? "") {
-            code = model.reviewLink.flatMap { URL(string: $0) }.flatMap { PaymentLinkQRCode.image(for: $0) }
             copied = false
+            // The same link keeps the code it already has: this task also runs each time the page
+            // comes back from a pushed one.
+            guard let link = model.reviewLink, code?.link != link, let url = URL(string: link) else { return }
+            if let image = await PaymentLinkQRCode.image(for: url), !Task.isCancelled {
+                code = (link, image)
+            }
         }
         .onChange(of: showReviewSettings) { _, showing in
             // Back from Review requests: the link may have changed there.
@@ -283,8 +289,9 @@ struct MarketingView: View {
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
             .accessibilityLabel("Review link, \(link)")
-        if let code {
-            Image(uiImage: UIImage(cgImage: code))
+        // Only the code drawn for this link: a changed link never sits beside the previous link's code.
+        if let code, code.link == link {
+            Image(uiImage: UIImage(cgImage: code.image))
                 .interpolation(.none).resizable().scaledToFit()
                 .frame(maxWidth: 204)
                 .padding(18)

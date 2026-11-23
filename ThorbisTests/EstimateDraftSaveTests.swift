@@ -90,6 +90,59 @@ final class EstimateDraftSaveTests: XCTestCase {
         XCTAssertFalse(failure.offersLatest)
     }
 
+    func testADiscountOverTheRoleLimitSaysSoInsteadOfLostPermission() {
+        var refused = problem(403, detail: "not permitted: estimate.discount (out_of_scope)")
+        refused.category = "authorization"
+        let failure = EstimateSaveFailure.of(refused, wasDraft: true, sentRevision: 0)
+        XCTAssertEqual(failure, .discountOverLimit)
+        XCTAssertEqual(failure.message, "That discount is more than your role allows. Lower it, or ask your office.")
+        XCTAssertFalse(failure.offersLatest)
+    }
+
+    private func featureOff(_ detail: String?) -> Problem {
+        var off = problem(403, detail: detail)
+        off.category = "feature_unavailable"
+        return off
+    }
+
+    func testEstimatesSwitchedOffForTheWorkspaceSaySo() {
+        // The two ways the server's feature gate words it (packages/features gate.ts).
+        for detail in ["estimates is not released to this organization", "this organization is not entitled to estimates"] {
+            let failure = EstimateSaveFailure.of(featureOff(detail), wasDraft: false, sentRevision: 1)
+            XCTAssertEqual(failure, .featureOff, detail)
+            XCTAssertEqual(failure.message, "Estimates aren\u{2019}t turned on for this workspace.")
+            XCTAssertFalse(failure.offersLatest)
+        }
+    }
+
+    func testOptionsSwitchedOffSayRemovingThemSaves() {
+        // estimates.revise checks estimate_option_signing only when the save carries options.
+        for detail in ["estimate_option_signing is not released to this organization",
+                       "this organization is not entitled to estimate_option_signing"] {
+            let failure = EstimateSaveFailure.of(featureOff(detail), wasDraft: true, sentRevision: 2)
+            XCTAssertEqual(failure, .optionsOff, detail)
+            XCTAssertEqual(failure.message, "Options aren\u{2019}t turned on for this workspace. Remove them to save.")
+            XCTAssertFalse(failure.offersLatest)
+        }
+    }
+
+    func testAnotherSwitchedOffFeatureIsNotCalledEstimatesOff() {
+        for off in [featureOff("price_book is not released to this organization"), featureOff("estimates is not enabled"), featureOff(nil)] {
+            let failure = EstimateSaveFailure.of(off, wasDraft: false, sentRevision: 1)
+            XCTAssertEqual(failure, .otherFeatureOff, off.detail ?? "no detail")
+            XCTAssertEqual(failure.message, "Part of this estimate isn\u{2019}t turned on for this workspace. Ask your office.")
+            XCTAssertFalse(failure.message.contains("price_book"), "A feature key is never shown")
+        }
+    }
+
+    func testTheFeatureIsReadFromEitherWording() {
+        XCTAssertEqual(EstimateSaveFailure.unavailableFeature("estimates is not released to this organization"), "estimates")
+        XCTAssertEqual(EstimateSaveFailure.unavailableFeature("this organization is not entitled to estimate_option_signing"),
+                       "estimate_option_signing")
+        XCTAssertNil(EstimateSaveFailure.unavailableFeature("not permitted: estimate.create (no_grant)"))
+        XCTAssertNil(EstimateSaveFailure.unavailableFeature(nil))
+    }
+
     func testServerWithoutDraftEditsFailsHonestly() {
         // Today's server: a never-sent draft's revision 0 is invalid (400)…
         let neverSent = EstimateSaveFailure.of(problem(400, detail: "expectedRevisionNumber"), wasDraft: true, sentRevision: 0)

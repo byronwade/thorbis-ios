@@ -383,6 +383,14 @@ struct PriceBookAuthority: Hashable {
     let revision: UUID
 }
 
+/// What re-runs a screen's price book refresh: its catalog context changing, or any session check
+/// the server answered (foreground, reconnect). The check never joins the context, so the catalog,
+/// its adoption rules and every add guard see only the authority.
+struct PriceBookCatalogLoad: Equatable {
+    let context: PriceBookCatalogContext
+    let verification: UUID
+}
+
 struct PriceBookCatalogContext: Hashable {
     let organizationID: String?
     let sessionGeneration: UUID
@@ -456,10 +464,22 @@ final class PriceBookCatalog: ObservableObject {
     static let shared = PriceBookCatalog()
     /// 50 pages of 200 is far beyond any real price book; the cap only bounds a runaway cursor.
     static let maximumPages = 50
+    /// How long a complete load is reused before the next refresh reloads it.
+    private static var freshnessWindow: TimeInterval {
+        #if DEBUG
+        // `--paper-preview-picker-stale-window`: every refresh finds the window already passed.
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-stale-window") { return 0 }
+        #endif
+        return 60
+    }
 
     @Published private(set) var items: [PriceBookListItem] = []
     @Published private(set) var index = PriceBookSearchIndex(items: [])
     @Published private(set) var loading = false
+    /// True when the current context was adopted over the same verified scope and the complete
+    /// snapshot was kept. Its reload (when the 60 s window has passed) replaces no visible item
+    /// until it finishes, so a list keeps its page while that reload runs.
+    @Published private(set) var keptSnapshot = false
     /// True when the visible snapshot has more server pages that have not loaded.
     @Published private(set) var isPartial = false
     @Published private(set) var origin: String?
@@ -502,8 +522,10 @@ final class PriceBookCatalog: ObservableObject {
            loadingRequest == nil, !loading, lastAPIGeneration == apiGeneration {
             // The server reverified the same scope. Adopt its local revision without
             // discarding an idle complete catalog or its existing freshness window.
+            keptSnapshot = true
             context = requested
         } else if context != requested || origin != requestedOrigin {
+            keptSnapshot = false
             context = requested
             origin = requestedOrigin
             self.organizationID = organizationID
@@ -533,6 +555,7 @@ final class PriceBookCatalog: ObservableObject {
             // The generation may reflect changed credentials or revoked authority.
             // Hide even a complete snapshot until a fresh request succeeds.
             lastRefresh = nil
+            keptSnapshot = false
             hasCompleteSnapshot = false
             isPartial = false
             partialAPIGeneration = nil
@@ -544,7 +567,7 @@ final class PriceBookCatalog: ObservableObject {
             loading = false
             return
         }
-        if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 60 { return }
+        if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < Self.freshnessWindow { return }
         if let pending = loadingRequest, pending.context == requested, pending.apiGeneration == apiGeneration {
             await pending.task.value
             return
@@ -739,6 +762,7 @@ final class PriceBookCatalog: ObservableObject {
     func clear() {
         organizationID = nil
         lastRefresh = nil
+        keptSnapshot = false
         context = nil
         origin = nil
         needsScopedRefresh = false

@@ -16,7 +16,7 @@ final class CustomerMoneyRowTests: XCTestCase {
         XCTAssertEqual(row.reference, "INV-2209")
         XCTAssertEqual(row.amount, money(34_000, currency: "USD"))
         XCTAssertEqual(row.amountNote, "Last known total")
-        XCTAssertEqual(row.status.word, "Last known: Part paid")
+        XCTAssertEqual(row.status.word, "Last known: Partly paid")
         XCTAssertEqual(row.meta, "Last known paid \(money(10_000, currency: "USD"))")
     }
 

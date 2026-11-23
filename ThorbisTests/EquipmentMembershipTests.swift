@@ -12,7 +12,7 @@ final class EquipmentMembershipTests: XCTestCase {
         XCTAssertEqual(MemberPricing(isMember: false, discountPercent: 0, membership: nil).memberPrice(500), 500)
     }
 
-    func testEquipmentBodyClearsEmptyFieldsAndKeepsTheCustomerInTheRoute() async throws {
+    func testNewEquipmentLeavesEmptyFieldsOutAndKeepsTheCustomerInTheRoute() async throws {
         let reply = #"{"id":"00000000-0000-4000-8000-000000006101","organizationId":"o","customerId":"\#(customerID)","name":"Condenser","createdAt":"2026-10-27T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(201, reply)]), baseURL: "https://app.thorbis.com")
         let unit = try await client.addEquipment(customerID, EquipmentInput(name: "Condenser", brand: "  ", serialNumber: " 2419E ",
@@ -22,9 +22,45 @@ final class EquipmentMembershipTests: XCTestCase {
         XCTAssertEqual(request.url?.path, "/v1/customers/\(customerID)/equipment")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
         XCTAssertNil(body["customerId"])
-        XCTAssertTrue(body["brand"] is NSNull)
+        // The server refuses null when adding a unit, so an empty field is not sent at all.
+        XCTAssertEqual(Set(body.keys), ["name", "serialNumber", "warrantyExpiresOn"])
         XCTAssertEqual(body["serialNumber"] as? String, "2419E")
         XCTAssertEqual(body["warrantyExpiresOn"] as? String, "2029-06-12")
+    }
+
+    func testEquipmentEditSendsNullForAnEmptiedField() async throws {
+        let equipmentID = "00000000-0000-4000-8000-000000006101"
+        let reply = #"{"id":"\#(equipmentID)","organizationId":"o","customerId":"\#(customerID)","name":"Condenser","createdAt":"2026-10-27T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.updateEquipment(customerID, equipmentID: equipmentID,
+                                             EquipmentInput(name: "Condenser", brand: "  ", serialNumber: " 2419E "))
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/customers/\(customerID)/equipment/\(equipmentID)")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        XCTAssertTrue(body["brand"] is NSNull)
+        XCTAssertTrue(body["notes"] is NSNull)
+        XCTAssertEqual(body["serialNumber"] as? String, "2419E")
+    }
+
+    func testTheEquipmentBookReadsEveryPage() async throws {
+        func unit(_ id: String) -> String {
+            #"{"id":"\#(id)","organizationId":"o","customerId":"\#(customerID)","name":"Unit","createdAt":"2026-10-27T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}"#
+        }
+        let first = "00000000-0000-4000-8000-000000006101"
+        let second = "00000000-0000-4000-8000-000000006102"
+        let session = URLProtocolFixture.session([
+            .init(200, #"{"items":[\#(unit(first))],"nextCursor":"\#(first)"}"#),
+            .init(200, #"{"items":[\#(unit(second))]}"#),
+        ])
+        let client = APIClient(session: session, baseURL: "https://app.thorbis.com")
+
+        let units = try await client.allEquipment()
+
+        XCTAssertEqual(units.map(\.id), [first, second])
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.absoluteString }, [
+            "https://app.thorbis.com/v1/equipment",
+            "https://app.thorbis.com/v1/equipment?cursor=\(first)",
+        ])
     }
 
     func testDaysRoundTripWithoutTimeZoneDrift() {

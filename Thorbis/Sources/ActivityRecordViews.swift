@@ -136,7 +136,7 @@ struct JobMediaDetailView: View {
               let organization = session.activeOrganization?.id, let policy = session.policyVersion,
               let origin = api.normalizedOrigin else { return nil }
         return MediaDetailScope(actor: actor, organization: organization, job: jobID,
-                                sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                                sessionGeneration: session.generation, authorityRevision: session.recheckRevision,
                                 policy: policy, requestGeneration: api.requestGeneration,
                                 savedCopyRevision: api.savedCopyScopeRevision, origin: origin)
     }

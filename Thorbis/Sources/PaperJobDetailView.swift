@@ -83,6 +83,7 @@ struct JobDetailView: View {
     @State private var activityFilterBeforePhotos = "All"
     #if DEBUG
     @State private var previewPaymentRevalidated = false
+    @State private var previewOverviewRechecked = false
     @State private var previewOverviewPaymentHold = false
     #endif
     @State private var showSchedule = false
@@ -95,6 +96,13 @@ struct JobDetailView: View {
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
     private var estimatesLoaded: Bool { estimateRead != nil }
     private var estimatesFailed: Bool { estimateRead?.isComplete == false }
+    /// The job's estimates are still being read: Money draws their placeholder rows.
+    private var estimatesPending: Bool {
+        session.can("estimate.view", feature: "estimates") && !estimatesLoaded && documents.estimatePageError == nil
+    }
+    private var customerDoor: JobMoneyCustomerDoor {
+        JobMoneyCustomerDoor(estimateCount: jobEstimates.count, estimatesPending: estimatesPending)
+    }
     @State private var showNewEstimate = false
     @State private var committed = 0
     /// Set when the person opens a wrap-up row; the next drop in rows left plays a light tap.
@@ -264,8 +272,9 @@ struct JobDetailView: View {
 
     private var liveActivityKey: String {
         guard let job else { return "" }
+        // The answered-check tick keeps today's re-sync on foreground (the 16-hour end, a card iOS ended).
         return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "",
-                session.generation.uuidString, session.authorityRevision.uuidString,
+                session.generation.uuidString, session.authorityRevision.uuidString, session.verificationRevision.uuidString,
                 String(session.can("job.view", feature: "jobs")),
                 // The card's street and access labels arrive with the job's locations.
                 street(job) ?? "", liveActivityAccess(job) ?? ""].joined(separator: "|")
@@ -420,11 +429,12 @@ struct JobDetailView: View {
         .thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await completeHere() } }])
         .background { revisionFlowHosts }
-        .sheet(isPresented: $showDeposit) { SheetSurface {
+        // Closing the sheet reloads the invoices however it closed, so a deposit whose answer was
+        // lost shows on the job and the deposit entry hides.
+        .sheet(isPresented: $showDeposit, onDismiss: { Task { await loadInvoices() } }) { SheetSurface {
             // Paper 89: the approved estimate's total feeds the 25% and 50% chips, when it is loaded.
             JobDepositSheet(jobID: jobId, estimateTotalCents: depositEstimateTotal, subtitle: depositSubtitle) { invoice in
                 selectedInvoiceID = invoice.id
-                Task { await loadInvoices() }
             }
         } }
         .thorbisDestination(item: $documentInvoiceID) { id in
@@ -449,10 +459,30 @@ struct JobDetailView: View {
                                       ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-revalidate") {
                                 try? await Task.sleep(for: .seconds(5))
                                 guard !Task.isCancelled else { return }
+                                // A revised authority (a real change, same access) retires the opened
+                                // document; an identical answer would keep it open.
+                                PaperPreviewProtocol.reviseSampleAuthority()
                                 await session.revalidate()
+                            } else if PaperPreview.isJobDocumentsPreview,
+                                      ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-recheck") {
+                                try? await Task.sleep(for: .seconds(5))
+                                guard !Task.isCancelled else { return }
+                                // An identical answer, as a foreground or reconnect check finds: the
+                                // opened document stays open.
+                                let before = session.verificationRevision
+                                await session.revalidate()
+                                previewOverviewRechecked = session.verificationRevision != before
                             }
                             #endif
                         }
+                        #if DEBUG
+                        .overlay(alignment: .topLeading) {
+                            if previewOverviewRechecked {
+                                Text("Sample check answered").font(Theme.font(11))
+                                    .accessibilityIdentifier("preview-overview-rechecked")
+                            }
+                        }
+                        #endif
                 }
             } else {
                 PaperEmptyState(symbol: "lock", title: "Document unavailable", message: "Return to the job and refresh to open this document.", problem: true)
@@ -647,7 +677,9 @@ struct JobDetailView: View {
                 }
             }
         } }
-        .task(id: customerAuthorityToken) {
+        // Re-reads after a changed authority and after every answered session check (foreground,
+        // reconnect), so a job paid or updated elsewhere shows it; only a changed authority clears.
+        .task(id: "\(customerAuthorityToken)|\(session.verificationRevision.uuidString)") {
             #if DEBUG
             if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload"),
@@ -656,7 +688,14 @@ struct JobDetailView: View {
                 guard !Task.isCancelled else { return }
             }
             #endif
-            if customerAuthorityID != customerAuthorityToken {
+            let authorityChanged = customerAuthorityID != customerAuthorityToken
+            // Customer view reads this screen's estimates and invoices. A check that changed nothing
+            // must not re-read them under the customer (that would take away Review and sign);
+            // handing back re-reads both.
+            let customerHoldsDocuments = !authorityChanged && (estimateHandoffPresenter.active.map {
+                $0.documents === documents && $0.isCurrentJob
+            } ?? false)
+            if authorityChanged {
                 customerAuthorityID = customerAuthorityToken
                 locations = []
                 locationsContext = nil
@@ -683,7 +722,9 @@ struct JobDetailView: View {
                 loadedInvoiceModelID = nil
                 paymentRoute = nil
             }
-            if let known = job {
+            if customerHoldsDocuments {
+                await load()
+            } else if let known = job {
                 // The job is already on screen from what the phone knows, so its live copy and its
                 // paper (the next step needs it) are asked for together, not one after another.
                 async let live: Void = load()
@@ -904,12 +945,13 @@ struct JobDetailView: View {
                     if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revalidate") {
                         Button(previewPaymentRevalidated ? "Preview revalidated" : "Preview revalidate") {
                             Task {
-                                let previous = session.authorityRevision
+                                // Marks a check the server answered, whether or not the authority changed.
+                                let previous = session.verificationRevision
                                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revoke") {
                                     PaperPreviewProtocol.revokePaymentPermission()
                                 }
                                 await session.revalidate()
-                                previewPaymentRevalidated = session.authorityRevision != previous
+                                previewPaymentRevalidated = session.verificationRevision != previous
                             }
                         }
                         .accessibilityIdentifier(previewPaymentRevalidated ? "preview-payment-revalidated" : "preview-payment-revalidate")
@@ -1485,9 +1527,32 @@ struct JobDetailView: View {
         }
     }
 
-    /// The job's name: its street when the job records a site, else its title (BYR-1593).
+    /// The job's name: its street when the job records a site, else its title (BYR-1593). Never the
+    /// customer's address: the Lock Screen card, Wrap up, "You're here" and the short header have
+    /// no line for its caveat.
     private func street(_ job: JobRecord) -> String? {
         JobPropertyHistory.street(job: job, locations: customerLocations)
+    }
+
+    /// The street on the header's second line: the job's own site; without one (BYR-1593), the
+    /// customer's only address on file, said with its caveat (`streetCaveat`) on the line under it.
+    private func headerStreet(_ job: JobRecord) -> String? {
+        street(job) ?? fallbackAddress(job)?.street
+    }
+
+    /// For a job with no site of its own: the customer's only address on file, from the locations
+    /// and the account this screen already read for this customer (nothing while either is unread).
+    private func fallbackAddress(_ job: JobRecord) -> JobFallbackAddress? {
+        guard job.locationId == nil, let context = customerContext(job), locationsContext == context else { return nil }
+        let account = contactsContext == context ? customerRecord : nil
+        let address = account.flatMap { $0.id == job.customerId && $0.organizationId == job.organizationId ? $0.address : nil }
+        return JobFallbackAddress.make(locationID: job.locationId, customerID: job.customerId, organizationID: job.organizationId,
+                                       locations: customerLocations, customerAddress: address)
+    }
+
+    /// Said under the header's street when it is the customer's address, not the job's own site.
+    private func streetCaveat(_ job: JobRecord) -> String? {
+        fallbackAddress(job)?.street == nil ? nil : JobFallbackAddress.caveat
     }
 
     private func displayTitle(_ job: JobRecord) -> String { street(job) ?? job.title }
@@ -1552,6 +1617,8 @@ struct JobDetailView: View {
         // starts at the steps.
         let barTitle = showsBarTitle(job)
         let subtitle = subtitleParts(job)
+        // The customer's only address on file stands in for a job with no site; its own line says so.
+        let caveat = subtitle.isEmpty ? nil : streetCaveat(job)
         return VStack(alignment: .leading, spacing: 0) {
             // Paper F2 to F4: out on the visit, the five steps lead the screen (Overview only;
             // Paper 23, 24 and 21B draw Money and Activity without them).
@@ -1569,8 +1636,8 @@ struct JobDetailView: View {
                              referenceIdentifier: "job-number",
                              title: job.title.isEmpty ? displayTitle(job) : job.title,
                              titleIdentifier: "job-title",
-                             subtitle: subtitle.isEmpty ? nil : headerLines(subtitle.joined(separator: " \u{00B7} ")),
-                             subtitleSpoken: subtitle.joined(separator: ", "),
+                             subtitle: subtitle.isEmpty ? nil : headerLines(subtitle.joined(separator: " \u{00B7} ")) + (caveat.map { "\n\($0)" } ?? ""),
+                             subtitleSpoken: (subtitle + (caveat.map { [$0] } ?? [])).joined(separator: ", "),
                              subtitleIdentifier: "job-subtitle") {
                     statusControl(job)
                 }
@@ -1605,7 +1672,7 @@ struct JobDetailView: View {
     private func subtitleParts(_ job: JobRecord) -> [String] {
         var parts: [String] = []
         if let when = whenText(job) { parts.append(when.replacingOccurrences(of: " \u{00B7} ", with: ", ")) }
-        if let street = street(job), street != job.title { parts.append(street) }
+        if let street = headerStreet(job), street != job.title { parts.append(street) }
         return parts
     }
 
@@ -1725,7 +1792,9 @@ struct JobDetailView: View {
     }
 
     /// Paper 21's bar: Call, Text and Directions as card circles, 8 apart, after the commit.
-    /// Directions always require choosing an account location; no job site is inferred.
+    /// Directions go where the header says: for a job with no site, the customer's own address when
+    /// it is their only one on file (JobFallbackAddress); else the one location on file, or a choice
+    /// of several. No job site is inferred.
     private func reachCircles(_ job: JobRecord) -> some View {
         let phone = customerContext(job) == contactsContext ? customerPhone : nil
         let reach = JobReach(phone: phone, email: nil)
@@ -1750,7 +1819,15 @@ struct JobDetailView: View {
 
     @ViewBuilder
     private var directionsCircle: some View {
-        if customerLocations.count == 1, let only = customerLocations.first,
+        if let url = job.flatMap({ fallbackAddress($0) })?.directions {
+            // No site on the job: the customer's own address, the one the header shows.
+            Button { openURL(url) } label: { barCircle("location") }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Directions")
+                .accessibilityValue(JobFallbackAddress.caveat)
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("job-directions")
+        } else if customerLocations.count == 1, let only = customerLocations.first,
            let url = JobLocationPolicy.directions(for: only.id, in: customerLocations) {
             Button { openURL(url) } label: { barCircle("location") }
                 .buttonStyle(PressStyle())
@@ -2321,10 +2398,17 @@ struct JobDetailView: View {
         .accessibilityIdentifier("job-commit")
     }
 
-    /// Directions as the bar's circle gives them: straight to Maps with one address on file, a
-    /// choice with several, nothing with none (no job site is inferred).
+    /// Directions as the bar's circle gives them: the header's fallback address first, else straight
+    /// to Maps with one address on file or a choice with several (no job site is inferred).
     @ViewBuilder private var openInMaps: some View {
-        if customerLocations.count == 1, let only = customerLocations.first,
+        if let url = job.flatMap({ fallbackAddress($0) })?.directions {
+            // No site on the job: the customer's own address, the one the header shows.
+            Button { openURL(url) } label: { secondaryPill("Open in Maps") }
+                .buttonStyle(PressStyle())
+                .accessibilityValue(JobFallbackAddress.caveat)
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("job-open-in-maps")
+        } else if customerLocations.count == 1, let only = customerLocations.first,
            let url = JobLocationPolicy.directions(for: only.id, in: customerLocations) {
             Button { openURL(url) } label: { secondaryPill("Open in Maps") }
                 .buttonStyle(PressStyle())
@@ -2581,37 +2665,6 @@ struct JobDetailView: View {
             .accessibilityLabel("Call the office")
             .accessibilityIdentifier("job-onsite-call")
         }
-    }
-
-    /// Money's one bar, in the order the paper needs it: a draft invoice to send, then what's owed,
-    /// then the estimates to show the customer, then the first estimate to build.
-    @ViewBuilder private var moneyAction: some View {
-        if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") {
-            PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
-        } else if moneyBarCollects, let model = invoicePaymentModel {
-            PaperInvoiceCollectionFooter(model: model,
-                invoiceReference: invoices.count > 1 ? selectedInvoice.map { jobInvoiceReference($0.id) } : nil) {
-                    if let id = selectedInvoice?.id { presentPayment(for: id) }
-                }
-        } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
-            PaperActionBar(title: "Show customer", symbol: "iphone") { openCustomerView(.estimates) }
-                .accessibilityIdentifier("job-customer-view-bar")
-        } else if canBuildEstimate {
-            PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
-        }
-    }
-
-    private var moneyBarCollects: Bool {
-        guard session.can("invoice.payment.create", feature: "payments"), let invoice = selectedInvoice,
-              invoice.status != "draft", invoicePaymentModel != nil else { return false }
-        return loadedInvoiceModelID == invoice.id
-    }
-
-    /// Whether Money's bar is already Customer view, so the estimates list doesn't repeat it.
-    private var moneyBarIsCustomerView: Bool {
-        guard !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") else { return false }
-        if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") { return false }
-        return !moneyBarCollects
     }
 
     /// Paper 21 Job details: one card per section, 20 apart, in the order a tech needs them at the
@@ -2982,12 +3035,13 @@ struct JobDetailView: View {
     /// Paper's Overview (service addresses, membership, the booking call, follow-ups and the
     /// record's own dates) follow them here.
     private func atAddressScreen(_ job: JobRecord) -> some View {
+        // The job's own site only: the visits here are the customer's, not visits at their address.
         JobAtAddressView(job: job, street: street(job), visits: visits, visitsLoaded: visitsLoaded, locations: customerLocations) {
             if session.can("customer.view", feature: "core_crm") {
                 let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
                                            loaded: placesCurrent, failed: locationsFailed,
-                                           headerStreet: displayTitle(job),
+                                           headerStreet: headerStreet(job) ?? job.title, accountAddress: fallbackAddress(job)?.address,
                                            factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
             }
             CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
@@ -3151,7 +3205,7 @@ struct JobDetailView: View {
                     .contentShape(Rectangle())
                     .contextMenu {
                         ForEach((access?.facts ?? []).filter(\.isCode)) { fact in
-                            Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { UIPasteboard.general.string = fact.value }
+                            Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { AccessCodeCopy.copy(fact.value) }
                         }
                     }
                     .accessibilityElement(children: .combine)
@@ -4180,7 +4234,7 @@ struct JobDetailView: View {
             invoiceContent(job)
             // With no estimate to sit beside, Customer view keeps its own one-row card so the door
             // is on Money whatever the job holds (the Share circle opens the same view).
-            if jobEstimates.isEmpty { JobPanel { showToCustomerRow } }
+            if customerDoor == .ownCard { JobPanel { showToCustomerRow } }
         }
     }
 
@@ -4199,7 +4253,7 @@ struct JobDetailView: View {
                 JobPanelLabel(title: "Estimates", count: count > 1 ? "\(count)\(documents.canLoadMoreEstimates ? " loaded" : "")" : nil,
                               actionTitle: session.can("estimate.create", feature: "estimates") ? (preparingEstimate ? "Preparing…" : "Add estimate") : nil, actionSymbol: "plus",
                               actionIdentifier: "job-add-estimate", action: buildEstimate)
-                if !estimatesLoaded && documents.estimatePageError == nil {
+                if estimatesPending {
                     SkeletonRows(count: 2, leading: false, inset: 0)
                 } else if estimateRead?.isComplete == true && count == 0 {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates on this job",
@@ -4281,7 +4335,7 @@ struct JobDetailView: View {
             }
             // The estimates' customer door (it was More › Show estimates): after the estimates it
             // hands over, before "Add an estimate".
-            if !jobEstimates.isEmpty { showToCustomerRow }
+            if customerDoor == .inEstimatesCard { showToCustomerRow }
         }
     }
 
@@ -4289,7 +4343,7 @@ struct JobDetailView: View {
     /// locked Customer view (it was "Show estimates"); with none it opens that view's home (it was
     /// "Customer view", which stays in •••).
     private var showToCustomerRow: some View {
-        let start: CustomerViewStart = jobEstimates.isEmpty ? .home : .estimates
+        let start = customerDoor.start
         return customerDoorRow(title: "Show to customer", symbol: "iphone",
                                spokenHint: "Hands the phone to the customer",
                                identifier: "job-money-customer-view") { openCustomerView(start) }
@@ -4442,7 +4496,8 @@ struct JobDetailView: View {
             }
             if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload") {
-                Button("Preview revalidate") { Task { await session.revalidate() } }
+                // A revised authority: the cards go stale until the reload re-reads them.
+                Button("Preview revalidate") { Task { PaperPreviewProtocol.reviseSampleAuthority(); await session.revalidate() } }
                     .accessibilityIdentifier("job-overview-revalidate")
             }
             #endif
@@ -4536,8 +4591,9 @@ struct JobDetailView: View {
             } label: {
                 if let due {
                     JobInvoiceBalanceHeader(reference: reference,
-                                            kind: invoice.origin == "estimate_deposit" ? "Deposit" : nil,
-                                            status: invoice.status, amount: money(due, currency: invoice.currency))
+                                            kind: invoice.isDeposit ? "Deposit" : nil,
+                                            status: invoice.status, amount: money(due, currency: invoice.currency),
+                                            amountPaid: invoice.amountPaid)
                         .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 16)
                 } else {
                     JobDocumentRow(invoice: invoice, fresh: fresh, invoiceReference: reference).onWell()
@@ -5714,6 +5770,7 @@ struct JobDetailView: View {
         }
         busy = true
         defer { busy = false }
+        let started = Date()
         do {
             let saved = try await api.addFieldNote(jobId, body: note.trimmingCharacters(in: .whitespacesAndNewlines))
             notes.append(saved)
@@ -5722,13 +5779,33 @@ struct JobDetailView: View {
             await loadCloseout()
         } catch is CancellationError {} catch {
             if error.isConnectivityFailure {
-                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
+                // A timeout or a dropped connection may have reached the server, so the replay looks
+                // for the note from `started` on first. A send that never left the phone is just resent.
+                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0,
+                               attemptedSince: error.neverReachedServer ? nil : started)
                 note = ""
             } else {
                 self.error = error.localizedDescription
             }
         }
     }
+}
+
+/// Where Money puts its one "Show to customer" row: in the estimates card once the job has
+/// estimates, in a card of its own when it has none, and nowhere while they are still being read.
+/// Drawn during the read, the own card opened Customer view at home and then gave way to the
+/// estimates card's row as they arrived.
+enum JobMoneyCustomerDoor: Equatable {
+    case hidden
+    case inEstimatesCard
+    case ownCard
+
+    init(estimateCount: Int, estimatesPending: Bool) {
+        if estimateCount > 0 { self = .inEstimatesCard } else { self = estimatesPending ? .hidden : .ownCard }
+    }
+
+    /// Where Customer view opens from the row: the estimates to hand over, or its home.
+    var start: CustomerViewStart { self == .inEstimatesCard ? .estimates : .home }
 }
 
 /// Keep each invoice scannable while leaving its line quantities and amounts a tap away.

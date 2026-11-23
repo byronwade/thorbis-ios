@@ -33,6 +33,9 @@ struct Customer: Codable, Identifiable, Hashable {
     let name: String
     let archived: Bool?
     let createdAt: String?
+    /// The customer record's own address (`customers.address`), as the list already sends it: where
+    /// a job with no site of its own is shown (JobFallbackAddress).
+    var address: String? = nil
 }
 
 /// `customers.create` input (createCustomerInputSchema); nil fields are omitted.
@@ -109,6 +112,40 @@ struct RefusedReads {
         if self.scope != scope { self.scope = scope; keys = [] }
         keys.insert(key)
     }
+
+    /// The server's answer may have changed (a new grant, a feature switched on), so every
+    /// remembered refusal is asked again.
+    mutating func forgetAll() { keys = [] }
+}
+
+/// One idempotency key per change. Asking again for the same change after a lost answer, a
+/// timeout or a server failure sends the same key, so the server replays its first answer
+/// instead of applying the change twice. A different change, or any definite answer (a success
+/// or a refusal that is not a timeout or rate limit), starts a new key.
+struct RetryKey<Content: Hashable> {
+    private var content: Content?
+    private var value = UUID().uuidString
+
+    /// The key to send for this change.
+    mutating func key(for content: Content) -> String {
+        if self.content != content {
+            self.content = content
+            value = UUID().uuidString
+        }
+        return value
+    }
+
+    /// After the server answered: a success or a definite refusal retires the key.
+    mutating func settle(after error: Error?) {
+        if let error, !Self.isDefinite(error) { return }
+        content = nil
+        value = UUID().uuidString
+    }
+
+    static func isDefinite(_ error: Error) -> Bool {
+        guard !(error is CancellationError), let status = (error as? Problem)?.status else { return false }
+        return (400..<500).contains(status) && status != 408 && status != 429
+    }
 }
 
 struct Problem: Codable, Error, LocalizedError {
@@ -121,6 +158,10 @@ struct Problem: Codable, Error, LocalizedError {
     var category: String? = nil
     /// The fields a validation refusal names (`errors[].path`), when the server sends them.
     var errors: [ProblemIssue]? = nil
+    /// A "Network error" taken to mean the request never left the phone (no network, or the host
+    /// could not be found or connected to; `URLError.Code.neverLeavesThePhone` says where that is
+    /// not certain). Never read from a response.
+    var neverSent = false
     var errorDescription: String? { detail ?? title ?? "Request failed (\(status ?? 0))" }
 
     /// True when a validation refusal names this field, or one under it ("multipart.parts.3").
@@ -151,9 +192,6 @@ extension Problem {
     }
 }
 
-struct MeAccount: Codable { let id: String; let name: String?; let email: String? }
-struct Me: Codable { let account: MeAccount }
-struct MeEnvelope: Codable { let me: Me? }
 
 /// Thin client over the canonical Thorbis API (services/api, OpenAPI 3.1, RFC 9457 errors).
 @MainActor
@@ -198,6 +236,10 @@ final class APIClient: ObservableObject {
     /// Reads this sign-in was refused, so a job screen does not ask again on every open.
     private var refusedReads = RefusedReads()
     var onUnauthorized: (() -> Void)?
+
+    /// Called when the session's authority changes within one sign-in, so a read refused under
+    /// the old capabilities or features is asked again.
+    func forgetRefusedReads() { refusedReads.forgetAll() }
 
     func invalidateRequests() {
         ScopedRecordFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
@@ -319,24 +361,28 @@ final class APIClient: ObservableObject {
     }
 
     func jobs() async throws -> [Job] { try await allPages("/v1/jobs") }
-    func job(_ id: String) async throws -> Job { try await send("GET", "/v1/jobs/\(id)") }
-    func customers() async throws -> [Customer] { try await allPages("/v1/customers") }
-    func customer(_ id: String) async throws -> Customer { try await send("GET", "/v1/customers/\(id)") }
-    func progress(_ id: String, to: String) async throws {
-        struct Arrival: Encodable { let method: String }
-        struct Body: Encodable { let to: String; let arrival: Arrival? }
-        let _: EmptyResponse = try await send("POST", "/v1/jobs/\(id)/progress",
-                                              body: Body(to: to, arrival: to == "arrived" ? Arrival(method: "manual") : nil))
+    func job(_ id: String) async throws -> Job {
+        guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: id) }
+        return try await send("GET", "/v1/jobs/\(id)")
     }
+
+    /// One path segment taken from a record id, cursor or type. It is refused unless every
+    /// character is unreserved (letters, digits, `-._~`) and it is not `.` or `..`, so it can
+    /// never add a segment or climb one. It is returned unchanged: URLComponents encodes the
+    /// path, and encoding here as well would send `%25` for every `%`.
+    nonisolated static func pathSegment(_ raw: String, invalid title: String = "Invalid record ID") throws -> String {
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard !raw.isEmpty, raw != ".", raw != "..",
+              raw.unicodeScalars.allSatisfy({ unreserved.contains($0) })
+        else { throw Problem(title: title, status: nil, detail: raw) }
+        return raw
+    }
+    func customers() async throws -> [Customer] { try await allPages("/v1/customers") }
     func createCustomer(name: String) async throws -> Customer {
         try await createCustomer(NewCustomerRequest(name: name))
     }
     func createCustomer(_ request: NewCustomerRequest) async throws -> Customer {
         try await send("POST", "/v1/customers", body: request)
-    }
-    func createJob(customerId: String, title: String) async throws -> Job {
-        struct Body: Encodable { let customerId: String; let title: String }
-        return try await send("POST", "/v1/jobs", body: Body(customerId: customerId, title: title))
     }
 
     struct EmptyResponse: Decodable { init(from decoder: Decoder) throws {} }
@@ -587,6 +633,9 @@ final class APIClient: ObservableObject {
         origin.path = path
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
+        // URLComponents leaves "+" as it is in a query value, and the API reads a bare "+" as a
+        // space. Send it encoded, the way the web app does.
+        origin.percentEncodedQuery = origin.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
         let freshRead = requireFresh || (SavedCopies.liveOnly && method.uppercased() == "GET")
         var req = URLRequest(url: url, cachePolicy: freshRead ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
@@ -670,7 +719,8 @@ final class APIClient: ObservableObject {
             let detail = (error as? URLError).map { offline.contains($0.code) } == true
                 ? (isGET ? "No connection. Check your signal and try again." : "This needs a connection. Try again when you have signal.")
                 : error.localizedDescription
-            throw Problem(title: "Network error", status: nil, detail: detail)
+            throw Problem(title: "Network error", status: nil, detail: detail,
+                          neverSent: (error as? URLError)?.code.neverLeavesThePhone == true)
         }
         try Task.checkCancellation()
         guard generation == requestGeneration else { throw CancellationError() }

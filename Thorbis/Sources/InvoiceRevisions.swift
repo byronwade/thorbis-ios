@@ -308,7 +308,7 @@ enum InvoiceEstimateBilling {
     /// The job's one invoice: its completion invoice, else its first invoice that is not a deposit
     /// and not void. Nil when the job has none.
     static func jobInvoice(_ invoices: [InvoiceRecord], jobID: String) -> InvoiceRecord? {
-        let live = invoices.filter { $0.jobId == jobID && $0.status != "void" && $0.origin != "estimate_deposit" }
+        let live = invoices.filter { $0.jobId == jobID && $0.status != "void" && !$0.isDeposit }
         return live.first(where: { $0.origin == "job_completion" }) ?? live.first
     }
 

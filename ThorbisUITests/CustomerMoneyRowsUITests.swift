@@ -13,8 +13,8 @@ final class CustomerMoneyRowsUITests: XCTestCase {
         XCTAssertTrue(invoice.waitForExistence(timeout: 30))
         for _ in 0..<15 where !invoice.isHittable { app.swipeUp() }
         XCTAssertTrue(invoice.isHittable)
-        // Paper 48E: "INV-2209 · AC not cooling" over "Part paid $100 · sent …", the total trailing.
-        XCTAssertTrue(invoice.label.contains("Part paid $100"))
+        // Paper 48E: "INV-2209 · AC not cooling" over "Partly paid $100 · sent …", the total trailing.
+        XCTAssertTrue(invoice.label.contains("Partly paid $100"))
         XCTAssertTrue(invoice.label.contains("$340"))
         invoice.tap()
         let title = app.staticTexts["invoice-detail-title"]

@@ -1,5 +1,7 @@
 # Job detail action contracts
 
+> Snapshot, 26-28 October 2026. Not maintained. Current API gaps: [GAPS.md](../GAPS.md). Current screen coverage: [paper-screen-index.md](../design/paper-screen-index.md).
+
 Source of truth: `Thorbis-TanStack/services/api/openapi.json` for route permission/feature metadata; `services/api/src/app.ts` for response wrappers; `domains/jobs/src/{schemas,commands,queries,closeout,workflow}.ts`, `domains/media/src/{schemas,commands,queries,ports}.ts`, and `domains/scheduling/src/{schemas,booking}.ts` for actual input and output. OpenAPI marks most success responses simply `2XX Success`, so the response shapes below come from handlers/domain return values.
 
 | Endpoint | Capability / feature | Request JSON | Success response |

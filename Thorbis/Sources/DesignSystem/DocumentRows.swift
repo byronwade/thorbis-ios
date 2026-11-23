@@ -40,11 +40,11 @@ struct DocumentStatus: Equatable {
                 // Paid in full, waiting for the server to mark it paid.
                 self.init(tone: .invoiced, word: "Paid")
             } else if amountPaid > 0 {
-                self.init(tone: .inProgress, word: "Part paid")
+                self.init(tone: .inProgress, word: "Partly paid")
             } else {
                 self.init(tone: .scheduled, word: "Unpaid")
             }
-        case "partial", "partially_paid": self.init(tone: .inProgress, word: "Part paid")
+        case "partial", "partially_paid": self.init(tone: .inProgress, word: "Partly paid")
         case "paid": self.init(tone: .invoiced, word: "Paid")
         case "overdue": self.init(tone: .attention, word: "Overdue")
         case "void", "voided": self.init(tone: .cancelled, word: "Void")
@@ -65,15 +65,6 @@ extension StatusTone {
     init(estimateStatus status: String) { self = DocumentStatus(estimateStatus: status).tone }
     /// An invoice's status on the job hues (see `DocumentStatus`).
     init(invoice: InvoiceRecord) { self = DocumentStatus(invoice: invoice).tone }
-}
-
-extension WrappingPropertyChip where Leading == AnyView {
-    /// A document's status as a tinted chip led by its glyph (the job header's status chip).
-    init(document status: DocumentStatus, action: (() -> Void)? = nil) {
-        self.init(text: status.word, tint: Theme.fill, textColor: Theme.foreground, action: action) {
-            AnyView(StatusMark(tone: status.tone))
-        }
-    }
 }
 
 extension Theme {
@@ -152,31 +143,5 @@ struct DocumentListRowContent: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, subtitle, meta, status.word, amount, amountNote == status.word ? nil : amountNote]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
-    }
-}
-
-/// A label and its value on a well (a document's totals, a payment's facts). `strong` sets the
-/// value in semibold, for the figure the section is about.
-struct WellAmountRow: View {
-    let label: String
-    let value: String
-    var strong = false
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-        layout {
-            Text(label).font(Theme.font(16, weight: strong ? .medium : .regular))
-                .foregroundStyle(strong ? Theme.foreground : Theme.subtle)
-                .fixedSize(horizontal: false, vertical: true)
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 12) }
-            Text(value).font(strong ? Theme.amountFont(17) : Theme.monoFont(16))
-                .foregroundStyle(strong ? Theme.foreground : Theme.subtle)
-                .lineLimit(1).minimumScaleFactor(0.7)
-        }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 13)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 }

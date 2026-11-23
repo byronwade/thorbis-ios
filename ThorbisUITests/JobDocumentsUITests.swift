@@ -53,6 +53,8 @@ final class JobDocumentsUITests: XCTestCase {
         let app = preview(extra: ["--paper-preview-overview-payment-hold"])
         thorbisTapStableButton(app, "job-section-money")
         let collect = app.buttons["job-invoice-collect-\(invoiceA)"]
+        // The invoice's card sits below the fold in Money's lazy stack, as in the test above.
+        for _ in 0..<10 where !collect.exists { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(collect.waitForExistence(timeout: 15))
         app.scrollClearOfFoot(collect)
         XCTAssertTrue(collect.isHittable)
@@ -93,7 +95,8 @@ final class JobDocumentsUITests: XCTestCase {
         }
     }
 
-    /// An invoice opened from its card on Money retires when the person's authority is revalidated.
+    /// An invoice opened from its card on Money retires when a revalidation finds changed authority
+    /// (the sample server revises it, same access); an identical check would keep it open.
     func testMoneyInvoiceRetiresWhenAuthorityIsRevalidated() {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-overview-revalidate"])
@@ -105,6 +108,23 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+    }
+
+    /// A foreground or reconnect check that finds the same authority leaves an invoice opened from
+    /// Money open (BYR-1833).
+    func testMoneyInvoiceStaysOpenWhenAnIdenticalCheckAnswers() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-overview-recheck"])
+        thorbisTapStableButton(app, "job-section-money")
+        let row = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        revealJobItem(row, in: app)
+        row.tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
+        // The check lands five seconds after the invoice opens; the marker says the server answered it.
+        XCTAssertTrue(app.staticTexts["preview-overview-rechecked"].waitForExistence(timeout: 20), "The sample check must be answered")
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].exists, "An identical check must keep the opened invoice")
+        XCTAssertFalse(app.staticTexts["Document unavailable"].exists)
     }
 
     /// While the job's paper reloads under a new authority, the invoice card read under the old
@@ -250,6 +270,8 @@ final class JobDocumentsUITests: XCTestCase {
         invoice.tap()
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
         app.navigationBars.buttons["Back"].firstMatch.tap()
+        // The invoice's page has its own Collect payment and stays in the tree while it slides away.
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForNonExistence(timeout: 10))
         // Paper 24: the invoice's own card collects it; with two payable invoices no pill is unnamed.
         XCTAssertFalse(app.buttons["Collect payment"].exists, "Two payable invoices: every Collect payment names its invoice")
         let collect = app.buttons["job-invoice-collect-\(invoiceA)"]
@@ -578,7 +600,7 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         for identifier in ["customer-estimate-\(estimateA)", "customer-estimate-\(addonA)",
                            "customer-invoice-\(invoiceA)", "customer-invoice-\(depositA)"] {
-            XCTAssertTrue(app.buttons[identifier].exists, identifier)
+            XCTAssertTrue(app.buttons[identifier].waitForExistence(timeout: 10), identifier)
         }
         XCTAssertFalse(app.buttons["customer-invoice-\(invoiceB)"].exists)
         XCTAssertFalse(app.staticTexts["Other job estimate"].exists)
@@ -681,6 +703,9 @@ final class JobDocumentsUITests: XCTestCase {
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
         XCTAssertTrue(pay.waitForExistence(timeout: 5))
         pay.tap()
+        // The invoice is read again before the owner is asked. The banner says the decline has landed.
+        XCTAssertTrue(app.staticTexts["Your technician needs to unlock before taking payment."].waitForExistence(timeout: 10),
+                      "The declined owner authentication must be answered before the screen is read")
         XCTAssertTrue(app.navigationBars["INV-2209"].exists)
         XCTAssertFalse(app.buttons["received-payment-methods"].exists)
         XCTAssertTrue(pay.isEnabled)

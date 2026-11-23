@@ -67,7 +67,8 @@ enum MediaGridMetrics {
     static let aspect: CGFloat = 175.0 / 132.0
     /// The pills over a photo keep one tone in light and dark: they sit on the picture, not the page.
     static let scrim = Color.black.opacity(0.72)
-    static let afterPill = Color(hex: 0x0E9A3F).opacity(0.92)
+    /// The After pill: solid green under white words (`Theme.successFill`, 5.2:1).
+    static let afterPill = Theme.successFill
     static func columns(width: CGFloat, accessibility: Bool) -> Int {
         if accessibility || width < 600 { return 2 }
         return max(3, Int(width / 190))

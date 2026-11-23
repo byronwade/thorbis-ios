@@ -94,12 +94,7 @@ final class MediaTransfer {
         }
         let url = try Self.validatedStorageURL(target.url)
         _ = try Self.validatedExpiry(target.expiresAt)
-        guard !target.headers.keys.contains(where: {
-            $0.caseInsensitiveCompare("cookie") == .orderedSame ||
-            $0.caseInsensitiveCompare("cookie2") == .orderedSame
-        }) else {
-            throw Problem(title: "Unsafe upload target", status: nil, detail: "Storage target supplied a cookie header.")
-        }
+        try Self.checkStorageHeaders(target.headers)
         var upload = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         upload.httpMethod = "PUT"
         upload.httpShouldHandleCookies = false
@@ -212,12 +207,7 @@ final class MediaTransfer {
                 try verify(generation)
                 guard currentAuthority() else { throw CancellationError() }
                 let headers = part.headers ?? [:]
-                guard !headers.keys.contains(where: {
-                    $0.caseInsensitiveCompare("cookie") == .orderedSame || $0.caseInsensitiveCompare("cookie2") == .orderedSame
-                        || $0.caseInsensitiveCompare("authorization") == .orderedSame
-                }) else {
-                    throw Problem(title: "Unsafe upload target", status: nil, detail: "Storage target supplied a cookie or sign-in header.")
-                }
+                try Self.checkStorageHeaders(headers)
                 let url = try Self.validatedStorageURL(part.url)
                 // An address that ran out while earlier parts were going up: ask for fresh ones.
                 guard (try? Self.validatedExpiry(part.expiresAt)) != nil else { needsFreshAddresses = true; break }
@@ -331,6 +321,15 @@ final class MediaTransfer {
         guard generation == api.requestGeneration else { throw CancellationError() }
     }
 
+    /// Storage is a different host from the API. Its signed address carries the permission, so a
+    /// header that would hand it a cookie or a sign-in is refused on every upload path.
+    static func checkStorageHeaders(_ headers: [String: String]) throws {
+        let refused = ["cookie", "cookie2", "authorization", "proxy-authorization"]
+        guard !headers.keys.contains(where: { name in refused.contains { name.caseInsensitiveCompare($0) == .orderedSame } }) else {
+            throw Problem(title: "Unsafe upload target", status: nil, detail: "Storage target supplied a cookie or sign-in header.")
+        }
+    }
+
     fileprivate static func validatedStorageURL(_ raw: String) throws -> URL {
         guard let components = URLComponents(string: raw), components.scheme?.lowercased() == "https",
               let host = components.host, !host.isEmpty,
@@ -342,11 +341,7 @@ final class MediaTransfer {
     }
 
     fileprivate static func validatedExpiry(_ raw: String) throws -> Date {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let fractional = formatter.date(from: raw)
-        formatter.formatOptions = [.withInternetDateTime]
-        guard let expiry = fractional ?? formatter.date(from: raw), expiry > Date() else {
+        guard let expiry = JobFiltering.date(raw), expiry > Date() else {
             throw Problem(title: "Expired storage URL", status: nil, detail: "Request a fresh media URL.")
         }
         return expiry

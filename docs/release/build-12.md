@@ -17,6 +17,6 @@ The login mark and app icon use the authentic Thorbis shield from the TanStack r
 
 ## Distribution
 
-`xcodebuild -exportArchive` reported **Upload succeeded** and **Uploaded package is processing** at 3:58 AM EDT on 2026-10-27. Build 12 is not yet available for tester assignment while Apple processes it. Hayley Wade (`hayleywoods15@gmail.com`) is in the external tester group, but assignment and invitation delivery are not confirmed. External beta review also needs the App Review contact and demo-login details documented in `apple-record.md`.
+`xcodebuild -exportArchive` reported **Upload succeeded** and **Uploaded package is processing** at 3:58 AM EDT on 2026-10-27. Build 12 is not yet available for tester assignment while Apple processes it. An external tester is in the external tester group, but assignment and invitation delivery are not confirmed. External beta review also needs the App Review contact and demo-login details documented in `apple-record.md`.
 
 This is an incremental staff beta, not complete Paper/TanStack parity or authenticated device workflow validation. See `beta-coverage.md` for remaining work.

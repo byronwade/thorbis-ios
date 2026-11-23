@@ -13,6 +13,9 @@ concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  XCODE_APP: /Applications/Xcode_26.3.app
+
 jobs:
   controls-lint:
     name: Custom controls guard
@@ -24,37 +27,401 @@ jobs:
       - uses: actions/checkout@v4
       - name: Guard against stock SwiftUI controls
         run: ./scripts/lint-stock-controls.sh
+      - name: Check the UI test shards cover every class once
+        run: |
+          python3 scripts/ui_test_shards.py --shards 6 --check
+          python3 scripts/ui_test_shards.py --tablet --shards 2 --check
+      - name: Test the guard, the shard planner, the cancelled-tap rule and the hold sampler
+        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests scripts.tests.test_ci_hold_sampler
+      - name: Check every text colour against the grounds it sits on
+        run: python3 scripts/tests/contrast.py
 
+  # One job used to build, run 1,500 unit tests and then 450 UI tests in a row. The UI tests
+  # alone need more than two hours on one runner, so that job hit its time limit on every run
+  # and never reported. Now the app is built once here and the unit tests run here; the UI
+  # tests run from the same build in the `ui` shards below.
   build:
     runs-on: macos-15
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode 26.3
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '26.3'
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
-      - name: Build and test on an iPhone simulator
+      - name: Restore Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: swift-packages-${{ hashFiles('project.yml') }}
+      - name: Build the app and both test bundles
         # Signed to run locally (ad hoc, no team or profile): an unsigned test host has no keychain
         # access in the simulator (errSecMissingEntitlement, -34018), and the price book's denial
         # marker lives in the keychain.
         run: |
-          simulator_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for key,values in sorted(d["devices"].items(), reverse=True) if "iOS" in key for v in values if v["name"].startswith("iPhone")))')
+          simulator_id=$(scripts/ci-simulator-id.sh)
           xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
-            -resultBundlePath "${{ runner.temp }}/ThorbisTests.xcresult" \
-            -parallel-testing-enabled NO \
+            -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
-            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= test
-      - name: Save test evidence
+            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= build-for-testing
+      - name: Unit tests
+        run: |
+          simulator_id=$(scripts/ci-simulator-id.sh)
+          xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
+            -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
+            -resultBundlePath "${{ runner.temp }}/ThorbisUnitTests.xcresult" \
+            -parallel-testing-enabled NO \
+            -only-testing:ThorbisTests test-without-building
+      - name: Save unit test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-test-results
-          path: ${{ runner.temp }}/ThorbisTests.xcresult
+          name: ios-unit-test-results
+          path: ${{ runner.temp }}/ThorbisUnitTests.xcresult
           if-no-files-found: ignore
+          retention-days: 14
+      - name: Pack the build for the UI test shards
+        # tar keeps the bundles' symlinks, executable bits and ad hoc signatures intact.
+        run: tar -C "${{ runner.temp }}/ThorbisDerivedData/Build" -cf "${{ runner.temp }}/ThorbisTestBuild.tar" Products
+      - name: Hand the build to the UI test shards
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-build
+          path: ${{ runner.temp }}/ThorbisTestBuild.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  # Every other job here builds and tests the Debug configuration. Nothing compiled the one that
+  # ships, so a reference to a debug-only symbol passed every check and would fail only when
+  # someone archived for TestFlight (scripts/testflight.sh). This compiles the app and its widget
+  # extension as Release, for the simulator and unsigned. It runs beside `build` and tests nothing.
+  # The optimiser is off and files compile side by side, as in Debug: the question here is which
+  # code compiles, and the optimising build held a runner for 28 minutes (run 45166212892), 16 of
+  # them while UI shards waited for it. The archive is still the fully optimised build.
+  release-build:
+    name: Release build
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Restore Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: swift-packages-${{ hashFiles('project.yml') }}
+      - name: Compile the Release configuration
+        # One architecture, as the test build has: the point is that Release compiles, and the
+        # simulator's second architecture would only double the time. Nothing else is changed from
+        # Release: DEBUG is not defined and testability is off.
+        run: |
+          simulator_id=$(scripts/ci-simulator-id.sh)
+          xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -configuration Release \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "${{ runner.temp }}/ThorbisReleaseDerivedData" \
+            -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
+            CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+            SWIFT_OPTIMIZATION_LEVEL=-Onone SWIFT_COMPILATION_MODE=incremental build
+
+  ui:
+    name: UI tests (${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: build
+    runs-on: macos-15
+    # Shards are balanced by test count, not time; the first run's slowest shards passed an hour.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # The split is by class and balanced by test count: scripts/ui_test_shards.py --list.
+        # Changing the number of entries here is the only edit needed to re-split, apart from
+        # the `--check` step in controls-lint.
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
+      - name: Fetch the build
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-test-build
+          path: ${{ runner.temp }}
+      - name: Unpack the build and warm the simulator
+        # xcodebuild used to boot the simulator cold and install the app as the first test began.
+        # Three failures landed in a shard's first two minutes that way: a first launch that timed
+        # out in Xcode, and two taps the app received and never acted on (BYR-1835). So this step
+        # boots the simulator and installs the app before any test.
+        #
+        # That did not end it. On run 45065336489, with the boot and install already done here,
+        # one shard's first test failed 60 s into its launch ("Timed out while acquiring background
+        # assertion") and the first launch took 11 to 21 s on the other shards, against a usual 2
+        # to 4 s. So this step also launches the app and stops it, over and over, until a launch
+        # returns within 8 s and three minutes have passed since boot, for at most about 240 s.
+        # Three minutes is what the one all-green run (45056462837) had before its first test; a
+        # quick launch alone does not predict the next one. `simctl launch` stands in for the
+        # test's launch; it is not known to take the assertion XCTest timed out on.
+        #
+        # Two waits tried here before gave no signal. On all six shards of run 45065336489 the
+        # load average read 160 to 680 when the step ended, and the wait for half the CPU to be
+        # idle ran all 30 polls, its last sample 0%. This step waits on neither; it prints each
+        # launch and the busiest processes, so the next slow start can be read from the log.
+        run: |
+          mkdir -p "${{ runner.temp }}/ThorbisBuild"
+          tar -C "${{ runner.temp }}/ThorbisBuild" -xf "${{ runner.temp }}/ThorbisTestBuild.tar"
+          simulator_id=$(scripts/ci-simulator-id.sh)
+          xcrun simctl bootstatus "$simulator_id" -b
+          booted=$SECONDS
+          app=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 2 -name 'Thorbis.app' | head -n 1)
+          if [[ -z "$app" ]]; then
+            echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
+            exit 0
+          fi
+          if ! xcrun simctl install "$simulator_id" "$app"; then
+            echo "::warning::The app could not be installed ahead of the tests"
+            exit 0
+          fi
+          # Nothing else bounds a simctl call that hangs, so each one runs under its own alarm.
+          bounded() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+          launch_log="${{ runner.temp }}/warm-launch.log"
+          ready=no
+          begun=$SECONDS
+          attempt=0
+          while (( SECONDS - begun < 240 )); do
+            # A launch reported as failed can still leave a copy running, and launching a running
+            # copy only brings it forward. End it first, so every attempt is a real start.
+            if bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1; then sleep 3; fi
+            attempt=$((attempt + 1))
+            started=$SECONDS
+            # The design preview: sample data, read only, no network. The UI tests launch it the same way.
+            if bounded 90 xcrun simctl launch "$simulator_id" com.thorbis.field --paper-preview >"$launch_log" 2>&1; then
+              took=$((SECONDS - started))
+              echo "Warm launch $attempt took ${took}s, $((SECONDS - booted))s after boot ($(tr '\n' ' ' <"$launch_log"))"
+              # Left running for ten seconds before it is stopped.
+              sleep 10
+              bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+              if (( took <= 8 && SECONDS - booted >= 180 )); then ready=yes; break; fi
+            else
+              echo "Warm launch $attempt did not start after $((SECONDS - started))s: $(tr '\n' ' ' <"$launch_log")"
+            fi
+            ps -Ao pcpu,comm -r | head -n 6 || true
+            sleep 3
+          done
+          bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+          echo "Ready for a quick launch: $ready after $((SECONDS - begun))s (load $(sysctl -n vm.loadavg))"
+          echo "Busiest processes:"
+          ps -Ao pcpu,comm -r | head -n 6 || true
+      - name: Run this shard's UI tests
+        # Evidence for BYR-1841, not a test: scripts/ci_hold_sampler.py samples the app's stack when
+        # its main thread has been held for 5 s. Its log stream starts at the default level and
+        # steps up to info, then debug, only after 300 s with no request line. It does not change
+        # how a test passes or fails, or which test is run once more. It adds some load: a
+        # filtered log stream for the first run, and a 3 s sample in a hold already 5 s long. It
+        # does not watch a test run once more by itself. Remove it once BYR-1841 has its stack.
+        env:
+          THORBIS_HOLD_SAMPLES: ${{ runner.temp }}/hold-samples
+        run: |
+          test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
+          [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
+          only_testing=$(python3 scripts/ui_test_shards.py --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
+          simulator_id=$(scripts/ci-simulator-id.sh)
+          # The tests, and one more run of a failed test only when the simulator's own log shows
+          # it cancelled that test's tap or did not deliver its key chord: scripts/ci-run-ui-tests.sh
+          # has the rule (BYR-1835, BYR-1843).
+          # $only_testing is a list of -only-testing: arguments and must split on spaces.
+          # shellcheck disable=SC2086
+          scripts/ci-run-ui-tests.sh "$test_run" "$simulator_id" \
+            "${{ runner.temp }}/ThorbisUITests-${{ matrix.shard }}.xcresult" \
+            "${{ runner.temp }}/ui-test-reruns" \
+            $only_testing
+      - name: Save UI test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-test-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ThorbisUITests-${{ matrix.shard }}.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+      # Only a failed shard has these: the times and steps of each test, the simulator's
+      # cancelled-tap lines, the decision, and the times and result bundle of each test that was
+      # run once more.
+      - name: Save the evidence for any test run once more
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-test-reruns-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ui-test-reruns
+          if-no-files-found: ignore
+          retention-days: 14
+      # BYR-1841: the hold sampler's summary and any stack samples it took.
+      - name: Save hold samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-hold-samples-${{ matrix.shard }}
+          path: ${{ runner.temp }}/hold-samples
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Which runs need the iPad layout's UI tests (BYR-1843): see scripts/ci-ipad-scope.sh.
+  ipad-scope:
+    name: iPad scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scope compares the pull request with its base, or a push to main with the head
+          # before it, so it needs the history.
+          fetch-depth: 0
+      - name: Does this push touch the iPad layout or a test with an iPad path
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! run=$(scripts/ci-ipad-scope.sh); then
+            echo "::warning::The iPad scope could not be read, so the iPad UI tests run"
+            run=true
+          fi
+          echo "The iPad run is needed: $run"
+          echo "run=$run" >>"$GITHUB_OUTPUT"
+
+  # The iPad layout (a sidebar, a list beside a detail column) is drawn by no iPhone test. This
+  # runs the UI test classes that have an iPad path on an iPad simulator, in two shards, when
+  # `ipad-scope` says the push can have changed their answer. It is its own check and is not yet
+  # part of `UI tests` below: these tests had never run in CI before BYR-1843, and the first
+  # runs are for reading. The warm-up is the iPhone job's, unchanged apart from the device.
+  ui-ipad:
+    name: iPad UI tests (${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: [build, ipad-scope]
+    if: needs.ipad-scope.outputs.run == 'true'
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # The split: scripts/ui_test_shards.py --tablet --shards 2 --list.
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
+      - name: Fetch the build
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-test-build
+          path: ${{ runner.temp }}
+      - name: Unpack the build and warm the simulator
+        run: |
+          mkdir -p "${{ runner.temp }}/ThorbisBuild"
+          tar -C "${{ runner.temp }}/ThorbisBuild" -xf "${{ runner.temp }}/ThorbisTestBuild.tar"
+          simulator_id=$(scripts/ci-simulator-id.sh iPad)
+          xcrun simctl bootstatus "$simulator_id" -b
+          booted=$SECONDS
+          app=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 2 -name 'Thorbis.app' | head -n 1)
+          if [[ -z "$app" ]]; then
+            echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
+            exit 0
+          fi
+          if ! xcrun simctl install "$simulator_id" "$app"; then
+            echo "::warning::The app could not be installed ahead of the tests"
+            exit 0
+          fi
+          # Nothing else bounds a simctl call that hangs, so each one runs under its own alarm.
+          bounded() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+          launch_log="${{ runner.temp }}/warm-launch.log"
+          ready=no
+          begun=$SECONDS
+          attempt=0
+          while (( SECONDS - begun < 240 )); do
+            # A launch reported as failed can still leave a copy running, and launching a running
+            # copy only brings it forward. End it first, so every attempt is a real start.
+            if bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1; then sleep 3; fi
+            attempt=$((attempt + 1))
+            started=$SECONDS
+            # The design preview: sample data, read only, no network. The UI tests launch it the same way.
+            if bounded 90 xcrun simctl launch "$simulator_id" com.thorbis.field --paper-preview >"$launch_log" 2>&1; then
+              took=$((SECONDS - started))
+              echo "Warm launch $attempt took ${took}s, $((SECONDS - booted))s after boot ($(tr '\n' ' ' <"$launch_log"))"
+              # Left running for ten seconds before it is stopped.
+              sleep 10
+              bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+              if (( took <= 8 && SECONDS - booted >= 180 )); then ready=yes; break; fi
+            else
+              echo "Warm launch $attempt did not start after $((SECONDS - started))s: $(tr '\n' ' ' <"$launch_log")"
+            fi
+            ps -Ao pcpu,comm -r | head -n 6 || true
+            sleep 3
+          done
+          bounded 30 xcrun simctl terminate "$simulator_id" com.thorbis.field >/dev/null 2>&1 || true
+          echo "Ready for a quick launch: $ready after $((SECONDS - begun))s (load $(sysctl -n vm.loadavg))"
+          echo "Busiest processes:"
+          ps -Ao pcpu,comm -r | head -n 6 || true
+      - name: Run this shard's iPad UI tests
+        # As on the iPhone: stack samples of long main-thread holds for BYR-1841. It does not change
+        # how a test passes or fails, or which test is run once more; it adds the same load.
+        env:
+          THORBIS_HOLD_SAMPLES: ${{ runner.temp }}/hold-samples
+        run: |
+          test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
+          [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
+          only_testing=$(python3 scripts/ui_test_shards.py --tablet --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
+          simulator_id=$(scripts/ci-simulator-id.sh iPad)
+          # As on the iPhone: one more run of a failed test only when the simulator cancelled
+          # its tap or did not deliver its key chord (scripts/ci-run-ui-tests.sh, BYR-1835, BYR-1843).
+          # $only_testing is a list of -only-testing: arguments and must split on spaces.
+          # shellcheck disable=SC2086
+          scripts/ci-run-ui-tests.sh "$test_run" "$simulator_id" \
+            "${{ runner.temp }}/ThorbisiPadUITests-${{ matrix.shard }}.xcresult" \
+            "${{ runner.temp }}/ui-test-reruns" \
+            $only_testing
+      - name: Save iPad UI test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipad-ui-test-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ThorbisiPadUITests-${{ matrix.shard }}.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Save the evidence for any test run once more
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipad-ui-test-reruns-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ui-test-reruns
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Save hold samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipad-ui-hold-samples-${{ matrix.shard }}
+          path: ${{ runner.temp }}/hold-samples
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # One check to require instead of six: green only when every shard passed.
+  ui-tests:
+    name: UI tests
+    if: always()
+    needs: ui
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every UI test shard passed
+        run: |
+          [[ "${{ needs.ui.result }}" == "success" ]] || { echo "UI test shards: ${{ needs.ui.result }}" >&2; exit 1; }

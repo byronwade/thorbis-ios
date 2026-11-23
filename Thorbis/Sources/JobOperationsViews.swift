@@ -1982,8 +1982,8 @@ struct JobFollowUpsView: View {
                                                   reason: reason.trimmingCharacters(in: .whitespacesAndNewlines),
                                                   nextAction: nextAction.trimmingCharacters(in: .whitespacesAndNewlines))
         // No signal: keep it on the phone; it is sent in order when signal returns (FieldOutbox).
-        func keep(attempted: Bool) {
-            guard outbox.enqueue(.followUp(payload), policyVersion: session.policyVersion ?? 0, attempted: attempted) != nil else {
+        func keep(attemptedSince: Date?) {
+            guard outbox.enqueue(.followUp(payload), policyVersion: session.policyVersion ?? 0, attemptedSince: attemptedSince) != nil else {
                 error = "This follow-up couldn't be saved on this phone. Try again when you have signal."
                 return
             }
@@ -1993,7 +1993,8 @@ struct JobFollowUpsView: View {
             error = nil
             savedNote = "Saved on this phone · sends to the office when you’re back online."
         }
-        if session.isOffline { keep(attempted: false); return }
+        if session.isOffline { keep(attemptedSince: nil); return }
+        let started = Date()
         do {
             _ = try await api.requestFieldFollowUp(jobID, request: .init(kind: kind, reason: payload.reason, nextAction: payload.nextAction))
             reason = ""
@@ -2001,9 +2002,11 @@ struct JobFollowUpsView: View {
             nextAction = ""
             await load()
         } catch is CancellationError {} catch {
-            // The request may have reached the server before the signal dropped, so the resend
-            // checks the job's follow-ups first.
-            if error.isConnectivityFailure { keep(attempted: true) } else { self.error = error.localizedDescription }
+            // A timeout or a dropped connection may have reached the server, so the resend checks
+            // the job's follow-ups first; a request that never left the phone is just resent.
+            if error.isConnectivityFailure {
+                keep(attemptedSince: error.neverReachedServer ? nil : started)
+            } else { self.error = error.localizedDescription }
         }
     }
     private func resolve(_ id: String) async {

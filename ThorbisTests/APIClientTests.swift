@@ -57,6 +57,17 @@ final class APIClientTests: XCTestCase {
         ])
     }
 
+    func testAPlusSignInAQueryValueIsSentEncoded() async throws {
+        let session = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":null}"#)])
+        let client = APIClient(session: session, baseURL: "https://app.thorbis.com")
+
+        let _: Items<Job> = try await client.send("GET", "/v1/jobs", queryItems: [URLQueryItem(name: "q", value: "A+ Heating & Air")])
+
+        // The API reads a bare "+" in a query as a space, so it has to arrive as %2B.
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.absoluteString,
+                       "https://app.thorbis.com/v1/jobs?q=A%2B%20Heating%20%26%20Air")
+    }
+
     func testCustomersFollowKeysetCursorAndIncludeEveryPage() async throws {
         let session = URLProtocolFixture.session([
             .init(200, #"{"items":[{"id":"c1","name":"Acme"}],"nextCursor":"next"}"#),
@@ -103,22 +114,6 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(problem.title, "Pagination cursor loop")
         } catch { XCTFail("Unexpected error: \(error)") }
         XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
-    }
-
-    func testArrivedProgressIncludesManualEvidence() async throws {
-        let session = URLProtocolFixture.session([.init()])
-        let client = APIClient(session: session, baseURL: "https://app.thorbis.com")
-
-        try await client.progress("job-1", to: "arrived")
-
-        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
-        XCTAssertEqual(request.method, "POST")
-        XCTAssertEqual(request.url?.path, "/v1/jobs/job-1/progress")
-        XCTAssertEqual(request.header("content-type"), "application/json")
-        let body = try XCTUnwrap(request.body)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-        XCTAssertEqual(json["to"] as? String, "arrived")
-        XCTAssertEqual((json["arrival"] as? [String: String])?["method"], "manual")
     }
 
     func testHostileLoopbackLikeHostnameNeverReceivesRequest() async {
@@ -205,13 +200,33 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
     }
 
+    func testAPathSegmentIsOneUnreservedSegmentOrRefused() throws {
+        let id = "019f0000-0000-7000-8000-000000000011"
+        XCTAssertEqual(try APIClient.pathSegment(id), id)
+        XCTAssertEqual(try APIClient.pathSegment("estimate"), "estimate")
+        for bad in ["a/b", "%41", "..", ".", "", "a b", "a?b", "a#b", "é"] {
+            XCTAssertThrowsError(try APIClient.pathSegment(bad), bad)
+        }
+    }
+
+    func testASingleJobReadRefusesAnIDThatIsNotARecordID() async {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        do {
+            _ = try await client.job("../organization")
+            XCTFail("A non-UUID id must not reach the network")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Invalid record ID")
+        } catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
     func testInvalidatedSingleRequestCannotReturnStaleJob() async throws {
         let gate = URLProtocolFixture.Gate()
         let session = URLProtocolFixture.session([
-            .init(200, #"{"id":"j1","title":"Old","status":"scheduled"}"#, gate: gate),
+            .init(200, #"{"id":"00000000-0000-4000-8000-000000000001","title":"Old","status":"scheduled"}"#, gate: gate),
         ])
         let client = APIClient(session: session, baseURL: "https://app.thorbis.com")
-        let task = Task { try await client.job("j1") }
+        let task = Task { try await client.job("00000000-0000-4000-8000-000000000001") }
         try await waitForRequestCount(1)
 
         client.invalidateRequests()

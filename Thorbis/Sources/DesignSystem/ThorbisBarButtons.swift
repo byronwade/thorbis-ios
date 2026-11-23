@@ -84,6 +84,9 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
     override open func viewDidLoad() {
         super.viewDidLoad()
         interactivePopGestureRecognizer?.delegate = self
+        #if DEBUG
+        interactivePopGestureRecognizer?.addTarget(self, action: #selector(thorbisPopProbe(_:)))
+        #endif
         let pan = UIPanGestureRecognizer(target: self, action: #selector(thorbisColumnBackSwipe(_:)))
         pan.name = Self.columnBackSwipeName
         pan.maximumNumberOfTouches = 1
@@ -114,6 +117,62 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
         guard distance > 60 || (distance > 20 && speed > 500), canGoBack else { return }
         popViewController(animated: true)
     }
+
+    #if DEBUG
+    /// DEBUG-only record of how each edge swipe back ended (BYR-1842). On CI one swipe back began,
+    /// followed the finger three quarters of the way across and was cancelled as the finger lifted,
+    /// and no log held what UIKit decided on. This is a second target on UIKit's own recognizer: it
+    /// reads and writes lines to the app's log, changes nothing about the gesture, and is not in
+    /// Release.
+    @objc private func thorbisPopProbe(_ recognizer: UIGestureRecognizer) {
+        let pan = recognizer as? UIPanGestureRecognizer
+        let moved = Double(pan?.translation(in: view).x ?? .nan)
+        let speed = Double(pan?.velocity(in: view).x ?? .nan)
+        let coordinator = transitionCoordinator
+        switch recognizer.state {
+        case .began:
+            let others = thorbisRecognizersActive(besides: recognizer).joined(separator: ", ")
+            NSLog("%@", "[pop-gesture] began moved=\(moved) speed=\(speed) transition=\(coordinator != nil) alongside=[\(others)]")
+            coordinator?.notifyWhenInteractionChanges { context in
+                let percent = Double(context.percentComplete), velocity = Double(context.completionVelocity)
+                NSLog("%@", "[pop-gesture] interaction ended cancelled=\(context.isCancelled) percent=\(percent) completionVelocity=\(velocity)")
+            }
+            // When the pop has committed or rolled back, after the finishing or cancelling
+            // animation, so the overview's own lines can be read against it.
+            _ = coordinator?.animate(alongsideTransition: nil) { context in
+                NSLog("%@", "[pop-gesture] transition completed cancelled=\(context.isCancelled)")
+            }
+        case .ended, .cancelled:
+            let cancelled = coordinator.map { "\($0.isCancelled)" } ?? "no transition"
+            let percent = coordinator.map { "\(Double($0.percentComplete))" } ?? "no transition"
+            let others = thorbisRecognizersActive(besides: recognizer).joined(separator: ", ")
+            NSLog("%@", "[pop-gesture] lifted state=\(recognizer.state.rawValue) moved=\(moved) speed=\(speed) "
+                + "width=\(Double(view.bounds.width)) cancelled=\(cancelled) percent=\(percent) alongside=[\(others)]")
+        default:
+            break
+        }
+    }
+
+    /// Every other recognizer in this stack's window that is part-way through a gesture or has
+    /// just ended or been cancelled: its class, its name, the class of the view it is on (cut
+    /// short, a hosting view's full type is very long) and its state. The walk starts at the window
+    /// so a presentation container's and the window's own recognizers are listed too.
+    private func thorbisRecognizersActive(besides pop: UIGestureRecognizer) -> [String] {
+        var found: [String] = []
+        var pending: [UIView] = []
+        if let window = view.window { pending.append(window) } else { pending.append(view) }
+        while let next = pending.popLast() {
+            for other in next.gestureRecognizers ?? [] where other !== pop {
+                guard other.state == .began || other.state == .changed || other.state == .ended
+                    || other.state == .cancelled else { continue }
+                let host = String("\(type(of: next))".prefix(48))
+                found.append("\(type(of: other)) named \(other.name ?? "-") on \(host) state \(other.state.rawValue)")
+            }
+            pending.append(contentsOf: next.subviews)
+        }
+        return found
+    }
+    #endif
 
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard isColumnBackSwipe(gestureRecognizer) else { return true }

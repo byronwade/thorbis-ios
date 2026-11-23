@@ -45,7 +45,7 @@ struct JobNoticeStatus: Decodable, Identifiable, Hashable {
 extension APIClient {
     func jobNotices(_ jobID: String) async throws -> (admission: String?, items: [JobNoticeStatus]) {
         struct Page: Decodable { let admission: String?; let items: [JobNoticeStatus] }
-        let key = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
+        let key = try Self.pathSegment(jobID)
         let page: Page = try await send("GET", "/v1/jobs/\(key)/notices",
                                         queryItems: [URLQueryItem(name: "limit", value: "100")])
         return (page.admission, page.items)

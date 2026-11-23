@@ -356,7 +356,6 @@ struct TabletRoot: View {
             case .customers: id = "customers"
             case .place(let item): id = item.rawValue
             case .local(let local): id = "local-" + local.rawValue
-            case .more: id = nil
             }
             if let id {
                 store.rememberRoot(id, session: session.generation)
@@ -493,8 +492,6 @@ struct TabletRoot: View {
             if let route = item.route { PaperRouteView(route: route).tabletReadable() }
         case .local(let section):
             PaperRouteView(route: .local(section)).tabletReadable()
-        case .more:
-            MoreView().tabletReadable()
         }
     }
 
@@ -653,7 +650,6 @@ struct TabletRoot: View {
         case .schedule: "Schedule"
         case .jobs: "Jobs"
         case .customers: "Customers"
-        case .more: "More"
         case .place(let item): item.title
         case .local(let local): local.title
         }

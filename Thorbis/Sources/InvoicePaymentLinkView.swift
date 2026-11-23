@@ -14,7 +14,8 @@ struct InvoicePaymentLinkView: View {
     let onCreate: () -> Void
     let onDone: () -> Void
     @Environment(\.scenePhase) private var scenePhase
-    @State private var renderedCode: (url: URL, image: CGImage)?
+    /// Nil while the code is being drawn. `image` is nil when the link is too long to draw as a code.
+    @State private var renderedCode: (url: URL, image: CGImage?)?
     @State private var copiedURL: URL?
 
     var body: some View {
@@ -77,12 +78,16 @@ struct InvoicePaymentLinkView: View {
                 Button("Done", action: onDone).frame(minWidth: 44, minHeight: 44)
             }
         }
+        // The invoice is re-checked as soon as the page opens; the code is drawn beside it.
+        .task(id: payLink?.url) { await model.load() }
         .task(id: payLink?.url) {
             renderedCode = nil
-            if let url = payLink?.shareURL, let image = PaymentLinkQRCode.image(for: url) {
-                renderedCode = (url, image)
-            }
-            await model.load()
+            guard let url = payLink?.shareURL else { return }
+            let image = await PaymentLinkQRCode.image(for: url)
+            // A task for a newer link clears the code first, so a finished drawing for an older
+            // link, or for a page that has closed, must not put its code back.
+            guard !Task.isCancelled else { return }
+            renderedCode = (url, image)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.load() } }
@@ -111,9 +116,9 @@ struct InvoicePaymentLinkView: View {
         case .ready:
             switch PaymentLinkPresentation(link: payLink, at: date) {
             case .ready(let url, let expiration):
-                if let renderedCode, renderedCode.url == url {
+                if let image = PaymentLinkPresentation.ready(url, expiresAt: expiration).code(from: renderedCode) {
                     // Paper 39C: the code on a 240 card in the light tone, 24 radius, 4 clear of the title block.
-                    Image(uiImage: UIImage(cgImage: renderedCode.image))
+                    Image(uiImage: UIImage(cgImage: image))
                         .interpolation(.none).resizable().scaledToFit()
                         // The code's own white ground takes the card's tone.
                         .blendMode(.multiply)
@@ -125,9 +130,17 @@ struct InvoicePaymentLinkView: View {
                         .accessibilityLabel("Payment QR code")
                         .accessibilityHint("The customer scans this with their phone camera")
                         .accessibilityIdentifier("invoice-payment-qr")
-                } else {
+                } else if renderedCode?.url == url {
+                    // Drawn, and the link is too long to be a code.
                     Text("Share the secure link to open checkout on the customer’s phone.")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                } else {
+                    // Still drawing: the card holds the code's place, so nothing below it moves.
+                    RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Self.codeCard)
+                        .frame(width: 240, height: 240)
+                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityHidden(true)
                 }
                 // Paper 39C: the caption as wide as the code, then the waiting line with its spinner.
                 Text("Ask the customer to scan with their phone camera")

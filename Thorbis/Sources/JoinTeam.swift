@@ -150,14 +150,7 @@ enum InvitationWords {
         TeamInvitation.roles.first { $0.id == role }?.label ?? role.statusLabel
     }
 
-    static func date(_ raw: String?) -> Date? {
-        guard let raw else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: raw) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: raw)
-    }
+    static func date(_ raw: String?) -> Date? { JobFiltering.date(raw) }
 
     /// "In 7 days", or nil when the date is missing or already past.
     static func expires(_ raw: String?, now: Date = Date()) -> String? {

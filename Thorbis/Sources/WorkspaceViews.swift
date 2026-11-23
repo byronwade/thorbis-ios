@@ -1,196 +1,5 @@
 import SwiftUI
 
-struct WorkspaceNoticesView: View {
-    @ObservedObject var api: APIClient
-    let available: Bool
-    /// The office call log (web Inbox calls), when call_recording is on for this role.
-    var calls = false
-
-    @State private var items: [StaffNotice] = []
-    @State private var nextCursor: String?
-    @State private var readCursor: String?
-    @State private var unreadState: StaffUnreadState = .unknown
-    @State private var loading = false
-    @State private var error: String?
-
-    @State private var filter = "All"
-    /// The job a row's swipe opened.
-    @State private var openingJob: String?
-    /// One open row at a time; scrolling closes it.
-    @StateObject private var swipes = RowSwipeState()
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// Bumped by pull to refresh on the Calls tab, so the log reloads.
-    @State private var callsGeneration = 0
-
-    private var tabs: [String] {
-        guard available else { return calls ? ["Calls"] : [] }
-        return calls ? ["All", "Unread", "Calls"] : ["All", "Unread"]
-    }
-
-    private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
-
-    /// Paper 77: the 34 Bold title and "3 unread", segmented All / Unread, then every notice on
-    /// one card: the dot, a bell on brand while unread, what happened, how long ago and the job.
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                PaperPageTitle(title: "Notifications", subtitle: subtitle)
-                    .padding(.bottom, 4)
-                if !available && !calls {
-                    // Permission names what is missing (design.thorbis.com States).
-                    ListRoomEmpty(symbol: "lock", title: "Your role can\u{2019}t see notices", message: "Ask your office for access to notifications.")
-                } else if filter == "Calls" || !available {
-                    if tabs.count > 1 { PaperTabs(options: tabs, selection: $filter).padding(.top, 12) }
-                    CallLogList().id(callsGeneration)
-                } else {
-                    PaperTabs(options: tabs, selection: $filter).padding(.top, 12)
-                    if let error { ErrorBanner(message: error) { await refresh() } }
-                    if loading && items.isEmpty && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
-                    // Paper 77: one card, newest first, no day labels; each row says how long ago.
-                    if !visible.isEmpty {
-                        CommsDayCard(title: "") {
-                            ForEach(Array(visible.enumerated()), id: \.element.id) { index, notice in
-                                // The hairline starts at the words, past the dot and bell.
-                                if index > 0 { WellDivider(leading: 76) }
-                                noticeRow(notice)
-                            }
-                        }
-                        // Paper: the card sits 16 under the segments (the day card's own top is 20).
-                        .padding(.top, -4)
-                    }
-                    if nextCursor != nil {
-                        Button { Task { await loadMore() } } label: {
-                            Text(loading ? "Loading…" : "Load older notices").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        .disabled(loading)
-                        .padding(.top, 12)
-                    }
-                    if visible.isEmpty && !loading && error == nil {
-                        if filter == "Unread" && !items.isEmpty {
-                            ListRoomEmpty(glyph: .bell, title: "No unread notices", message: "All shows every notice.")
-                        } else {
-                            ListRoomEmpty(glyph: .bell, title: "No notices yet", message: "New assignments and job changes land here.")
-                        }
-                    }
-                }
-            }
-            .padding(.bottom, 24)
-        }
-        .background(Theme.canvas)
-        .foregroundStyle(Theme.foreground)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if available && filter != "Calls" && (unreadState == .present || readCursor != nil) {
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    // Paper 77: the 44pt card circle with a check.
-                    Button { Task { await markReadBatch() } } label: { CreamCircleLabel(symbol: "checkmark") }
-                        .buttonStyle(PressStyle())
-                        .accessibilityLabel(readCursor == nil ? "Mark all read" : "Continue marking read")
-                        .disabled(loading)
-                }
-            }
-        }
-        .refreshable {
-            if filter == "Calls" || !available { callsGeneration += 1 } else { await refresh() }
-        }
-        .onScrollPhaseChange { _, phase in if phase != .idle { swipes.close() } }
-        .thorbisDestination(item: $openingJob) { JobDetailView(jobId: $0).tabletReadable() }
-        .task { await refresh() }
-    }
-
-    /// Each notice opens the job it is about. Swipe right offers the same, as a shortcut.
-    /// Read/Unread is not a swipe: the notices API only marks the whole feed read
-    /// (POST /v1/staff/notices/read), not one notice.
-    private func noticeRow(_ notice: StaffNotice) -> some View {
-        let open = RowSwipeAction(id: "row-swipe-open-\(notice.id)", title: "Open job",
-                                  symbol: "arrow.up.right", tone: .ink, spokenName: "Open job") {
-            openingJob = notice.jobId
-        }
-        return RowSwipeContainer(id: notice.id, leading: [open], state: swipes) {
-            NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                CommsNoticeRow(notice: notice, relativeTime: true)
-            }
-            .buttonStyle(RowPressStyle())
-            .background(Theme.card)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel([notice.title, notice.meta, spokenTime(notice.at), notice.read ? "Read" : "Unread"]
-                .filter { !$0.isEmpty }.joined(separator: ", "))
-            .accessibilityHint("Opens the job")
-            .accessibilityIdentifier("inbox-row-\(notice.id)")
-            .rowSwipeAccessibility([open])
-        }
-    }
-
-    private var subtitle: String {
-        if filter == "Calls" || (!available && calls) { return "Calls to your business" }
-        if !available { return "Job updates" }
-        // Paper 77: "3 unread", counted only once every page is here so it is never short.
-        let unread = items.filter { !$0.read }.count
-        if nextCursor == nil && unread > 0 { return "\(unread) unread" }
-        switch unreadState {
-        case .present: return "Unread notices waiting"
-        case .unknown: return loading ? "Checking for new notices…" : "Job updates"
-        default: return "All caught up"
-        }
-    }
-
-    /// How long ago, for VoiceOver ("5 min. ago"), in whole words where the row shows "12m".
-    private func spokenTime(_ raw: String?) -> String {
-        guard let raw, let date = JobFiltering.date(raw) else { return "" }
-        return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
-    }
-
-    private func refresh() async {
-        guard available, !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await api.staffNotices()
-            items = page.items
-            nextCursor = page.nextCursor
-            unreadState = page.unreadState
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func loadMore() async {
-        guard available, !loading, let cursor = nextCursor else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await api.staffNotices(cursor: cursor)
-            guard page.nextCursor != cursor else {
-                throw Problem(title: "Notice pagination stopped", status: nil, detail: "The server repeated its cursor.")
-            }
-            items.append(contentsOf: page.items)
-            nextCursor = page.nextCursor
-            unreadState = page.unreadState
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func markReadBatch() async {
-        guard available, !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let result = try await api.markStaffNoticesRead(cursor: readCursor)
-            guard result.nextCursor != readCursor || result.nextCursor == nil else {
-                throw Problem(title: "Notice acknowledgement stopped", status: nil, detail: "The server repeated its cursor.")
-            }
-            readCursor = result.nextCursor
-            let page = try await api.staffNotices()
-            items = page.items
-            nextCursor = page.nextCursor
-            unreadState = page.unreadState
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-}
-
 struct WorkspaceRevenueView: View {
     @ObservedObject var api: APIClient
     let available: Bool
@@ -539,6 +348,11 @@ struct WorkspacePriceBookView: View {
                 }
                 .onChange(of: search) { _, _ in collapsedGroups.removeAll() }
                 .onChange(of: localScope) { _, _ in localDetail = nil }
+                // A list that failed (offline, a server error) reads again after an answered check;
+                // a loaded list stays as it is.
+                .onChange(of: session.verificationRevision) { _, _ in
+                    if hasCurrentOwner, items.isEmpty, error != nil { Task { await refresh() } }
+                }
                 .safeAreaInset(edge: .bottom) {
                     if canEdit {
                         // Paper 34: the brand pill, 50 tall, 16 from the edges.
@@ -556,13 +370,25 @@ struct WorkspacePriceBookView: View {
                         ThorbisToolbarItem(placement: .topBarTrailing) {
                             Button("Change sample access shortly") {
                                 Task { @MainActor in
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-from-detail") {
+                                        // Count from the open item, as CustomerJobDocumentBook does from an open
+                                        // Description: on a slow simulator the tap that opens it can't use up the delay.
+                                        for _ in 0..<600 where !PaperPreview.priceBookDetailOpened {
+                                            try? await Task.sleep(for: .milliseconds(100))
+                                        }
+                                    }
                                     try? await Task.sleep(for: .seconds(5))
                                     guard !Task.isCancelled else { return }
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-switch") {
                                         PaperPreviewProtocol.switchSavedWorkWorkspace()
-                                    } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
+                                    } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
+                                        // Renewed authority: a real change with the same access. An identical
+                                        // answer would leave the list as it is.
+                                        PaperPreviewProtocol.reviseSampleAuthority()
+                                    } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-recheck") {
                                         PaperPreviewProtocol.revokePriceBookView()
                                     }
+                                    // `-recheck`: the server answers exactly what the session holds.
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-refresh-failure") {
                                         PaperPreviewProtocol.failPriceBookQuery()
                                     }
@@ -786,6 +612,10 @@ private struct PriceBookLocalDetail: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        #if DEBUG
+        // `--paper-preview-pricebook-from-detail` counts the sample access change from here.
+        .task { PaperPreview.priceBookDetailOpened = true }
+        #endif
     }
 }
 
@@ -1072,22 +902,3 @@ struct PriceBookItemEditor: View {
     }
 }
 
-// Presentation-only grouping of an already-ordered notice feed.
-enum InboxNoticeDay {
-    static func header(_ raw: String?, after previous: String?, hasPrevious: Bool, calendar: Calendar, locale: Locale) -> String? {
-        let date = JobFiltering.date(raw)
-        let prior = JobFiltering.date(previous)
-        if hasPrevious {
-            if let date, let prior, calendar.isDate(date, inSameDayAs: prior) { return nil }
-            if date == nil && prior == nil { return nil }
-        }
-        guard let date else { return "Date unavailable" }
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.locale = locale
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-}

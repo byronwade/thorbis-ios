@@ -322,10 +322,14 @@ struct ScheduleView: View {
                   let people = try? await api.fieldAssignees() else { return }
             roster = Dictionary(people.map { ($0.userId, $0.displayName) }, uniquingKeysWith: { first, _ in first })
         }
-        .task(id: "addr|\(jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)|\(session.isOffline)") {
+        // The addresses jobs without a site fall back to are in the id, so one that arrives later
+        // (a saved copy of the customer list, then the server's) is shown without a relaunch.
+        .task(id: "addr|\(JobAddressBook.taskKey(jobs, customerAddresses: store.customerAddresses))|\(session.generation)|\(session.isOffline)") {
             guard tab != "Map", session.can("customer.view", feature: "core_crm") else { return }
+            // Jobs without a site of their own show the customer's only address on file (BYR-1632).
             await addresses.load(jobs, api: api, organizationID: session.activeOrganization?.id,
-                                 identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+                                 identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)",
+                                 customerAddresses: store.customerAddresses)
         }
         #if DEBUG
         .onAppear {
@@ -396,14 +400,14 @@ struct ScheduleView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ScheduleHero(label: isActive ? "Now" : "Next up",
                              job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id),
-                             place: place, street: addresses.street(first),
+                             place: place, street: addresses.street(first), streetCaveat: addresses.caveat(first),
                              etaMinutes: place != nil && driving ? eta.minutes : nil,
                              onSiteSince: onSiteSince(first),
                              locationNotice: place?.coordinates != nil && driving && !session.isOffline && eta.locationOff && !locationNoticeDismissed
                                 ? { NextStopLocationNotice.dismissedThisLaunch = true
                                     withMotion(.easeOut(duration: 0.2)) { locationNoticeDismissed = true } } : nil)
                     .task(id: "\(first.id)|\(first.status)|\(first.updatedAt ?? "")") { await loadHero(first) }
-                    .task(id: "stop|\(first.id)|\(first.customerId ?? "")|\(first.locationId ?? "")|\(session.generation)|\(session.isOffline)") {
+                    .task(id: "stop|\(first.id)|\(first.customerId ?? "")|\(first.locationId ?? "")|\(first.locationId == nil ? store.customerAddress(first.customerId) ?? "" : "")|\(session.generation)|\(session.isOffline)") {
                         await loadStop(first)
                     }
                     .task(id: "eta|\(place?.jobID ?? "")|\(place?.coordinates.map { "\($0.latitude),\($0.longitude)" } ?? "")|\(driving)") {
@@ -471,7 +475,7 @@ struct ScheduleView: View {
             if index > 0 { WellDivider(leading: week ? TodayRow.weekDividerInset : TodayRow.dividerInset) }
             // Swipe right: Call, Directions. Swipe left: the next move the server allows.
             JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
-                TodayRow(job: job, customer: customer, street: addresses.street(job),
+                TodayRow(job: job, customer: customer, street: addresses.street(job), streetCaveat: addresses.caveat(job),
                          timeStyle: leading, pendingStatus: outbox.pendingStatus(for: job.id),
                          assignee: everyone ? job.assignedToUserId.flatMap { roster[$0] } : nil,
                          week: week,
@@ -553,8 +557,9 @@ struct ScheduleView: View {
         }
     }
 
-    /// The lead job's own service location and a number to call. A failed read keeps the last
-    /// copy for this job, so the card still shows the address without signal.
+    /// The lead job's own service location (or, with none recorded, the customer's only address on
+    /// file) and a number to call. A failed read keeps the last copy for this job, so the card
+    /// still shows the address without signal.
     private func loadStop(_ job: Job) async {
         guard session.can("customer.view", feature: "core_crm"),
               let organizationID = session.activeOrganization?.id, let customerID = job.customerId else {
@@ -568,14 +573,11 @@ struct ScheduleView: View {
         if stop?.jobID != job.id { stop = cached }
         var next = cached ?? NextStopPlace(jobID: job.id, organizationID: organizationID, customerID: customerID, locationID: job.locationId)
         var reached = false
-        if let locationID = job.locationId, let places = try? await api.fieldLocations(customerID) {
+        // One read for the lead job, with or without a site; the customer's own address is the
+        // one already loaded with the customer list.
+        if let places = try? await api.fieldLocations(customerID) {
             reached = true
-            let place = places.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
-            next.address = place?.address
-            next.coordinates = place?.coordinates
-        } else if job.locationId == nil {
-            next.address = nil
-            next.coordinates = nil
+            next.setPlace(from: places, customerAddress: store.customerAddress(customerID))
         }
         if let contacts = try? await api.fieldContacts(customerID) {
             reached = true
@@ -607,6 +609,8 @@ private struct ScheduleHero: View {
     var place: NextStopPlace? = nil
     /// The job's street from the list's address book, when the stop itself is not loaded.
     var street: String? = nil
+    /// The address book's caveat for `street` (the customer's only address on file).
+    var streetCaveat: String? = nil
     var etaMinutes: Int? = nil
     /// The server's arrival time while on site: the card says "On site 42 min".
     var onSiteSince: Date? = nil
@@ -620,6 +624,8 @@ private struct ScheduleHero: View {
     private var status: String { pendingStatus ?? job.status }
     private var underWay: Bool { ScheduleLead.activeStatuses.contains(status) }
     private var where_: String? { place?.firstLine ?? street }
+    /// "From the customer's only address on file" when `where_` is not the job's own site.
+    private var caveat: String? { place?.firstLine != nil ? place?.caveat : (street != nil ? streetCaveat : nil) }
     /// "Danielle Marlowe · 412 Birchwood Ln".
     private var supporting: String { [customer, where_ ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ") }
 
@@ -673,6 +679,12 @@ private struct ScheduleHero: View {
                             .multilineTextAlignment(.leading)
                             .lineLimit(stacked ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let caveat {
+                        Text(caveat).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("next-stop-address-caveat")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -731,6 +743,7 @@ private struct ScheduleHero: View {
     private var accessibilitySummary: String {
         var parts = [labelLine, job.title, customer]
         if let where_ { parts.append(where_) }
+        if let caveat { parts.append(caveat) }
         if let trailing = trailing(now: .now) { parts.append(trailing) }
         return parts.filter { !$0.isEmpty }.joined(separator: ", ")
     }
@@ -776,6 +789,9 @@ struct TodayRow: View {
     let job: Job
     let customer: String
     var street: String? = nil
+    /// Said under `street`, and with it, when it is the customer's only address on file rather than
+    /// the job's own site (JobFallbackAddress).
+    var streetCaveat: String? = nil
     var timeStyle: ScheduleCompactRow.TimeStyle = .time
     var pendingStatus: String? = nil
     /// The assigned tech's name from the roster; nil shows no initials (one tech's own day).
@@ -865,6 +881,12 @@ struct TodayRow: View {
                             .foregroundStyle(underWay && pendingStatus == nil ? Theme.warning : Theme.muted)
                             .lineLimit(stacked ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let caveat {
+                            Text(caveat).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .lineLimit(stacked ? nil : 1)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("today-row-address-caveat")
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -880,8 +902,12 @@ struct TodayRow: View {
         .contentShape(Rectangle())
     }
 
+    /// Only beside a street the row shows.
+    private var caveat: String? { street == nil ? nil : streetCaveat }
+
     private var spoken: String {
         var parts = [street ?? job.title]
+        if let caveat { parts.append(caveat) }
         if street != nil { parts.append(job.title) }
         parts.append(customer)
         parts.append(time.spoken)
@@ -1197,6 +1223,8 @@ struct JobsView: View {
         }
         .task(id: "addr|\(jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)|\(session.isOffline)") {
             guard session.can("customer.view", feature: "core_crm") else { return }
+            // Jobs rows show no street, so a job without a site costs no read of its customer's places
+            // here; its page and Schedule show the customer's only address on file (BYR-1632).
             await addresses.load(jobs, api: api, organizationID: session.activeOrganization?.id,
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }

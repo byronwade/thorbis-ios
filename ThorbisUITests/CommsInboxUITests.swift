@@ -21,7 +21,7 @@ final class CommsInboxUITests: XCTestCase {
         let discard = app.buttons["Discard draft"]
         XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.tap()
         XCTAssertTrue(options.waitForExistence(timeout: 10), "A failed discard must not close the draft")
-        XCTAssertTrue(app.staticTexts["inbox-thread-storage-error"].exists)
+        XCTAssertTrue(app.staticTexts["inbox-thread-storage-error"].waitForExistence(timeout: 10))
     }
 
     func testStartingNewTextWhenStorageBlockedExplainsFailure() {
@@ -139,7 +139,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(row(app, "inbox-local-t-preview-text").exists)
         XCTAssertTrue(row(app, "inbox-local-t-preview-email").exists)
-        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.exists, "All carries the job notices too")
+        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 15), "All carries the job notices too")
 
         pick(app, "unread")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "A visit is ready")).firstMatch.waitForExistence(timeout: 5))
@@ -172,6 +172,8 @@ final class CommsInboxUITests: XCTestCase {
     func testDraftsChipShowsLocalDrafts() {
         continueAfterFailure = false
         let app = launch()
+        XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         pick(app, "drafts")
         let text = row(app, "inbox-local-t-preview-text")
         XCTAssertTrue(text.waitForExistence(timeout: 10), app.debugDescription)
@@ -187,6 +189,9 @@ final class CommsInboxUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 20), app.debugDescription)
         more(app, "Mark all notices read")
+        // The sample server refuses the write, and this banner is its answer. Before it lands the
+        // list is simply unchanged, so the filter and the notices are read after it.
+        XCTAssertTrue(app.staticTexts["Sample data cannot be changed. No request was sent to a server."].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.buttons["inbox-filter-all"].isSelected, "Marking read does not change the filter")
         XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 10), "The notices stay listed")
     }
@@ -199,7 +204,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 20), app.debugDescription)
         more(app, "Sent")
         XCTAssertTrue(row(app, "inbox-local-t-preview-email").waitForExistence(timeout: 10), "The queued email is in Sent")
-        XCTAssertFalse(row(app, callThread).exists)
+        XCTAssertTrue(row(app, callThread).waitForNonExistence(timeout: 10))
         XCTAssertFalse(app.buttons["inbox-filter-all"].isSelected, "No chip is lit while a \"…\" lens is on")
         let clear = app.buttons["Sent filter"]
         XCTAssertTrue(clear.exists); clear.tap()
@@ -465,7 +470,7 @@ final class CommsInboxUITests: XCTestCase {
         let archive = app.buttons["Archive"]
         XCTAssertTrue(archive.waitForExistence(timeout: 10)); archive.tap()
         XCTAssertTrue(field.waitForExistence(timeout: 10), "A failed archive must keep the conversation open")
-        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].exists)
+        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].waitForExistence(timeout: 10))
     }
 
     func testEmailArchiveFailureShowsStorageWarning() {

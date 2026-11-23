@@ -79,4 +79,15 @@ final class TeamGoalsTests: XCTestCase {
         pending.remove(.role(key: "technician", weeklySold: 3), actorID: "a", organizationID: "o")
         XCTAssertEqual(pending.edits(actorID: "a", organizationID: "o"), [.person(userId: "u1", weeklySold: 2)])
     }
+
+    func testSignOutForgetsQueuedEditsAndTheLastLoadedScreen() {
+        let defaults = UserDefaults(suiteName: "TeamGoalsTests-\(UUID().uuidString)")!
+        let pending = PendingTeamGoalEdits(defaults: defaults)
+        pending.put(.leaderboard(true), actorID: "a", organizationID: "o")
+        defaults.set(Data("{}".utf8), forKey: TeamGoalsCache.key)
+        pending.clearAll()
+        TeamGoalsCache.clear(defaults)
+        XCTAssertEqual(pending.edits(actorID: "a", organizationID: "o"), [])
+        XCTAssertNil(defaults.data(forKey: TeamGoalsCache.key))
+    }
 }

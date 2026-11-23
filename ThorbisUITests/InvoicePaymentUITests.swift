@@ -20,7 +20,8 @@ final class InvoicePaymentUITests: XCTestCase {
         app.launch()
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 30))
-        XCTAssertTrue(collect.isEnabled)
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: collect)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "Collect payment turns on once the payment history has loaded")
         collect.tap()
         XCTAssertTrue(app.buttons["received-payment-methods"].waitForExistence(timeout: 15))
     }
@@ -40,6 +41,9 @@ final class InvoicePaymentUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-overflow"]
         app.launch()
         XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30), "An invalid amount needs an explicit unavailable state")
+        // The amount can be drawn from the copy saved on this phone before the live invoice answers.
+        // The page's menu exists only once it has, and collection is decided from that same live invoice.
+        XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Get customer signature"].exists)
         XCTAssertFalse(app.buttons["Collect payment"].exists)
     }
@@ -50,6 +54,9 @@ final class InvoicePaymentUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-overflow"]
         app.launch()
         XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
+        // The amount can be drawn from the copy saved on this phone before the live invoice answers.
+        // The page's menu exists only once it has, and Issue is decided from that same live invoice.
+        XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 10))
         let issue = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Issue")).firstMatch
         if issue.exists { XCTAssertFalse(issue.isEnabled, "An unverified amount must not be issued") }
     }
@@ -123,7 +130,8 @@ final class InvoicePaymentUITests: XCTestCase {
         menu.tap()
         let bank = app.buttons["Bank transfer (ACH) received"]
         XCTAssertTrue(bank.waitForExistence(timeout: 10))
-        XCTAssertTrue(bank.isHittable)
+        let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: bank)
+        XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 10), .completed, "Bank transfer can be reached once the menu is up")
         bank.tap()
         let record = button("Record $340.00 bank transfer received", in: app)
         XCTAssertTrue(record.waitForExistence(timeout: 10))
@@ -144,8 +152,10 @@ final class InvoicePaymentUITests: XCTestCase {
     func testReadyLinkShowsScannableCheckoutAndDoneReturnsToInvoice() {
         continueAfterFailure = false
         let app = linkPreview()
+        // The page first, then its code: a failure says which of the two was late.
+        XCTAssertTrue(app.buttons["check-invoice-payment-status"].waitForExistence(timeout: 30))
         let code = app.images["invoice-payment-qr"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertTrue(code.waitForExistence(timeout: Self.firstCodeTimeout))
         XCTAssertTrue(app.buttons["share-invoice-payment-link"].exists)
         app.buttons["Copy link"].tap()
         XCTAssertTrue(app.buttons["Link copied"].waitForExistence(timeout: 3))
@@ -169,8 +179,10 @@ final class InvoicePaymentUITests: XCTestCase {
     func testLargestTextAndDarkModeKeepSharingReachable() {
         continueAfterFailure = false
         let app = linkPreview(accessibleText: true)
+        // The page first, then its code: a failure says which of the two was late.
+        XCTAssertTrue(app.buttons["check-invoice-payment-status"].waitForExistence(timeout: 30))
         let code = app.images["invoice-payment-qr"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertTrue(code.waitForExistence(timeout: Self.firstCodeTimeout))
         capture(app, "Scan to pay with accessible text")
         let share = app.buttons["share-invoice-payment-link"]
         let content = app.scrollViews.containing(.image, identifier: "invoice-payment-qr").firstMatch
@@ -186,9 +198,17 @@ final class InvoicePaymentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Payment link expired"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.images["invoice-payment-qr"].exists)
         XCTAssertFalse(app.buttons["share-invoice-payment-link"].exists)
-        XCTAssertTrue(app.buttons["Create new payment link"].isEnabled)
+        // The page re-checks the invoice after the link expires; Create waits for that check (CI 41ac2c7, shard 6).
+        let create = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Create new payment link"])
+        XCTAssertEqual(XCTWaiter.wait(for: [create], timeout: 10), .completed, "An expired link offers a working Create new payment link")
         capture(app, "Expired payment link recovery")
     }
+
+    /// The first code in a fresh process is slow to draw on a busy machine. On one CI machine the
+    /// app's main thread did not answer for 18 seconds while it drew there, and the code appeared
+    /// about 24 seconds into a 15 second wait (BYR-1839). The app now draws on a detached task,
+    /// so the page answers meanwhile. How long the drawing takes there is not yet measured.
+    private static let firstCodeTimeout: TimeInterval = 30
 
     private func linkPreview(expired: Bool = false, accessibleText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()

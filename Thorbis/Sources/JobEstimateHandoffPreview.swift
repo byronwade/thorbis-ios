@@ -176,13 +176,13 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; value.append(buffer, count: count) }
         return value
     }
-    /// `--paper-preview-handoff-slow-after-first-approval`: once one approval is recorded, the next read waits 8 s
-    /// (time to leave the screen mid-run).
+    /// `--paper-preview-handoff-slow-after-first-approval`: once one approval is recorded, the next read waits 20 s
+    /// (time to leave the screen mid-run, even on a slow simulator).
     func response(_ request: URLRequest) -> Response? {
         guard var value = answer(request) else { return nil }
         lock.withLock {
             if flags.contains("--paper-preview-handoff-slow-after-first-approval"), !slowed, !approved.isEmpty,
-               request.httpMethod ?? "GET" == "GET", request.url?.path == "/v1/jobs/\(PaperPreview.jobID)" { slowed = true; value.delay = 8 }
+               request.httpMethod ?? "GET" == "GET", request.url?.path == "/v1/jobs/\(PaperPreview.jobID)" { slowed = true; value.delay = 20 }
             // `--paper-preview-handoff-slow-first-approval-post`: the first approval is recorded, its answer waits 8 s.
             if flags.contains("--paper-preview-handoff-slow-first-approval-post"), !slowedPost, request.httpMethod == "POST",
                request.url?.path.hasSuffix("/approve") == true { slowedPost = true; value.delay = 8 }
@@ -369,11 +369,13 @@ struct JobEstimateHandoffPreviewControls: View {
     var body: some View {
         DisclosureGroup("Sample testing controls") {
             Button("Change sample workspace shortly") { delayed { JobEstimateHandoffPreview.shared.changeWorkspace() } }
+            // A foreground or reconnect check that finds the same authority: nothing changes.
+            Button("Check sample session shortly") { delayed {} }
             Button("End sample session shortly") { delayed(restore: true) { JobEstimateHandoffPreview.shared.endSession() } }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-retire-api") {
                 Button("Retire sample API shortly") {
                     Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(20))
+                        await Self.waitBeforeChange(seconds: 20)
                         api.invalidateRequests()
                     }
                 }
@@ -385,15 +387,31 @@ struct JobEstimateHandoffPreviewControls: View {
             Button("Allow sample unlock") { JobEstimateHandoffPreview.shared.allowUnlock() }
             Button("Refresh sample receipt") { proof = JobEstimateHandoffPreview.shared.receipt }
             Text("Sample approval receipt").accessibilityIdentifier("handoff-sample-receipt").accessibilityValue(proof)
+            Text("Sample session checks").accessibilityIdentifier("handoff-sample-checked").accessibilityValue(session.verificationRevision.uuidString)
             Text("Sample live session").accessibilityIdentifier("handoff-sample-session").accessibilityValue("\(session.generation.uuidString) | \(session.activeOrganization?.id ?? "none") | \(session.phase)")
         }.font(Theme.font(13)).padding(.horizontal, Theme.gutter)
     }
     private func delayed(restore: Bool = false, _ change: @escaping @MainActor () -> Void) {
         Task { @MainActor in
             let delay: Int64 = ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-slow-invalidation") ? 20 : 4
-            try? await Task.sleep(for: .seconds(delay)); change()
+            await Self.waitBeforeChange(seconds: delay); change()
             if restore { await session.restore() } else { await session.revalidate() }
         }
+    }
+    /// How long a "shortly" control waits before it changes the session or the API. With
+    /// `--paper-preview-handoff-long-description` the tests check that an open Description closes,
+    /// so it counts from the open Description (`PaperPreview.descriptionOpened`), as
+    /// CustomerJobDocumentBook does: on a slow simulator the taps to reach it cannot use up the delay.
+    @MainActor private static func waitBeforeChange(seconds: Int64) async {
+        guard ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-long-description") else {
+            try? await Task.sleep(for: .seconds(seconds))
+            return
+        }
+        while !PaperPreview.descriptionOpened {
+            try? await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled { return }
+        }
+        try? await Task.sleep(for: .seconds(10))
     }
 }
 #endif

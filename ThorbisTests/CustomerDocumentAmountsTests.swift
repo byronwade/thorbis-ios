@@ -82,7 +82,7 @@ final class CustomerDocumentAmountsTests: XCTestCase {
         XCTAssertEqual(summary("paid", true, paid, false), .init(title: "No balance due", amount: 0))
         XCTAssertEqual(summary("paid", false, paid, true), .init(title: "Last known balance", amount: 0))
         XCTAssertEqual(summary("void", true, unpaid, false), .init(title: "Voided invoice", amount: nil))
-        XCTAssertEqual(summary("void", false, unpaid, false), .init(title: "Last known status: Voided", amount: nil))
+        XCTAssertEqual(summary("void", false, unpaid, false), .init(title: "Last known status: Void", amount: nil))
     }
 
     func testUnverifiableMoneyIsNeverPresentedAsZeroOrACollectableBalance() {

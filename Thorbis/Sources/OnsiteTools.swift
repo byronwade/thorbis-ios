@@ -40,19 +40,24 @@ enum JobNotePoster {
         guard !trimmed.isEmpty else { return .failed("There’s nothing to add yet.") }
         guard trimmed.utf16.count <= maxLength else { return .failed("This note is too long for one job note.") }
         guard canPost(session) else { return .failed("Your role can’t add notes to this job.") }
-        func queue() -> JobNotePostResult {
-            outbox.enqueue(.note(.init(jobId: jobID, body: trimmed)), policyVersion: session.policyVersion ?? 0) == nil
+        func queue(attemptedSince: Date?) -> JobNotePostResult {
+            outbox.enqueue(.note(.init(jobId: jobID, body: trimmed)), policyVersion: session.policyVersion ?? 0,
+                           attemptedSince: attemptedSince) == nil
                 ? .failed("This phone couldn’t keep the note. Try again.")
                 : .queued
         }
-        if session.isOffline { return queue() }
+        if session.isOffline { return queue(attemptedSince: nil) }
+        let started = Date()
         do {
             _ = try await api.addFieldNote(jobID, body: trimmed)
             return .saved
         } catch is CancellationError {
             return .failed("The note wasn’t sent. Try again.")
         } catch {
-            return error.isConnectivityFailure ? queue() : .failed(error.localizedDescription)
+            // A timeout or a dropped connection may have reached the server, so the replay looks for
+            // the note from `started` on first. A send that never left the phone is just resent.
+            guard error.isConnectivityFailure else { return .failed(error.localizedDescription) }
+            return queue(attemptedSince: error.neverReachedServer ? nil : started)
         }
     }
 }

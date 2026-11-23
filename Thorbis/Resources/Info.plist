@@ -41,7 +41,6 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Inter.ttf</string>
-		<string>GeistMono.ttf</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

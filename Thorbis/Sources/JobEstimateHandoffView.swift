@@ -224,6 +224,9 @@ struct JobEstimateHandoffView: View {
     @State private var preparingBatch = false
     @State private var batchError: String?
     private var signsTogether: Bool { reviewing && model.reviewed.count > 1 }
+    /// Whether an estimate or an approval step is pushed over this page. A swipe back shows the
+    /// page while one still is, and SwiftUI clears it only when the pop commits.
+    private var coveredByDestination: Bool { detailsID != nil || checkpointID != nil }
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -255,7 +258,25 @@ struct JobEstimateHandoffView: View {
         }
         .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("Estimates").navigationBarTitleDisplayMode(.inline)
-        .task { await model.refresh() }
+        // Reload when the person has come back, not when a swipe back begins. The swipe shows this
+        // page while the estimate is still pushed over it, and a swipe the person lets go of without
+        // going back leaves it there. The task starts again when the page first appears and when what
+        // was pushed is cleared: by Back, by a finished swipe or by the page itself. A reload still
+        // running when something is pushed stops then, as it stopped before when the page left.
+        .task(id: coveredByDestination) {
+            #if DEBUG
+            NSLog("%@", "[pop-gesture] keyed task started covered=\(coveredByDestination)")
+            #endif
+            guard !coveredByDestination else { return }
+            await model.refresh()
+        }
+        #if DEBUG
+        // BYR-1842, DEBUG only: when this page appears, leaves and is uncovered, read in the app log
+        // beside the pop probe's lines and the task's line above. They change nothing on screen.
+        .onAppear { NSLog("%@", "[pop-gesture] overview appeared covered=\(coveredByDestination)") }
+        .onDisappear { NSLog("%@", "[pop-gesture] overview disappeared covered=\(coveredByDestination)") }
+        .onChange(of: coveredByDestination) { _, covered in NSLog("%@", "[pop-gesture] overview covered=\(covered)") }
+        #endif
         .onChange(of: api.requestGeneration) { _, _ in
             if !model.isCurrent { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
         }

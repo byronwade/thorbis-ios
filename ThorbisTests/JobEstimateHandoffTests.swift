@@ -415,6 +415,39 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertFalse(model.overviewPriceFailures.contains(estimate.id), "An old response must not publish a retry state into the retired handoff")
     }
 
+    /// A foreground or reconnect check that finds the same authority keeps a customer's handoff
+    /// open (BYR-1833); a renewed authority generation, with the same access, still retires it.
+    func testIdenticalRevalidationKeepsTheCustomerHandoffCurrent() async throws {
+        let model = try await ready([])
+        let membershipPath = "/v1/jobs/\(jobID)/estimates", estimatePath = "/v1/estimates/\(a)"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        // The same session, capabilities and features `ready` signed in with.
+        let sessionJSON = #"{"user":{"id":"\#(actor)","name":"Sample"},"session":{"userId":"\#(actor)","activeOrganizationId":"\#(org)","expiresAt":"2099-10-29T00:00:00Z"}}"#
+        let features = #"{"organizationId":"\#(org)","evaluatedAt":"2026-10-29T00:00:00Z","features":{"jobs":{"enabled":true,"released":true,"entitled":true},"estimates":{"enabled":true,"released":true,"entitled":true}}}"#
+        func routes(generation: String) -> [String: URLProtocolFixture.Reply] {
+            let catalog = #"{"authority":{"actorId":"\#(actor)","organizationId":"\#(org)","policyVersion":1,"generation":"\#(generation)"},"capabilities":["job.view","estimate.view","estimate.send","estimate.approve"],"resources":[],"views":[]}"#
+            return ["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+                    "\(membershipPath)/\(a)": .init(200, link), estimatePath: .init(200, record(a)),
+                    "\(estimatePath)/revisions/1": .init(200, revision(a)),
+                    "/api/auth/get-session": .init(200, sessionJSON), "/v1/query/catalog": .init(200, catalog),
+                    "/v1/features": .init(200, features)]
+        }
+        URLProtocolFixture.setRoutes(routes(generation: "sample"))
+        await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first)
+        XCTAssertTrue(model.isCurrent)
+        XCTAssertTrue(model.detailsCurrent(estimate, authority: model.session.authorityRevision))
+        let authority = model.session.authorityRevision
+        await model.session.revalidate()
+        XCTAssertEqual(model.session.authorityRevision, authority)
+        XCTAssertTrue(model.isCurrent, "An identical check must not end the customer's handoff")
+        XCTAssertTrue(model.detailsCurrent(estimate, authority: model.session.authorityRevision))
+        URLProtocolFixture.setRoutes(routes(generation: "sample-renewed"))
+        await model.session.revalidate()
+        XCTAssertTrue(model.session.can("estimate.approve", feature: "estimates"))
+        XCTAssertFalse(model.isCurrent, "A renewed authority still retires the handoff")
+    }
+
     func testCancelledOverviewLoadDoesNotPublishAndCanBeRetried() async throws {
         let model = try await ready([])
         let membershipPath = "/v1/jobs/\(jobID)/estimates", estimatePath = "/v1/estimates/\(a)"

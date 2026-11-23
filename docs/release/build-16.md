@@ -15,6 +15,6 @@ Date: 2026-10-27. Bundle `com.thorbis.field`, Apple ID `6827337706`, team `T6772
 
 ## Distribution
 
-Build 16 is uploaded and processing in App Store Connect. Hayley Wade (`hayleywoods15@gmail.com`) is already in the external tester group, but assignment of Build 16 and invitation delivery are not confirmed. A valid signed-in App Store Connect session is needed to complete and verify those steps. External beta review still needs the App Review contact and reviewer demo-login details documented in `apple-record.md`.
+Build 16 is uploaded and processing in App Store Connect. An external tester is already in the external tester group, but assignment of Build 16 and invitation delivery are not confirmed. A valid signed-in App Store Connect session is needed to complete and verify those steps. External beta review still needs the App Review contact and reviewer demo-login details documented in `apple-record.md`.
 
 This incremental beta does not establish full Paper/TanStack parity, authenticated live-device validation, or Universal Link readiness. See `beta-coverage.md` for remaining work.

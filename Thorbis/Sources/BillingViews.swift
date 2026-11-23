@@ -150,8 +150,6 @@ struct BillingScheduleDetailView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirm: String?
-    /// One key per intended command, kept until the server answers, so a retry never bills twice.
-    @State private var pendingKeys: [String: String] = [:]
     @State private var createdInvoiceID: String?
 
     var body: some View {
@@ -338,11 +336,19 @@ struct BillingScheduleDetailView: View {
         guard !busy else { return }
         busy = true
         defer { busy = false }
-        let key = pendingKeys[command] ?? UUID().uuidString
-        pendingKeys[command] = key
+        // One key per command, kept on the phone until the server answers with success, so a retry
+        // after leaving the screen gets the invoice already issued instead of a second one.
+        let intents = BillingMoneyIntents()
+        let request = BillingMoneyIntents.Request.scheduleCommand(scheduleID: scheduleID, command: command)
+        let actorID = session.user?.id
+        let organizationID = session.activeOrganization?.id
+        guard let key = intents.key(for: request, actorID: actorID, organizationID: organizationID) else {
+            self.error = "Could not save this request for a safe retry. Please try again."
+            return
+        }
         do {
             let result = try await api.billingScheduleCommand(scheduleID, command, idempotencyKey: key)
-            pendingKeys[command] = nil
+            intents.complete(request, key: key, actorID: actorID, organizationID: organizationID)
             createdInvoiceID = result.invoice.id
             await load()
         } catch is CancellationError {} catch {
@@ -363,9 +369,9 @@ struct JobDepositSheet: View {
     var subtitle: String? = nil
     var onCreated: (InvoiceRecord) -> Void = { _ in }
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var amount = ""
-    @State private var key = UUID().uuidString
     @State private var busy = false
     @State private var error: String?
     /// What's missing in the amount, under the field (design.thorbis.com "Help under the field").
@@ -403,7 +409,7 @@ struct JobDepositSheet: View {
                                 .font(Theme.paymentAmountFont())
                                 .fixedSize()
                                 .focused($amountFocused)
-                                .onChange(of: amount) { _, _ in key = UUID().uuidString; amountError = nil }
+                                .onChange(of: amount) { _, _ in amountError = nil }
                                 .accessibilityLabel("Deposit amount")
                         }
                         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -523,10 +529,21 @@ struct JobDepositSheet: View {
     private func create() async {
         guard !busy else { return }
         guard let cents else { amountError = "Add the deposit amount, like 150.00."; return }
+        // The key is saved on the phone before sending and kept until the server answers with
+        // success, so the same amount sent again after the sheet was closed cannot issue a second deposit.
+        let intents = BillingMoneyIntents()
+        let request = BillingMoneyIntents.Request.deposit(jobID: jobID, amountCents: cents)
+        let actorID = session.user?.id
+        let organizationID = session.activeOrganization?.id
+        guard let key = intents.key(for: request, actorID: actorID, organizationID: organizationID) else {
+            self.error = "Could not save this deposit for a safe retry. Please try again."
+            return
+        }
         busy = true
         defer { busy = false }
         do {
             let result = try await api.requestJobDeposit(jobID: jobID, amountCents: cents, idempotencyKey: key)
+            intents.complete(request, key: key, actorID: actorID, organizationID: organizationID)
             onCreated(result.invoice)
             dismiss()
         } catch is CancellationError {} catch { self.error = error.localizedDescription }

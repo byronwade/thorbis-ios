@@ -85,9 +85,9 @@ final class PriceBookPickerUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
-                               "--paper-preview-catalog-pages", "--paper-preview-picker-revalidation"]
+                               "--paper-preview-catalog-pages", "--paper-preview-picker-revalidation", "--paper-preview-picker-feature-change"]
         app.launch()
-        let before = lineCount(app)
+        let before = lineCount(app, timeout: 20)
         openPicker(in: app, addItem: "invoice-add-item")
         let search = app.textFields["invoice-catalog-search"]
         search.tap()
@@ -113,9 +113,10 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
         revalidate.tap()
         XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        // The rows return once the catalog adopts the refreshed authority, so the search and the count are read after that.
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "Catalog items must return after authority refresh")
         XCTAssertEqual(search.value as? String, sentinel)
         XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
-        XCTAssertTrue(item.waitForExistence(timeout: 10), "Catalog items must return after authority refresh")
         // The refreshed notice pushes the match down again.
         clearOfDone()
         item.tap()
@@ -131,14 +132,15 @@ final class PriceBookPickerUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
-                               "--paper-preview-catalog-many", "--paper-preview-picker-revalidation"]
+                               "--paper-preview-catalog-many", "--paper-preview-picker-revalidation", "--paper-preview-picker-feature-change"]
         app.launch()
         openPicker(in: app, addItem: "invoice-add-item")
         let search = app.textFields["invoice-catalog-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         search.typeText("plumbing\n")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        // On iPad a put-away keyboard can stay in the tree at zero height, so ask the helper there.
+        XCTAssertTrue(app.usesTabletLayout ? app.waitForKeyboardToHide(timeout: 5) : app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         let more = app.buttons["price-book-show-more"]
         expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", "23 remaining"), evaluatedWith: more)
         waitForExpectations(timeout: 15)
@@ -150,7 +152,44 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
         revalidate.tap()
         XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        // The list can be mid-refresh when that text appears; the range is read once it is back.
+        XCTAssertTrue(range.waitForExistence(timeout: 5))
         XCTAssertEqual(range.label, "51–73 of 73", "A harmless authority refresh should preserve the current page")
+        XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"].exists)
+    }
+
+    /// The same refresh once the catalog's 60 s freshness window has passed: the catalog adopts the
+    /// new revision and starts a reload in the same step. `--paper-preview-picker-stale-window`
+    /// treats the window as passed and leaves that reload unanswered, so the page is read while the
+    /// reload runs. Before the list kept its page through it, this read "1–50 of 73".
+    func testInvoicePickerKeepsCurrentPageWhileSameAuthorityRevalidationReloads() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-many",
+                               "--paper-preview-picker-revalidation", "--paper-preview-picker-feature-change",
+                               "--paper-preview-picker-stale-window"]
+        app.launch()
+        openPicker(in: app, addItem: "invoice-add-item")
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("plumbing\n")
+        // On iPad a put-away keyboard can stay in the tree at zero height, so ask the helper there.
+        XCTAssertTrue(app.usesTabletLayout ? app.waitForKeyboardToHide(timeout: 5) : app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        let more = app.buttons["price-book-show-more"]
+        expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", "23 remaining"), evaluatedWith: more)
+        waitForExpectations(timeout: 15)
+        showMore(in: app)
+        let range = app.staticTexts["price-book-page-range"]
+        expectation(for: NSPredicate(format: "label == %@", "51–73 of 73"), evaluatedWith: range)
+        waitForExpectations(timeout: 5)
+        let revalidate = app.buttons["price-book-preview-revalidate"]
+        XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
+        revalidate.tap()
+        XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        // The list shows placeholder rows until the catalog adopts the revision; the range returns with it.
+        XCTAssertTrue(range.waitForExistence(timeout: 5))
+        XCTAssertEqual(range.label, "51–73 of 73", "A reload over the kept snapshot should preserve the current page")
         XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"].exists)
     }
 
@@ -188,8 +227,8 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         chooseCategory("Materials", in: app)
         if app.keyboards.firstMatch.exists { search.typeText("\n") }
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Showing materials"].exists, "An active category must stay visible")
+        XCTAssertTrue(app.usesTabletLayout ? app.waitForKeyboardToHide(timeout: 5) : app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Showing materials"].waitForExistence(timeout: 5), "An active category must stay visible")
         XCTAssertEqual(app.buttons["Category"].value as? String, "Materials")
         chooseCategory("All", in: app)
         XCTAssertTrue(app.staticTexts["Showing materials"].waitForNonExistence(timeout: 5))
@@ -366,10 +405,12 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(clear(), "\(row.frame) is clear of Done at \(done.frame)")
     }
 
-    /// "Line items · N" read from its identifier, so additions are counted, not guessed.
-    private func lineCount(_ app: XCUIApplication) -> Int {
+    /// "Line items · N" read from its identifier, so additions are counted, not guessed. Straight
+    /// after launch the invoice editor is still on its way, so a launch passes the 20 s that
+    /// `launchInvoiceEditor()` gives the editor to appear.
+    private func lineCount(_ app: XCUIApplication, timeout: TimeInterval = 5) -> Int {
         let header = app.staticTexts["invoice-line-count"]
-        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        XCTAssertTrue(header.waitForExistence(timeout: timeout))
         return Int(header.label.components(separatedBy: "·").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
     }
 

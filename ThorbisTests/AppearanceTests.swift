@@ -13,7 +13,8 @@ final class AppearanceTests: XCTestCase {
         }
     }
 
-    // design.thorbis.com MA-08: the ink commit's inverse type stays readable in every appearance.
+    // Inverse type on ink (a step badge, today's date, the listening mic) stays readable in every
+    // appearance. The commit itself is the blue pill; testBrandCommitTypeIsReadable covers it.
     func testInkCommitTypeIsReadable() {
         for style: UIUserInterfaceStyle in [.light, .dark] {
             for contrast: UIAccessibilityContrast in [.normal, .high] {
@@ -21,6 +22,21 @@ final class AppearanceTests: XCTestCase {
                 let type = luminance(resolve(Theme.onInk, style: style, contrast: contrast))
                 XCTAssertGreaterThanOrEqual((max(ink, type) + 0.05) / (min(ink, type) + 0.05), 7,
                     "Ink commit unreadable in style \(style.rawValue), contrast \(contrast.rawValue)")
+            }
+        }
+    }
+
+    // Paper v2: the commit and every blue or red pill set white type on `brand` or
+    // `destructiveFill`; it holds 4.5:1 in every appearance, Increase Contrast included.
+    func testBrandCommitTypeIsReadable() {
+        let white = luminance(UIColor(red: 1, green: 1, blue: 1, alpha: 1))
+        for style: UIUserInterfaceStyle in [.light, .dark] {
+            for contrast: UIAccessibilityContrast in [.normal, .high] {
+                for fill in [Theme.brand, Theme.destructiveFill] {
+                    let ground = luminance(resolve(fill, style: style, contrast: contrast))
+                    XCTAssertGreaterThanOrEqual((max(white, ground) + 0.05) / (min(white, ground) + 0.05), 4.5,
+                        "White on a commit fill unreadable in style \(style.rawValue), contrast \(contrast.rawValue)")
+                }
             }
         }
     }
@@ -39,12 +55,14 @@ final class AppearanceTests: XCTestCase {
         XCTAssertEqual(Theme.minimumSize, 12)
     }
 
-    // Paper's electric blue, not the retired #3A6AE0.
+    // Paper's electric blue (#2F6BFF, drawn one step darker as #2F6AFF, green 6B to 6A, so white
+    // type holds 4.5:1).
+    // The web keeps its own accent (#3A6AE0); neither client is repainted to the other's blue.
     func testBrandIsPaperBlue() {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         XCTAssertTrue(UIColor(Theme.brand).getRed(&r, green: &g, blue: &b, alpha: &a))
         XCTAssertEqual(Int((r * 255).rounded()), 0x2F)
-        XCTAssertEqual(Int((g * 255).rounded()), 0x6B)
+        XCTAssertEqual(Int((g * 255).rounded()), 0x6A)
         XCTAssertEqual(Int((b * 255).rounded()), 0xFF)
     }
 

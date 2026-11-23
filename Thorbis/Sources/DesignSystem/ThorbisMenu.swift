@@ -35,8 +35,9 @@ extension DynamicTypeSize {
 ///   "Pause job" and "Cancel job" in a second card). When no row sets it, destructive rows get
 ///   their own card as before. An anchored popover ignores it: it is one list.
 /// - `detail`: a short trailing value in the muted tone (a step's time, "Next", "$340 due").
-struct ThorbisMenuItem: Identifiable {
-    let id = UUID()
+/// Not `Identifiable` on purpose: pages build their items again on every render, so an id made
+/// here would be new each time, and rows keyed by it were replaced under the finger.
+struct ThorbisMenuItem {
     var title: String
     var subtitle: String? = nil
     var icon: String? = nil
@@ -108,6 +109,19 @@ enum ThorbisMenuGrouping {
         if !regular.isEmpty { groups.append(regular) }
         if !destructive.isEmpty { groups.append(destructive) }
         return groups
+    }
+}
+
+/// What fills a menu slot: a row keeps its view while the same item stays in its slot.
+struct ThorbisMenuRowKey: Hashable {
+    let title: String
+    let subtitle: String?
+    let destructive: Bool
+
+    init(_ item: ThorbisMenuItem) {
+        title = item.title
+        subtitle = item.subtitle
+        destructive = item.role == .destructive
     }
 }
 
@@ -351,6 +365,19 @@ extension View {
     static var isRegularWidth: Bool {
         keyWindow?.traitCollection.horizontalSizeClass == .regular
     }
+
+    /// Returns once nothing in the key window is being presented or dismissed (at most about a
+    /// second), so a sheet asked for right after a menu closes is not dropped mid-transition.
+    static func presentationSettled() async {
+        // Let a dismissal that was just requested begin before looking.
+        try? await Task.sleep(for: .milliseconds(16))
+        for _ in 0..<20 {
+            var top = keyWindow?.rootViewController
+            while let next = top?.presentedViewController { top = next }
+            guard let top, top.isBeingPresented || top.isBeingDismissed else { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
 }
 
 /// How tall a fitted popover may be. Portrait keeps the previous 460pt cap; a compact-height
@@ -494,13 +521,18 @@ struct ThorbisMenuRows: View {
     }
 
     private func group(_ rows: [ThorbisMenuItem]) -> some View {
-        let firstID = rows.first?.id
-        return VStack(spacing: 0) {
-            ForEach(rows) { item in
-                Button { onSelect(item) } label: { row(item, divided: item.id != firstID) }
+        // Rows are keyed by their slot and what fills it. A page builds its items again every time
+        // it renders; a re-render of the same list keeps every row, so a tap that lands while the
+        // page updates (a reload, a background session check) is not dropped. A slot that a
+        // different item takes (a roster or refresh inserting a row) gets a new row, so a press
+        // already on it is dropped, never retargeted to another action.
+        VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, item in
+                Button { onSelect(item) } label: { row(item, divided: index > 0) }
                     .buttonStyle(MenuRowPressStyle(pressChanged: pressChanged))
                     .disabled(item.isDisabled)
                     .opacity(item.isDisabled ? 0.4 : 1)
+                    .id(ThorbisMenuRowKey(item))
             }
         }
     }

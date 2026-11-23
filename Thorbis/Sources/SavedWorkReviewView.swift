@@ -89,6 +89,11 @@ struct SavedWorkReviewView: View {
             if !allowed { discardID = nil; cancelWork() }
         }
         .onDisappear { cancelWork() }
+        #if DEBUG
+        // `--paper-preview-saved-work-from-question` counts the sample access change from here. The
+        // confirm below watches the same id and presents its cover when it is set.
+        .onChange(of: discardID?.id) { _, id in if id != nil { PaperPreview.savedWorkDiscardQuestionOpened = true } }
+        #endif
         // Paper P4 Confirm: the question, what happens, then Cancel beside the red "Discard".
         .thorbisConfirm(item: $discardID,
                         title: { _ in "Discard saved change?" },

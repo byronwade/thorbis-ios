@@ -163,6 +163,8 @@ struct NewEstimateView: View {
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
                                     Task {
+                                        // The server revises authority while the create is held: a real change.
+                                        PaperPreviewProtocol.reviseSampleAuthority()
                                         await session.revalidate()
                                         EstimateRecoveryPreview.shared.release()
                                     }
@@ -222,7 +224,8 @@ struct NewEstimateView: View {
                                 Task { await save() }
                             }])
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
-            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)) { await refreshCatalog() }
+            .task(id: PriceBookCatalogLoad(context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority),
+                                           verification: session.verificationRevision)) { await refreshCatalog() }
             .onChange(of: customerID) { _, _ in customerProblem = nil }
             .onChange(of: lines.count) { _, _ in
                 linesProblem = nil

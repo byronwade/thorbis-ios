@@ -135,11 +135,17 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
 
     /// A reply that never reaches a server, like a phone with no signal.
     static let offline = Reply(0)
+    /// A request that went out and got no answer in time: it may have reached the server.
+    static let timedOut = Reply(-1)
 
     private func deliver(_ reply: Reply) {
         guard stateLock.withLock({ !stopped }) else { return }
         if reply.status == 0 {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        if reply.status == -1 {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
             return
         }
         guard let url = request.url,

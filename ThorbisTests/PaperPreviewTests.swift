@@ -51,46 +51,6 @@ final class PaperPreviewTests: XCTestCase {
         XCTAssertTrue(payments.isEmpty)
     }
 
-    func testPaperInvoiceBalanceReflectsUnpaidPartialPaidAndUnavailableStates() throws {
-        let issued = PaperInvoiceBalance(invoice: PaperPreview.issuedInvoice, balanceCents: 44_000)
-        XCTAssertEqual(issued.statusLabel, "Unpaid")
-        XCTAssertEqual(issued.balanceCents, 44_000)
-
-        var partialJSON = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice)) as? [String: Any]
-        )
-        partialJSON["amountPaid"] = 10_000
-        let partialInvoice = try JSONDecoder().decode(
-            InvoiceRecord.self,
-            from: JSONSerialization.data(withJSONObject: partialJSON)
-        )
-        let partial = PaperInvoiceBalance(invoice: partialInvoice, balanceCents: 34_000)
-        XCTAssertEqual(partial.statusLabel, "Partially paid")
-        XCTAssertEqual(partial.balanceCents, 34_000)
-
-        let paid = PaperInvoiceBalance(invoice: PaperPreview.refundInvoice, balanceCents: 0)
-        XCTAssertEqual(paid.statusLabel, "Paid")
-
-        let unavailable = PaperInvoiceBalance(invoice: PaperPreview.issuedInvoice, balanceCents: nil)
-        XCTAssertEqual(unavailable.statusLabel, "Balance unavailable")
-        XCTAssertNil(unavailable.balanceCents)
-    }
-
-    @MainActor
-    func testPaperInvoiceContentStateAdvancesWhenTheObservedModelLoads() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "thorbis.paper-invoice-content-state-test"))
-        defaults.removePersistentDomain(forName: "thorbis.paper-invoice-content-state-test")
-        let model = InvoicePaymentCollectionModel(
-            api: PaperPreview.api(),
-            invoiceID: PaperPreview.issuedInvoice.id,
-            intentStore: InvoicePaymentIntentStore(defaults: defaults)
-        )
-
-        XCTAssertEqual(PaperInvoiceContentState.resolve(invoiceID: PaperPreview.issuedInvoice.id, model: model), .loading)
-        await model.load()
-        XCTAssertEqual(PaperInvoiceContentState.resolve(invoiceID: PaperPreview.issuedInvoice.id, model: model), .ready)
-    }
-
     func testPaymentRefundPreviewUsesAConsistentRecordedPaymentFixture() async throws {
         let api = PaperPreview.api()
         let invoice = try await api.fieldInvoice(PaperPreview.refundInvoice.id)

@@ -253,7 +253,7 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertFalse(old.exists)
     }
 
-    func testUnchangedAuthorityAndFailedRefreshKeepsPreviouslyLoadedPages() {
+    func testRenewedAuthorityAndFailedRefreshKeepsPreviouslyLoadedPages() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-authority", "--paper-preview-pricebook-renew", "--paper-preview-pricebook-stable", "--paper-preview-pricebook-pages", "--paper-preview-pricebook-refresh-failure"]
         app.launch()
@@ -304,9 +304,27 @@ final class PriceBookStandaloneUITests: XCTestCase {
         assertAuthorityChangeRetiresDetail(switchWorkspace: true)
     }
 
+    /// A foreground or reconnect check that finds the same authority leaves the list and an open
+    /// item as they were: no stale banner, the detail stays open.
+    func testIdenticalRecheckKeepsListAndOpenLocalDetail() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-authority", "--paper-preview-pricebook-recheck", "--paper-preview-pricebook-from-detail"]
+        app.launch()
+        let title = app.staticTexts["PEX copper crimp ring pack: 1-in."]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        app.buttons["Change sample access shortly"].tap()
+        title.tap()
+        let details = app.staticTexts["PEX copper crimp ring pack: 1-in. Ten rings for matching-size PEX; tool calibration remains required."]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        // The check lands five seconds after the detail opens; the detail must outlast it.
+        XCTAssertFalse(details.waitForNonExistence(timeout: 12), "An identical check must not close the open item")
+        XCTAssertTrue(app.buttons["Done"].exists)
+        XCTAssertFalse(app.staticTexts["Showing previously loaded items. Refresh to update."].exists)
+    }
+
     private func assertAuthorityChangeRetiresDetail(switchWorkspace: Bool) {
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-authority"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-authority", "--paper-preview-pricebook-from-detail"]
         if switchWorkspace { app.launchArguments.append("--paper-preview-pricebook-switch") }
         app.launch()
         let title = app.staticTexts["PEX copper crimp ring pack: 1-in."]

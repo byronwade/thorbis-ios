@@ -447,7 +447,7 @@ private struct CustomerInvoiceBookPage: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(invoice.origin == "estimate_deposit" ? "Deposit invoice" : "Invoice")
+                    Text(invoice.isDeposit ? "Deposit invoice" : "Invoice")
                         .font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("customer-invoice-summary")
@@ -530,7 +530,7 @@ private struct CustomerInvoiceBookPage: View {
             ForEach(model.payments.sorted { $0.recordedAt > $1.recordedAt }) { payment in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(payment.method == "ach" ? "Bank transfer" : FieldPaymentMethod(rawValue: payment.method)?.displayName ?? "Payment")
+                        Text(FieldPaymentMethod(rawValue: payment.method)?.displayName ?? (payment.method.isEmpty ? "Payment" : payment.method.statusLabel))
                         Spacer(minLength: 8)
                         Text(money(payment.amount.amount, currency: payment.amount.currency)).font(Theme.customerFont(type.body)).monospacedDigit()
                     }
@@ -561,10 +561,6 @@ private struct CustomerInvoiceBookPage: View {
 }
 
 private func customerPaymentDate(_ raw: String) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let fractional = formatter.date(from: raw)
-    formatter.formatOptions = [.withInternetDateTime]
-    guard let date = fractional ?? formatter.date(from: raw) else { return "Date unavailable" }
+    guard let date = JobFiltering.date(raw) else { return "Date unavailable" }
     return date.stampLabel()
 }

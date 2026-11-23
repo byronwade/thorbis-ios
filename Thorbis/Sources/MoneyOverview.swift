@@ -47,7 +47,7 @@ struct MoneyOverviewView: View {
     private var billed: Int {
         invoices.filter { ["issued", "paid"].contains($0.status) }.reduce(0) { $0 + Self.total($1) }
     }
-    private var collected: Int { payments.filter { !$0.refunded }.reduce(0) { $0 + $1.amount } }
+    private var collected: Int { CompanyPayment.collected(payments) }
 
     /// AR aging by days since the invoice was created (there is no due date on an invoice yet).
     static func buckets(_ unpaid: [(InvoiceRecord, Int)], now: Date = .now) -> [Bucket] {

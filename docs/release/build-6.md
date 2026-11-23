@@ -17,4 +17,4 @@ This is an incremental staff beta, **not full Paper/TanStack parity**. See `beta
 
 ## Distribution
 
-`xcodebuild -exportArchive` uploaded build 6 successfully at 12:32 AM EDT on 2026-10-27. Apple reports **Uploaded package is processing**. Upload log: `../../outputs/testflight-upload-6.log`. App Store Connect has not yet been rechecked because the browser session is signed out. Hayley Wade (`hayleywoods15@gmail.com`) is already in the `External Testers` group; build 6 has not been assigned and no invitation has been sent. External beta review still needs an App Review contact phone and reviewer demo login.
+`xcodebuild -exportArchive` uploaded build 6 successfully at 12:32 AM EDT on 2026-10-27. Apple reports **Uploaded package is processing**. Upload log: `../../outputs/testflight-upload-6.log`. App Store Connect has not yet been rechecked because the browser session is signed out. An external tester is already in the `External Testers` group; build 6 has not been assigned and no invitation has been sent. External beta review still needs an App Review contact phone and reviewer demo login.

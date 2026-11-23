@@ -37,7 +37,12 @@ final class InvoiceRevisionsUITests: XCTestCase {
     func testReopenIsHiddenWhileItsFlagIsOff() {
         let app = launch("job", ["--paper-preview-job-status", "completed"])
         let more = app.buttons["Job actions"]
-        XCTAssertTrue(more.waitForExistence(timeout: 20)); more.tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 20))
+        // The job first shows the copy the last launch saved, which may not be a completed job. Open
+        // the menu once this launch's completed job is on screen, so its status is not what hides Reopen.
+        let completed = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Job status, Completed")).firstMatch
+        XCTAssertTrue(completed.waitForExistence(timeout: 20), "The job is a completed job")
+        more.tap()
         XCTAssertTrue(app.staticTexts["More"].waitForExistence(timeout: 5))
         XCTAssertFalse(reopenRow(app).exists)
     }
@@ -75,6 +80,9 @@ final class InvoiceRevisionsUITests: XCTestCase {
 
         let off = launch("invoice-detail", [])
         XCTAssertTrue(off.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+        // The title can be drawn from the invoice the first launch saved, and that copy never shows
+        // Edit or the note. The page's menu exists only once this launch's invoice has answered.
+        XCTAssertTrue(off.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 20))
         XCTAssertFalse(off.buttons["invoice-detail-edit-items"].exists, "An issued invoice stays closed while the flag is off")
         XCTAssertFalse(off.staticTexts["invoice-unsigned-version"].exists)
     }

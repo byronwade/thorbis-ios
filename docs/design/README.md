@@ -6,20 +6,25 @@ and the [implementation/review process](ios-implementation-process.md). The
 is preserved in full. These apply across the entire app and existing work in progress;
 the coverage below records current implementation, not automatic conformance.
 
-Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01KY0S86CYXENWSH216F3ZB058/B-0), token hash `2803f4aa`, exported 2026-10-26. JSON files contain original Paper JSX, not hand-measured screenshots. Inter and Geist Mono are bundled with their OFL licenses.
+Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01KY0S86CYXENWSH216F3ZB058/B-0), token hash `2803f4aa`, exported 2026-10-26. JSON files contain original Paper JSX, not hand-measured screenshots. Inter is bundled with its OFL license.
 
 Current direction: [continuous UI and UX goal](continuous-ux-goal.md), updated
 28 October 2026. Simplify complete user flows, preserve every feature, and use
 menus or disclosures for secondary actions while keeping common work direct.
 
-## Paper redesign (branch claude/paper-redesign)
+## Paper redesign (branch claude/paper-redesign) — history
 
-- iPhone navigation is a native `TabView` with Paper's technician dock: Schedule, Jobs, Customers, More and a system Search tab. iOS 26 draws it as Paper's floating pill; the deployment target is iOS 18 for the search tab role. The overlay menu and the Done-sheets for Schedule and Customers are gone. Inbox, Estimates, Invoices, Price book, Revenue, drafts and on-device records live in More.
+*Superseded.* These bullets record that branch. Its `TabView` gave way to a side drawer on
+31 October 2026, and on 18 November 2026 the iPhone took Paper 18A's bottom bar (`PhoneTabBar`)
+as its default, with the drawer behind Menu and as the Settings › Menu and start screen ›
+Navigation choice; iPad keeps its sidebar. Golden rule 6 has the current navigation.
+
+- iPhone navigation was a native `TabView` with Paper's technician dock: Schedule, Jobs, Customers, More and a system Search tab. iOS 26 draws it as Paper's floating pill; the deployment target is iOS 18 for the search tab role. The overlay menu and the Done-sheets for Schedule and Customers are gone. Inbox, Estimates, Invoices, Price book, Revenue, drafts and on-device records live in More.
 - Tab roots use Paper's 34/700 large title with a filter circle and account avatar; Paper's compact 22pt switcher title is retired (one header grammar). Segment tabs are pills; the gutter is 20 pt.
 - Schedule's Next up band carries the old Arrive tab's On my way commit. Week groups by day. Paper's Map tab is replaced by Unscheduled until job records carry coordinates.
 - Job, customer, estimates, invoices and price book screens use the native navigation bar (system back and swipe-back) with Paper record headers below it.
 - Leading coloured rails (Next up underline, week bars, composer caret) are removed per design.thorbis.com D-018.
-- Every type-ramp step scales with its nearest Dynamic Type style; lanes use `@ScaledMetric` and rows stack at accessibility sizes. `Theme.brandText` (#5285FF dark, #2558E0 light) replaces brand blue as text and tint for 4.5:1 contrast.
+- Every type-ramp step scales with its nearest Dynamic Type style; lanes use `@ScaledMetric` and rows stack at accessibility sizes. `Theme.brandText` (then #5285FF dark, #2558E0 light; today #6494FF dark, #1F55E0 light) replaces brand blue as text and tint for 4.5:1 contrast.
 
 ## Field flows (end to end)
 

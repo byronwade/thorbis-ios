@@ -1452,7 +1452,7 @@ struct PaperRouteView: View {
         case .estimates: EstimatesView()
         case .invoices: InvoicesView()
         case .priceBook:
-            WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
+            WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("pricebook.edit", feature: "price_book")).id(session.generation)
         // Paper 59 / 54: Money is its own page; the reports are one row away (Paper 60).
         case .revenue: MoneyHomeView().id(session.generation)
         case .drafts:

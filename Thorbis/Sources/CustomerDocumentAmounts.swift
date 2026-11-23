@@ -72,7 +72,7 @@ struct CustomerInvoiceBalanceSummary: Equatable {
 
     init(status: String, fresh: Bool, amounts: CustomerDocumentAmounts, historyReconciled: Bool) {
         if !fresh {
-            self.init(title: status == "void" ? "Last known status: Voided" : "Last known balance",
+            self.init(title: status == "void" ? "Last known status: Void" : "Last known balance",
                       amount: status == "void" ? nil : amounts.due)
         } else if status == "void" {
             self.init(title: "Voided invoice", amount: nil)

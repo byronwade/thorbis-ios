@@ -190,6 +190,18 @@ private struct InboxEmailPresenterModifier: ViewModifier {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
     @ObservedObject private var presenter = InboxEmailPresenter.shared
+    /// The opening the root sheet shows. It follows `presenter.opening` once any presentation in
+    /// flight has finished: an Email row chosen in a popover runs while that popover is still being
+    /// dismissed, and a sheet asked for in that moment is dropped (BYR-1779).
+    @State private var shown: InboxEmailPresenter.Opening?
+
+    private var shownBinding: Binding<InboxEmailPresenter.Opening?> {
+        Binding(get: { shown }, set: { next in
+            // A swipe down dismisses the sheet: close the opening it showed.
+            if next == nil, let shown { presenter.close(shown.id) }
+            shown = next
+        })
+    }
 
     func body(content: Content) -> some View {
         content
@@ -200,7 +212,15 @@ private struct InboxEmailPresenterModifier: ViewModifier {
             .onChange(of: api.requestGeneration) { _, _ in bind() }
             .onChange(of: InboxMessaging.on(session)) { _, _ in bind() }
             .onDisappear { presenter.unbind() }
-            .sheet(item: $presenter.opening) { opening in
+            .onChange(of: presenter.opening?.id) { _, _ in
+                guard let next = presenter.opening else { shown = nil; return }
+                Task { @MainActor in
+                    await ThorbisMenuWindow.presentationSettled()
+                    guard presenter.opening?.id == next.id else { return }
+                    shown = next
+                }
+            }
+            .sheet(item: shownBinding) { opening in
                 if presenter.isCurrent(opening) {
                     CommsMailSheet(draft: CommsMailDraft(mail: opening.mail),
                                    store: CommsLocalStore.shared(actorID: opening.actorID, organizationID: opening.organizationID),

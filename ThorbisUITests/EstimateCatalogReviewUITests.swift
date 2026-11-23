@@ -75,8 +75,14 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
         let add = app.buttons.matching(identifier: "estimate-add-item-heading")
             .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
-        for _ in 0..<8 where !add.exists { app.swipeUp() }
-        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        // One look at a time. Each accessibility read of this 500-line screen takes 15 to 30 s on
+        // CI, and `for … where !add.exists` read it on all eight passes after finding the button.
+        var found = add.exists
+        for _ in 0..<8 where !found {
+            app.swipeUp()
+            found = add.exists
+        }
+        XCTAssertTrue(found || add.waitForExistence(timeout: 20))
         XCTAssertFalse(add.isEnabled, "The option must respect its 500-line limit")
     }
 
@@ -199,6 +205,17 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
         let keyboardDone = app.keyboardDoneButton
         XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        // The price field takes focus a moment after the picker closes, so Done is there while the
+        // keyboard is still coming up, and Save rides up with it. Compare the frames once both have
+        // stopped moving; an overlap at rest still fails below.
+        var previous: (CGRect, CGRect)?
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frames = (save.frame, keyboardDone.frame)
+            defer { previous = frames }
+            guard let last = previous else { return false }
+            return save.isHittable && last == frames
+        }, object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed, "Save and the keyboard must come to rest")
         XCTAssertFalse(save.frame.intersects(keyboardDone.frame), "The keyboard Done control must not cover any part of Save")
         save.tap()
         let warning = app.waitForDescriptionLengthWarning()

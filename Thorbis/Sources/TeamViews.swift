@@ -63,7 +63,7 @@ extension APIClient {
             let idempotencyKey: String
             let reason: String
         }
-        let encodedID = member.member.memberId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? member.member.memberId
+        let encodedID = try Self.pathSegment(member.member.memberId)
         let _: EmptyResponse = try await send("POST", "/v1/organization/role-members/\(encodedID)/role",
                                               body: Body(desiredRoleId: role.role.id, expectedVersion: member.authority.currentAssignmentVersion ?? 0,
                                                          expectedRoleRevision: role.role.currentRevision, idempotencyKey: idempotencyKey,
@@ -115,6 +115,7 @@ struct TeamView: View {
     @State private var customRoles: [OrganizationRole] = []
     @State private var naming = false
     @State private var newRoleName = ""
+    @State private var createRoleKey = RetryKey<String>()
     @State private var editingRoleID: String?
     @State private var invitations: [TeamInvitation] = []
     @State private var inviting = false
@@ -447,10 +448,15 @@ extension TeamView {
         let trimmed = newRoleName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         do {
-            let created = try await api.createOrganizationRole(name: trimmed, description: "", idempotencyKey: UUID().uuidString)
+            let created = try await api.createOrganizationRole(name: trimmed, description: "",
+                                                               idempotencyKey: createRoleKey.key(for: trimmed))
+            createRoleKey.settle(after: nil)
             await load()
-            editingRoleID = created.role.id
-        } catch { self.error = error.localizedDescription }
+            editingRoleID = created.id
+        } catch {
+            createRoleKey.settle(after: error)
+            self.error = error.localizedDescription
+        }
     }
 }
 
@@ -667,7 +673,7 @@ struct MemberRoleSheet: View {
     @State private var loaded = false
     @State private var busy = false
     @State private var error: String?
-    @State private var key = UUID().uuidString
+    @State private var key = RetryKey<String>()
 
     var body: some View {
         NavigationStack {
@@ -717,12 +723,13 @@ struct MemberRoleSheet: View {
         busy = true
         defer { busy = false }
         do {
-            try await api.changeMemberRole(member, to: role, idempotencyKey: key)
+            try await api.changeMemberRole(member, to: role, idempotencyKey: key.key(for: role.role.id))
+            key.settle(after: nil)
             await onChanged()
             dismiss()
         } catch is CancellationError {
         } catch {
-            key = UUID().uuidString
+            key.settle(after: error)
             self.error = error.isConnectivityFailure ? "Changing a role needs a connection." : error.localizedDescription
         }
     }

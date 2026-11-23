@@ -11,13 +11,27 @@ struct CompanyPayment: Identifiable, Hashable {
     let recordedAt: String
 
     var refunded: Bool { status == "refunded" || refundedAmount > 0 }
+    /// What this payment still brings in: a part refund counts what is left, as on the web.
+    var net: Int { status == "recorded" ? max(0, amount - refundedAmount) : 0 }
+    /// Money collected across payments, net of refunds.
+    static func collected(_ payments: [CompanyPayment]) -> Int { payments.reduce(0) { $0 + $1.net } }
     var isCard: Bool { method.contains("card") || method.contains("tap") }
     var isCash: Bool { method == "cash" }
+    /// The method as the shared money word table names it (contracts/design/money-and-flow.md in
+    /// the web repo): "Card", "Bank transfer (ACH)", never a raw value.
     var methodLabel: String {
         switch method {
         case "tap_to_pay": "Tap to Pay"
         case "": "Payment"
-        default: method.replacingOccurrences(of: "_", with: " ").capitalized
+        default: FieldPaymentMethod(rawValue: method)?.displayName ?? method.statusLabel
+        }
+    }
+    /// The method inside a sentence: "card", "bank transfer (ACH)", "Tap to Pay".
+    var methodPhrase: String {
+        switch method {
+        case "tap_to_pay": "Tap to Pay"
+        case "ach": "bank transfer (ACH)"
+        default: methodLabel.lowercased()
         }
     }
 }
@@ -132,14 +146,14 @@ struct CompanyPaymentsView: View {
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
-    private var collected: Int { payments.filter { !$0.refunded }.reduce(0) { $0 + $1.amount } }
+    private var collected: Int { CompanyPayment.collected(payments) }
 
     /// Payments by the day they were recorded, newest day first, each with what came in that day.
     private struct DayGroup: Identifiable {
         let id: String
         let label: String
         var payments: [CompanyPayment]
-        var total: Int { payments.filter { !$0.refunded }.reduce(0) { $0 + $1.amount } }
+        var total: Int { CompanyPayment.collected(payments) }
     }
 
     private var days: [DayGroup] {
@@ -180,7 +194,7 @@ struct CompanyPaymentsView: View {
         let whole = complete || start.map { start in
             payments.contains { (JobFiltering.date($0.recordedAt) ?? .distantFuture) < start }
         } ?? false
-        let sum = inPeriod.filter { !$0.refunded }.reduce(0) { $0 + $1.amount }
+        let sum = CompanyPayment.collected(inPeriod)
         let figure = "\(money(sum, currency: "USD")) collected\(whole ? "" : " in the latest \(payments.count)")"
         return activePeriod == .all ? figure : "\(activePeriod.rawValue) \u{00B7} \(figure)"
     }
@@ -198,7 +212,7 @@ struct CompanyPaymentsView: View {
     /// Paper T54A: "This week · $12,480 collected" under the title.
     private var wideSubtitle: String {
         guard loaded, weekCovered else { return phoneSubtitle }
-        let week = summaryPayments.filter { !$0.refunded }.reduce(0) { $0 + $1.amount }
+        let week = CompanyPayment.collected(summaryPayments)
         return "This week \u{00B7} \(money(week, currency: "USD")) collected"
     }
 
@@ -315,8 +329,8 @@ struct CompanyPaymentsView: View {
     /// Paper T54A's "This week" card: what came in, what went back and the average payment.
     private var weekSummary: some View {
         let scope = summaryPayments
-        let kept = scope.filter { !$0.refunded }
-        let collectedCents = kept.reduce(0) { $0 + $1.amount }
+        let kept = scope.filter { $0.net > 0 }
+        let collectedCents = CompanyPayment.collected(scope)
         let refundCents = scope.reduce(0) { $0 + refundedCents($1) }
         let refundText = refundCents > 0 ? "\u{2212}\(money(refundCents, currency: "USD"))" : money(0, currency: "USD")
         return VStack(alignment: .leading, spacing: 0) {
@@ -386,7 +400,7 @@ struct CompanyPaymentsView: View {
         // Paper 54A: "INV-8819 · Refund to Visa ending 7302". The record carries the method, not
         // the card or who took it, so a full refund reads "Refund to card".
         if wentBack(payment) {
-            let to = payment.method.isEmpty ? "Refund" : "Refund to \(payment.methodLabel.lowercased())"
+            let to = payment.method.isEmpty ? "Refund" : "Refund to \(payment.methodPhrase)"
             return [reference(payment), to].compactMap { $0 }.joined(separator: " \u{00B7} ")
         }
         let refund: String? = payment.refunded

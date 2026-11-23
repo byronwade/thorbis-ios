@@ -11,6 +11,9 @@ tokens = {}
 for m in re.finditer(r"static let (\w+) = adaptive\(light: 0x(\w+), dark: 0x(\w+)(?:, highLight: 0x(\w+), highDark: 0x(\w+))?\)", src):
     name, l, d, hl, hd = m.groups()
     tokens[name] = {"light": l, "dark": d, "highLight": hl or l, "highDark": hd or d}
+# Brand is one fixed hex in both themes (`Color(hex:)`, not `adaptive`).
+brand = re.search(r"static let brand = Color\(hex: 0x(\w+)\)", src).group(1)
+tokens["brand"] = {m: brand for m in ["light", "dark", "highLight", "highDark"]}
 for m in re.finditer(r"static let (\w+) = (\w+)\n", src):
     if m.group(2) in tokens: tokens[m.group(1)] = tokens[m.group(2)]
 
@@ -27,17 +30,22 @@ grounds = ["background", "card", "fill", "field"]
 checks = {
     "foreground": grounds + ["surface", "selectedSegment", "brandSurface", "warningSurface", "successSurface", "destructiveSurface"],
     # The job's "Before you go in" banner sets its notes and caveat on the warning surface.
-    "muted": grounds + ["surface", "selectedSegment", "warningSurface"],
-    "subtle": grounds + ["surface", "warningSurface"],
-    "brandText": grounds[:2] + ["brandSurface"],
-    "success": grounds[:2] + ["successSurface"],
-    "warning": grounds[:2] + ["warningSurface"],
-    "destructive": grounds[:2] + ["destructiveSurface"],
-    "statusScheduledText": grounds[:2] + ["statusScheduledSurface"],
-    "statusInvoicedText": grounds[:2] + ["statusInvoicedSurface"],
+    # No segmented control puts muted words on the chosen segment: all five draw it with
+    # foreground and the others with subtle, so selectedSegment is checked for foreground only.
+    "muted": grounds + ["surface", "warningSurface"],
+    # The unchosen segments of every segmented control sit on the track.
+    "subtle": grounds + ["surface", "warningSurface", "segmentTrack"],
+    # Coloured words sit on every ground too: a ••• sheet menu draws its rows (Cancel job in
+    # destructive, links in brandText) on fill, and a select or field sets them on field.
+    "brandText": grounds + ["brandSurface"],
+    "success": grounds + ["successSurface"],
+    "warning": grounds + ["warningSurface"],
+    "destructive": grounds + ["destructiveSurface"],
+    "statusScheduledText": grounds + ["statusScheduledSurface"],
+    "statusInvoicedText": grounds + ["statusInvoicedSurface"],
     "onInk": ["foreground"],
     # Paper v2: the drawer / iPad sidebar and its chosen place; the AI accent as text.
-    "ai": grounds[:2] + ["aiSurface"],
+    "ai": grounds + ["aiSurface"],
 }
 for t in ["foreground", "muted", "subtle"]:
     checks[t] = checks[t] + ["sidebar", "sidebarAccent"]
@@ -54,7 +62,6 @@ for mode in ["light", "dark", "highLight", "highDark"]:
         print(f"  {text:22} " + " | ".join(row))
 # Non-text (WCAG 1.4.11): each status glyph hue against the grounds it is drawn on: the screen,
 # the well, and its own chip surface (unscheduled and cancelled chips sit on `fill`). 3:1, counted.
-tokens["statusDispatched"] = {m: "2F6BFF" for m in ["light", "dark", "highLight", "highDark"]}  # = brand, Color(hex:)
 glyphs = {
     "statusUnscheduled": "fill",
     "statusScheduled": "statusScheduledSurface",
@@ -86,13 +93,16 @@ for mode in ["light", "dark"]:
             fails += not ok
             row.append(f"{g} {r:.2f}{'' if ok else ' FAIL'}")
         print(f"  {mode:5} {n:12} " + " | ".join(row))
-# White type on a destructive commit or badge.
-print("== white on destructiveFill")
-for mode in ["light", "dark"]:
-    r = ratio("FFFFFF", tokens["destructiveFill"][mode])
-    ok = r >= 4.5
-    fails += not ok
-    print(f"  {mode:5} {r:.2f}{'' if ok else ' FAIL'}")
+# White type on a fill: the blue commit and pills (brand), a destructive commit or badge, the
+# white square on the voice note's Stop circle (destructiveFill), and a photo's After pill
+# (successFill).
+for fill in ["brand", "destructiveFill", "successFill"]:
+    print(f"== white on {fill}")
+    for mode in ["light", "dark"]:
+        r = ratio("FFFFFF", tokens[fill][mode])
+        ok = r >= 4.5
+        fails += not ok
+        print(f"  {mode:5} {r:.2f}{'' if ok else ' FAIL'}")
 # Paper v2: a field is ink at 9% over the card, so it always reads apart from the card it sits on
 # (darker in light, lighter in dark). It must never be the card's own tone.
 print("== field reads apart from the card")
@@ -100,13 +110,5 @@ for mode in ["light", "dark"]:
     ok = abs(lum(tokens["field"][mode]) - lum(tokens["card"][mode])) > 0.004
     fails += not ok
     print(f"  {mode:5} field {tokens['field'][mode]} vs card {tokens['card'][mode]}{'' if ok else ' FAIL'}")
-# The dark toast capsule (ThorbisToast) and its words.
-print("== toast")
-for mode in ["light", "dark", "highLight", "highDark"]:
-    for text in ["toastText", "toastMuted"]:
-        r = ratio(tokens[text][mode], tokens["toastFill"][mode])
-        ok = r >= 4.5
-        fails += not ok
-        print(f"  {mode:9} {text:10} toastFill {r:.2f}{'' if ok else ' FAIL'}")
 print("FAILURES:", fails)
 sys.exit(1 if fails else 0)

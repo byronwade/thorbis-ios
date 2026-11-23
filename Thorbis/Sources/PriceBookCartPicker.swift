@@ -3,6 +3,8 @@ import SwiftUI
 private struct PriceBookPickerLoadScope: Equatable {
     let context: PriceBookCatalogContext
     let apiGeneration: UUID
+    /// Re-runs the (60 s windowed) refresh after every answered check; never part of the context.
+    let verification: UUID
 }
 
 /// The price book as a cart (EB-01..EB-07): the search field is focused when it opens, this
@@ -104,7 +106,8 @@ struct PriceBookCartPicker: View {
         .sensoryFeedback(.success, trigger: added)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .task(id: PriceBookPickerLoadScope(context: context, apiGeneration: api.requestGeneration)) {
+        .task(id: PriceBookPickerLoadScope(context: context, apiGeneration: api.requestGeneration,
+                                           verification: session.verificationRevision)) {
             await refresh(false)
         }
         .task {
@@ -194,7 +197,14 @@ struct PriceBookCartPicker: View {
             #if DEBUG
             if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-revalidation") {
                 Button("Refresh sample authority") {
-                    Task { await session.revalidate(); previewRevalidated = true }
+                    Task {
+                        // `-feature-change`: the server answers a same-version authority change, which the
+                        // catalog adopts; without it the answer is identical and nothing moves.
+                        if ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-feature-change") {
+                            PaperPreviewProtocol.reviseSampleAuthority()
+                        }
+                        await session.revalidate(); previewRevalidated = true
+                    }
                 }.accessibilityIdentifier("price-book-preview-revalidate")
                 if previewRevalidated {
                     Text("Sample authority refreshed").accessibilityIdentifier("price-book-preview-revalidated")

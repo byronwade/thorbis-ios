@@ -15,11 +15,15 @@ The port plan is [paper-v2-port-plan.md](paper-v2-port-plan.md).
 
 - **Tokens** (`Theme.swift`) are Paper's. Light: canvas `#FAF9F6`, card `#FFFFFF`,
   sidebar `#F3F2EE`, type `#1A1A1A`. Dark: canvas `#1F1F1F`, card `#232323`,
-  sidebar `#141414`, type `#EDEDED`. Brand `#2F6BFF` (`Theme.brand`), for selected,
-  focus, switches and the one live thing. Status words use Paper's `-text` colours and
-  marks use the plain hue. `Theme.ai*` is Paper's purple for AI help only. Seven Paper
-  values are one shade off (1–4%) so that `scripts/tests/contrast.py` still passes
-  with 0 failures; `Theme.swift` lists them.
+  sidebar `#141414`, type `#EDEDED`. Brand `#2F6AFF` (`Theme.brand`; Paper's `#2F6BFF`,
+  one shade off so white type on the commit holds 4.5:1), for selected, focus, switches
+  and the one live thing. This is the iOS blue; the web keeps its own accent
+  (`#3A6AE0`), and neither client is repainted to the other's. Status words use Paper's
+  `-text` colours and marks use the plain hue. `Theme.ai*` is Paper's purple for AI help
+  only. Eight Paper values are one shade off (1–4%), and five coloured words (dark brand
+  text, destructive and AI; light success and warning) sit one step further from the ground
+  so they hold 4.5:1 on a chip fill and a field as well as the canvas and card. With them
+  `scripts/tests/contrast.py` passes with 0 failures; `Theme.swift` lists them.
 - **Canvas:** every screen sits on Paper's `sidebar` tone (`Theme.background` =
   `#F3F2EE` / `#141414`) with grouped cards (`Theme.card`, radius 20) on top; Paper's own
   `background` (`#FAF9F6` / `#1F1F1F`) only frames the drawer in its mock-ups.
@@ -45,46 +49,31 @@ The port plan is [paper-v2-port-plan.md](paper-v2-port-plan.md).
 
 ## Design direction (v2, 31 October 2026)
 
-**Linear grammar on design.thorbis.com tokens; the drawer is an owner-approved
-exception.** The owner asked for "linear.app mobile app and design.thorbis.com".
-Linear's mobile app sets the layout grammar (quiet titles, circles, text tabs,
-grouped sections by space, property chips, a composer, anchored popovers).
+**Linear grammar on design.thorbis.com tokens.** The owner asked for "linear.app
+mobile app and design.thorbis.com". Linear's mobile app sets the layout grammar
+(quiet titles, circles, text tabs, grouped sections by space, property chips, a
+composer, anchored popovers).
 design.thorbis.com (`docs` copy: the site's text) is the law for tokens, depth,
 controls, forms, words, places and states. "Linear grammar. Not Linear dress":
 no Linear purple, no issue row, no status rings as decoration. The site says
-"iOS is a tab bar and a stack"; the owner overrides that one rule for this app
-and keeps the side drawer (rule 6). Everything below that predates v2 yields to
-these points where they disagree:
+"iOS is a tab bar and a stack". From 31 October to 18 November 2026 the owner
+overrode that one rule with a side drawer; since 18 November the iPhone defaults
+to Paper 18A's bottom bar again, with the drawer behind Menu and as a Settings
+choice (rule 6). Everything below that predates v2 yields to these points where
+they disagree:
 
-- **Tokens** (`Theme.swift`): dark is the first drawing — canvas oklch 14.5%,
-  panel 20.5%, cream type, a cool grey body, a dimmer marker. Light is the warm
-  cream sheet (canvas `#F7F4EE`, panel `#FDFCFA`). One electric-blue accent
-  (`Theme.brand`, oklch 55.8% 0.188 264.4) for selected, focus and the one live
-  thing — never a wash. Status hues are the site's success, error, info and
-  warning, tuned in lightness only. Place marks are olive, forest, pumpkin, burnt
-  and the accent mixed down. `scripts/tests/contrast.py` holds 4.5:1 text, 3:1
-  marks, both themes and Increase Contrast, with 0 failures.
-- **Type:** Inter Regular 400 and Medium 500 only (`Theme.allowed` maps heavier
-  to 500). Staff screens use a compact ramp (`Theme.onRamp`): body and row titles
-  15, supporting lines 14, chrome 13 Medium, captions 12, sheet titles 16–17,
-  detail titles 24, root titles 26; money hero 30. Customer-facing presentation
-  keeps its 17pt / 56pt floors through `Theme.customerFont`.
-- **Depth:** Rest (the sheet is planar), Sink (fields and selects: `Theme.field`,
-  one step darker, inset, 1px rim — `fieldWell()`), Lift (the ink commit: radius
-  10, 1px rim, 1px light from above, 1px drop; press sinks), Overlay (menus and
-  popovers only: the panel with a real shadow). There is no fifth.
-- **No separators:** never a line between rows, under a heading or as a 1px box
-  around a section, and never a coloured side rail. A 1px rim belongs only to a
-  field, a commit, a chip or a photo. Tone, type and space separate things.
 - **Status is a word** (`StatusLabel`: a small mark in the hue, then the word).
   A row never shows colour without its word. Rows lead with the street (time in
   a tabular column); the status word sits in the subtitle or at the trailing edge.
 - **Places:** a route for durable records; a modal (`ThorbisModalSheet`, a clean
-  system sheet on the panel with detents, 17pt Medium title, close circle, one
-  ink commit in the pad) for one task; an anchored popover (`ThorbisMenu`) for
-  one local choice — status, tech, payment method, the ••• overflow. Never
-  pre-disable a commit: let them press it and say what is missing under the
-  field; if it truly must be off, a sentence says why.
+  system sheet on the panel with detents, one of Paper's three headers, one blue
+  commit in the pad) for one task; an anchored popover (`ThorbisMenu`) for one
+  local choice — status, tech, payment method; a page's own ••• menu is a bottom
+  sheet. Never pre-disable a commit: let them press it and say what is missing
+  under the field; if it truly must be off, a sentence says why.
+- **Depth:** Rest (the sheet is planar), Sink (fields and selects: `Theme.field`,
+  a step off the card, inset, 1px rim — `fieldWell()`), the commit (the brand-blue
+  pill in Controls above), Overlay (menus and popovers only). There is no fifth.
 - **Motion:** 120ms ease-out for menus, chips and segments; no bounce or stagger
   on routine work; the drawer and sheets may use the system spring; respect
   Reduce Motion. Haptics stay.
@@ -97,6 +86,39 @@ wireframes, flows, conflict policies, privacy guidance and quality targets.
 Use the [implementation process](ios-implementation-process.md) on every change.
 The source is preserved verbatim. Its imported citation markers are not resolved
 source evidence; verify platform/API/version claims before relying on them.
+
+### History (superseded 16 November 2026)
+
+The Paper v2 section at the top replaced these 31 October points. They stay as the
+record of that pass; do not build to them.
+
+- **Tokens** (`Theme.swift`): dark is the first drawing — canvas oklch 14.5%,
+  panel 20.5%, cream type, a cool grey body, a dimmer marker. Light is the warm
+  cream sheet (canvas `#F7F4EE`, panel `#FDFCFA`). One electric-blue accent
+  (`Theme.brand`, oklch 55.8% 0.188 264.4: the web's accent `#3A6AE0`, which the
+  web keeps; iOS now draws Paper's blue) for selected, focus and the one live
+  thing — never a wash. Status hues are the site's success, error, info and
+  warning, tuned in lightness only. Place marks are olive, forest, pumpkin, burnt
+  and the accent mixed down. `scripts/tests/contrast.py` holds 4.5:1 text, 3:1
+  marks, both themes and Increase Contrast, with 0 failures.
+- **Type:** Inter Regular 400 and Medium 500 only (`Theme.allowed` maps heavier
+  to 500). Staff screens use a compact ramp (`Theme.onRamp`): body and row titles
+  15, supporting lines 14, chrome 13 Medium, captions 12, sheet titles 16–17,
+  detail titles 24, root titles 26; money hero 30. Customer-facing presentation
+  keeps its 17pt / 56pt floors through `Theme.customerFont`.
+- **Depth (31 October):** Rest (the sheet is planar), Sink (fields and selects:
+  `Theme.field`, one step darker, inset, 1px rim — `fieldWell()`), Lift (the ink commit: radius
+  10, 1px rim, 1px light from above, 1px drop; press sinks), Overlay (menus and
+  popovers only: the panel with a real shadow). There is no fifth.
+- **No separators:** never a line between rows, under a heading or as a 1px box
+  around a section, and never a coloured side rail. A 1px rim belongs only to a
+  field, a commit, a chip or a photo. Tone, type and space separate things.
+- **Places (31 October):** a route for durable records; a modal
+  (`ThorbisModalSheet`, a clean system sheet on the panel with detents, 17pt
+  Medium title, close circle, one ink commit in the pad) for one task; an anchored popover (`ThorbisMenu`) for
+  one local choice — status, tech, payment method, the ••• overflow. Never
+  pre-disable a commit: let them press it and say what is missing under the
+  field; if it truly must be off, a sentence says why.
 
 ## Authority and consistency
 
@@ -131,10 +153,20 @@ source evidence; verify platform/API/version claims before relying on them.
    Jobs/Today is the field-work home direction; Current/Arrive, Inbox and Search
    are meaningful destinations. Preserve existing routes while deliberately
    aligning navigation; the sample tab diagram is not a completed migration.
-   *Redesign, 31 October 2026 (drawer, simplified after build 125):* the iPhone
-   navigates with a side drawer in the style of the Claude and ChatGPT iOS apps;
-   the floating tab bar and the More screen are gone. Roots lead their header with
-   a round menu circle at top left (their own circles — filter, + — stay right).
+   *Current (Paper 18A, shipped 18 November 2026):* iPhone defaults to the Paper
+   18A bottom bar (`PhoneTabBar`): a Search circle, a pill of four icon-only places
+   for the role (technician and office: Schedule, Jobs, Customers, Inbox; owner:
+   Home, Schedule, Jobs, Money), then Menu (three lines), which opens the drawer, and the
+   account circle. Settings › Menu and start screen › Navigation offers the side
+   drawer alone; iPad keeps its sidebar. Roots keep `DrawerMenuCircle` only in
+   sidebar mode. DEBUG previews and UI tests run the drawer unless launched with
+   `--paper-preview-nav bottom` (`TabBarUITests` covers the bar). The drawer
+   described below is the one Menu and the sidebar choice open.
+   *Redesign, 31 October 2026 (drawer, simplified after build 125; superseded as
+   the default on 18 November):* the iPhone navigated with a side drawer in the
+   style of the Claude and ChatGPT iOS apps; the floating tab bar and the More
+   screen went. In sidebar mode, roots lead their header with a round menu circle
+   at top left (their own circles — filter, + — stay right).
    *Cream sheet, 1 November 2026 (C-Job, build 140):* pushed screens (job,
    customer, estimate, invoice, …) show the round Back circle alone at top left, with
    no menu circle beside it; the drawer opens from the place's root. An edge swipe
@@ -144,11 +176,12 @@ source evidence; verify platform/API/version claims before relying on them.
    the person comes back. The drawer is about 80% of the screen and pushes the
    place right as a slightly dimmed card with the device's corner radius, a soft
    shadow and a hairline edge in dark mode, on a gentle spring (Reduce Motion
-   fades). *v2:* the drawer is an owner-approved exception to "iOS is a tab bar
-   and a stack"; it wears the v2 tokens — the panel tone, a modest 17pt Medium
-   business name, Medium place words in body grey that lift to cream for the
-   place showing, and place marks in soft hues, outlined at rest and filled for
-   the place showing (no wash on the row). Keep it calm — it lists only: the business name (one
+   fades). *v2:* the drawer was an owner-approved exception to "iOS is a tab bar
+   and a stack" until the bottom bar returned as the default; it wears the v2
+   tokens — the panel tone, a modest 17pt Medium business name, Medium place
+   words in body grey that lift to cream for the place showing, and place marks
+   in soft hues, outlined at rest and filled for the place showing (no wash on
+   the row). Keep it calm — it lists only: the business name (one
    line) and a search circle; at most five places for the person's role (no
    header; about 44pt rows) — technicians Today, Jobs, Customers, Inbox; office Schedule, Jobs,
    Customers, Money, Inbox; owners Home, Jobs, Customers, Money, Inbox (Home
@@ -196,13 +229,15 @@ source evidence; verify platform/API/version claims before relying on them.
    creating an equal-button dashboard. Reserve cards for bounded objects such as
    media or a financial summary. Status is always a word, with color/symbols as
    reinforcement. Keep list scope, filters, position and saved views on return.
-   *v2 (31 October 2026):* grouped sections are the norm — a 13pt Medium section
-   header with its count above rows on one panel (`Theme.well`, radius 14), with
-   no line between rows and no box around the group (`Well`, `WellList`,
-   `SectionHeader`; `WellDivider` now draws nothing). Rows lead with the street and
-   carry the status as a word with its small mark (`StatusLabel`). Avatars
-   (`InitialsAvatar`, in place-mark hues) and pill chips (`PropertyChip`, a 1px rim)
-   are allowed.
+   *Paper v2 (16 November 2026, current):* grouped sections are the norm — a 13pt
+   Semibold section label with its count at the trailing edge (`SectionHeader`)
+   above rows on one card (`Well`, `Theme.well`, radius 20), with a hairline
+   (`WellDivider`) between rows inside the card, inset to the row text, never
+   between cards or under a heading. Rows lead with the street and carry the
+   status as a word with its small mark (`StatusLabel`); a record's header carries
+   one `RecordStatusBadge`. Avatars (`InitialsAvatar`) are allowed. *Superseded:*
+   the 31 October v2 note (radius 14, no line between rows, property chips with a
+   1px rim).
 
 ## Visual and interaction system
 

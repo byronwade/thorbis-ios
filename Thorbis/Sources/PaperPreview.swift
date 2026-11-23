@@ -110,6 +110,11 @@ enum PaperPreview {
     }
     /// Set once a document's Description sheet has opened; the preview's document changes wait for it.
     @MainActor static var descriptionOpened = false
+    /// Set once the price book's local item sheet has opened; `--paper-preview-pricebook-from-detail` waits for it.
+    @MainActor static var priceBookDetailOpened = false
+    /// Set when the saved work review's discard question opens and cleared by the two sample access buttons;
+    /// under `--paper-preview-saved-work-from-question` they wait for it.
+    @MainActor static var savedWorkDiscardQuestionOpened = false
     @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
         let args = ProcessInfo.processInfo.arguments
         guard isJobDocumentsPreview || (screen == "present-estimate" && args.contains("--paper-preview-option-long-description")),
@@ -248,7 +253,7 @@ enum PaperPreview {
         return [primary,
          changed(alternate, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
                             ? "00000000-0000-4000-8000-000000012209" : "00000000-0000-4000-8000-000000002240",
-                           "status": equalBalances || mixedBalance ? "issued" : "paid", "origin": "estimate_deposit",
+                           "status": equalBalances || mixedBalance ? "issued" : "paid", "origin": "deposit",
                            "currency": mixedBalance ? "EUR" : original.currency,
                            "amountPaid": equalBalances || mixedBalance ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),
@@ -279,7 +284,9 @@ enum PaperPreview {
     }
     /// Synthetic long lists for catalog-entry navigation checks; no writes or real records.
     private static func longCatalogLines(offset: Int = 0) -> [FieldLine] {
-        let count = ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") ? 500 : 12
+        // At the limit only the first list holds 500 (the invoice, the estimate's first option): a second
+        // 500-line option doubles every accessibility read of the screen and tests nothing more.
+        let count = offset == 0 && ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") ? 500 : 12
         return (0..<count).map { index in
             FieldLine(id: String(format: "00000000-0000-4000-8000-%012d", 88000 + offset + index),
                       description: "Sample work item \(index + 1)", quantity: 1,
@@ -789,7 +796,15 @@ struct SavedWorkPreviewControls: View {
                 let actor = session.user?.id, organization = session.activeOrganization?.id
                 let before = try? PaperPreview.savedWorkFileHashes()
                 let mutations = PaperPreviewProtocol.savedWorkMutationCount
+                PaperPreview.savedWorkDiscardQuestionOpened = false
                 Task { @MainActor in
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-from-question") {
+                        // Count from the open discard question, as the price book does from an open item:
+                        // on a slow simulator the tap that opens it can't use up the delay.
+                        for _ in 0..<600 where !PaperPreview.savedWorkDiscardQuestionOpened {
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
+                    }
                     try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled else { return }
                     PaperPreviewProtocol.revokeSavedWorkEditing()
@@ -813,7 +828,15 @@ struct SavedWorkPreviewControls: View {
             }.frame(minHeight: 44)
             Button("Retire sample requests") { api.invalidateRequests() }.frame(minHeight: 44)
             Button("Switch sample workspace shortly") {
+                PaperPreview.savedWorkDiscardQuestionOpened = false
                 Task { @MainActor in
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-from-question") {
+                        // Count from the open discard question, as the price book does from an open item:
+                        // on a slow simulator the tap that opens it can't use up the delay.
+                        for _ in 0..<600 where !PaperPreview.savedWorkDiscardQuestionOpened {
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
+                    }
                     try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled else { return }
                     PaperPreviewProtocol.switchSavedWorkWorkspace()
@@ -853,6 +876,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var answeredListPaths: Set<String> = []
         var jobReopened = false
         var estimateOnInvoice: String?
+        /// How many times the sample server has revised authority: each adds one feature decision nothing
+        /// on screen reads, so capabilities, the policy version and the generation stay the same.
+        var authorityRevisions = 0
     }
     private static let scenario = Scenario()
     /// The sample estimate line the invoice-revisions preview adds to the sample invoice.
@@ -908,8 +934,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0; scenario.jobReopened = false; scenario.estimateOnInvoice = nil }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0; scenario.jobReopened = false; scenario.estimateOnInvoice = nil; scenario.authorityRevisions = 0 }
     }
+    /// A real authority change for the next revalidation, unlike an identical answer, which keeps open
+    /// work: the features read gains one more decision nothing on screen reads. Every capability, the
+    /// policy version, the generation and each can() stay the same, so it changes `authorityRevision`
+    /// and nothing else, as every check used to. Each call is a new change.
+    static func reviseSampleAuthority() { scenario.lock.withLock { scenario.authorityRevisions += 1 } }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
     static func beginSavedWorkOffline() -> Bool {
@@ -984,6 +1015,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        // `--paper-preview-picker-stale-window`: the reload a revised sample authority starts is never
+        // answered, so the picker is read while that reload runs over the snapshot it kept.
+        if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-stale-window"), url.path == "/v1/query",
+           let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }),
+           Self.scenario.lock.withLock({ Self.scenario.authorityRevisions > 0 }) {
+            return
+        }
         // Keep the second catalog page pending to exercise honest partial search states.
         if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
@@ -1717,7 +1757,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
-            if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
+            // The description preview revokes it on the present-estimate screen too (expireDocumentSessionForTesting).
+            if PaperPreview.isJobDocumentsPreview || PaperPreview.screen == "present-estimate", scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.invoiceEditRevoked }) { capabilities.removeAll { $0 == "invoice.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.completionViewRevoked }) { capabilities.removeAll { $0 == "invoice.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
@@ -1731,7 +1772,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "owner-home", PaperPreview.role == nil { capabilities.append("organization.settings.edit") }
-            if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
+            // An owner or admin holds both: pricebook.edit opens, edits and removes items (the server's
+            // check), organization.settings.edit manages the book's settings.
+            if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities += ["organization.settings.edit", "pricebook.edit"] }
             if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
             if PaperPreview.isInvoiceRevisionsPreview { capabilities.append("job.complete") }
             switch PaperPreview.role {
@@ -1757,6 +1800,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
             if PaperPreview.isInvoiceRevisionsPreview { enabledFeatures += ["job_reopen", "invoice_revisions"] }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-checklists") { enabledFeatures.append("job_checklists") }
+            // reviseSampleAuthority(): one more decision per revision, which nothing on screen reads.
+            let revisions = scenario.lock.withLock { scenario.authorityRevisions }
+            if revisions > 0 { enabledFeatures += (1...revisions).map { "preview_authority_revision_\($0)" } }
             let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
@@ -2367,8 +2413,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.screen.hasPrefix("next-stop") {
             listed = listed.map { $0.merging(["locationId": "00000000-0000-4000-8000-000000007001"]) { _, new in new } }
         }
-        // Today's and Jobs' rows lead with the street (design 2026-10-30); one visit has no site, so its row
-        // shows the fallback to the job title (BYR-1593).
+        // Today's rows lead with the street (design 2026-10-30); one visit has no site (BYR-1593), so the phone's
+        // Today shows its customer's only address on file with that caveat. Jobs rows show no street; Search and
+        // the iPad keep its title.
         if ["my-day", "schedule", "schedule-week", "jobs", "jobs-filters"].contains(PaperPreview.screen) || PaperPreview.screen.hasPrefix("search") {
             listed = listed.map { row in
                 (row["id"] as? String)?.hasSuffix("2224") == true ? row
@@ -2403,7 +2450,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         // The visit someone is on (Chen's water heater) has its site on every screen, so the iPad
         // sidebar's "On now" card leads with the same street on every place. The sample job keeps
-        // its per-screen site: its screens show the title when it has none.
+        // its per-screen site: with none, its screens lead with the title, and the job page's header
+        // says its customer's only address on file with the caveat (JobFallbackAddress).
         listed = listed.map { row in
             row["status"] as? String == "in_progress" && row["locationId"] == nil && row["id"] as? String != PaperPreview.jobID
                 ? row.merging(["locationId": PaperPreview.homeLocationID]) { _, new in new } : row

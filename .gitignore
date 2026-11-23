@@ -4,3 +4,4 @@ DerivedData/
 
 .codegraph/
 .superpowers/
+__pycache__/

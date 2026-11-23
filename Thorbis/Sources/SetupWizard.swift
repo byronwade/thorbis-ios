@@ -102,7 +102,7 @@ enum SetupStep: String, CaseIterable, Identifiable {
     @MainActor func permitted(_ session: SessionController) -> Bool {
         switch self {
         case .trade, .company, .legal, .messages, .hours, .payments: session.can("organization.settings.edit")
-        case .customers: session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm")
+        case .customers: CustomerImportModel.permitted { session.can($0, feature: "core_crm") }
         case .services: session.can("pricebook.edit", feature: "price_book") || session.can("organization.settings.edit", feature: "price_book")
         case .team: session.can("organization.members.manage")
         case .done: true

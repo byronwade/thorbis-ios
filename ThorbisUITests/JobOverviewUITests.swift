@@ -49,7 +49,9 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Activity", "job-section-chooser")).firstMatch.tap()
         let photos = app.buttons["activity-filter-photos"]
-        let content = app.scrollViews.firstMatch
+        // The job's own scroll view (on iPad the list column beside it comes first).
+        let content = app.usesTabletLayout ? app.scrollViews.containing(.button, identifier: "activity-filter-photos").firstMatch
+                                           : app.scrollViews.firstMatch
         XCTAssertTrue(photos.waitForExistence(timeout: 10))
         for _ in 0..<8 where !photos.isHittable { content.swipeUp() }
         XCTAssertTrue(photos.isHittable); photos.tap()
@@ -69,7 +71,9 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
         let notes = app.buttons["activity-filter-notes"]
         let photos = app.buttons["activity-filter-photos"]
-        let content = app.scrollViews.firstMatch
+        // The job's own scroll view (on iPad the list column beside it comes first).
+        let content = app.usesTabletLayout ? app.scrollViews.containing(.button, identifier: "activity-filter-notes").firstMatch
+                                           : app.scrollViews.firstMatch
         XCTAssertTrue(notes.waitForExistence(timeout: 10))
         for _ in 0..<6 where !notes.isHittable { content.swipeUp() }
         XCTAssertTrue(notes.isHittable); notes.tap()
@@ -271,6 +275,10 @@ final class JobOverviewUITests: XCTestCase {
         // Owner 2026-11-21: the customer is the first pill of the related row under the header.
         let customer = app.buttons["job-customer-link"]
         XCTAssertTrue(customer.waitForExistence(timeout: 20))
+        // The job first shows the workspace the last launch saved. Measure the link once this
+        // launch's customer list has named the customer.
+        let named = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Danielle Marlowe"), object: customer)
+        XCTAssertEqual(XCTWaiter.wait(for: [named], timeout: 15), .completed, customer.label)
         // Bring the row into the open middle of the screen, clear of the bar above and the commit below.
         let barBottom = app.navigationBars.firstMatch.frame.maxY
         for _ in 0..<12 {
@@ -294,7 +302,10 @@ final class JobOverviewUITests: XCTestCase {
         app.launch()
         let customer = app.buttons["job-customer-link"]
         XCTAssertTrue(customer.waitForExistence(timeout: 20))
-        XCTAssertTrue(customer.label.hasPrefix("I"), customer.label)
+        // The job first shows the workspace the last launch saved, where the sample customer is
+        // Danielle Marlowe. Measure once this launch's customer list has put the short name in.
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "I"), object: customer)], timeout: 15), .completed,
+                       customer.label)
         XCTAssertGreaterThanOrEqual(customer.frame.width, 44)
         XCTAssertGreaterThanOrEqual(customer.frame.height, 44)
     }
@@ -316,6 +327,13 @@ final class JobOverviewUITests: XCTestCase {
         address.tap()
         let locations = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Service addresses")).firstMatch
         XCTAssertTrue(locations.waitForExistence(timeout: 20))
+        // The page's own reads land above the row after Service addresses shows: the equipment, who
+        // was notified and the plan push it down a page. Asked for its hittability while they land,
+        // XCTest reads a point that was on screen and a frame that no longer is, and throws.
+        for section in ["Equipment", "Who was notified", "Maintenance plan"] {
+            let title = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", section)).firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 20), "\(section) has not loaded on At this address")
+        }
         let details = app.buttons["More job details"]
         for _ in 0..<12 where !details.isHittable { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(details.waitForExistence(timeout: 5))
@@ -368,7 +386,7 @@ final class JobOverviewUITests: XCTestCase {
         let back = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Back to the visit")).firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
         XCTAssertTrue(app.buttons["job-tool-photo"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["job-section-money"].exists, "Field mode has no sections")
+        XCTAssertTrue(app.buttons["job-section-money"].waitForNonExistence(timeout: 5), "Field mode has no sections")
     }
 
     func testSingleEstimateOptionUsesSingularLabel() {
@@ -518,7 +536,9 @@ final class JobOverviewUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview("job", accessibleText: true, working: true)
         let chooser = app.buttons["job-section-chooser"]
-        let content = app.scrollViews.firstMatch
+        // The job's own scroll view (on iPad the list column beside it comes first).
+        let content = app.usesTabletLayout ? app.scrollViews.containing(.button, identifier: "job-section-chooser").firstMatch
+                                           : app.scrollViews.firstMatch
         XCTAssertTrue(chooser.waitForExistence(timeout: 20))
         for _ in 0..<5 where !chooser.isHittable { content.swipeUp() }
         XCTAssertTrue(chooser.isHittable)

@@ -19,10 +19,12 @@ The new "Thorbis Mobile" Paper files (about 420 phone screens, each with a table
 and light) replace "Thorbis — Schedule Redesign" as the Paper reference for this app. This plan says
 how the Swift code changes to match them.
 
-## 1. Navigation — keep the drawer and sidebar
+## 1. Navigation — bottom bar, drawer and sidebar
 
-Paper and the code already agree: a side drawer on iPhone and a sidebar on iPad. Bottom tabs
-(Paper 18A) stay an unbuilt option. What changes is the **contents** of the drawer and sidebar.
+Bottom tabs (Paper 18A) shipped as the iPhone default on 2026-11-18 (`PhoneTabBar`: four places
+for the role, then Menu (three lines), which opens the drawer). Settings › Menu and start screen › Navigation
+offers the side drawer alone, and iPad keeps its sidebar. When this plan was written the code had
+the drawer only. What changes below is the **contents** of the drawer and sidebar.
 
 | Role (Paper) | Menu in Paper | In code today |
 |---|---|---|

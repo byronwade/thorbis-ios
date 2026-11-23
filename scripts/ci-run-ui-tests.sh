@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# Run one shard's UI tests, and run a failed test once more only when the simulator itself
+# cancelled the tap, or failed to deliver the key chord, that test failed on.
+#
+#   scripts/ci-run-ui-tests.sh <xctestrun> <simulator-id> <result-bundle> <evidence-dir> \
+#       -only-testing:ThorbisUITests/SomeClass [...]
+#
+# Why: XCTest taps through a virtual touchscreen it attaches for each gesture. On a busy runner
+# the simulator's input server sometimes registers that touchscreen twice, drops the lift and
+# cancels the touch, and logs "*** unknown digitizer". The app sees a cancelled touch and does
+# nothing, so the test fails on a tap no person made (BYR-1835; scripts/ci_cancelled_taps.py
+# has the detail). XCTest also presses each keyboard chord through a virtual keyboard it attaches
+# for that one press. backboardd hands a ⌘ chord to the app as a key command only once the app
+# has registered its key commands with it, and on the iPad that registration now and then comes
+# only after the test has pressed twice. Until then it logs a cache miss and hands the app the
+# bare letter, so the test fails on a chord the app never received (BYR-1843).
+#
+# What this does NOT do: retry failures. A failed test is run again only when ALL of these hold.
+#   - xcodebuild exited 65, its status for failed tests, and nothing else went wrong.
+#   - The run is fully accounted for: one session, every started test finished, and xcodebuild's
+#     own count of tests and failures matches the log, with no unexpected failure.
+#   - EVERY failed test failed on the wait right after a tap, its first failure speaks of no
+#     crash or launch, and backboardd logged that error at that tap; or it failed on the wait
+#     right after a key chord, backboardd sent every chord of the test to the app as a bare key
+#     before the app had registered any key commands, matched no command against the app, and
+#     the app's first registration after the last chord lists that chord.
+#   - There are at most three of them, and the job has time left to run them.
+# Each is then run once, by itself. The step passes only if each of those runs shows that one
+# test passing. Anything else leaves the first run's failure standing. Every re-run is announced
+# as a warning on the job, with the reasons, and listed in the step summary.
+#
+# While the tests run, a filter on the simulator's log keeps only backboardd's lines for that
+# error and for how it routes keys: the app's connection, its key command registrations, each
+# key command match and each bare key it hands on. It reads the log; it does not touch the app.
+# Evidence (the times, the log lines, the decision, each re-run's times and result bundle) goes
+# to <evidence-dir>, which is created only when a test failed.
+#
+# When THORBIS_HOLD_SAMPLES names a directory, scripts/ci_hold_sampler.py also runs beside the
+# first run of the tests: evidence for BYR-1841, not a test. It takes a stack sample of the app
+# when its main thread has been held for 5 s, writes the samples to that directory and prints one
+# summary line to the job log. It follows its own log stream, which it starts in a process group
+# of its own, at the default level and louder only when that delivers nothing. The sampler
+# itself is stopped by its own pid. It never touches the filter above. It does not change how a
+# test passes or fails, this script's exit status, or which test is run once more. It does add
+# some load while it runs: a filtered log stream for the first run, and, during a hold that has
+# already lasted 5 s, a 3 s stack sample. It does not watch a test that is run once more by
+# itself. Unset, nothing of it runs.
+set -uo pipefail
+
+if [[ $# -lt 5 ]]; then
+  echo "usage: ci-run-ui-tests.sh <xctestrun> <simulator-id> <result-bundle> <evidence-dir> -only-testing:... [...]" >&2
+  exit 2
+fi
+test_run=$1
+simulator_id=$2
+result_bundle=$3
+evidence=$4
+shift 4
+
+here=$(cd "$(dirname "$0")" && pwd)
+
+run_tests() { # <result bundle> <-only-testing:...>...
+  local bundle=$1
+  shift
+  xcodebuild -xctestrun "$test_run" \
+    -destination "platform=iOS Simulator,id=$simulator_id" \
+    -resultBundlePath "$bundle" \
+    -parallel-testing-enabled NO \
+    "$@" test-without-building
+}
+
+# Without a scratch directory nothing can be noted, so the tests run as they always did.
+if ! scratch=$(mktemp -d "${TMPDIR:-/tmp}/ui-tests.XXXXXX"); then
+  run_tests "$result_bundle" "$@"
+  exit
+fi
+# The hold sampler's pid, while it runs. Only ever signalled by this exact pid.
+hold_sampler=
+# Ask it to stop. Never waits: the tests' own decision follows at once.
+stop_hold_sampler() {
+  if [[ -n "$hold_sampler" ]]; then
+    kill -TERM "$hold_sampler" 2>/dev/null || true
+  fi
+}
+# On the way out, give it up to 30 s to finish a sample and write its summary, so its files are
+# whole for the upload step, and then end it. Runs from the EXIT trap, after every decision and
+# re-run; it calls no `exit`, so the script's own exit status stands.
+# shellcheck disable=SC2329 # called from the EXIT trap
+end_hold_sampler() {
+  local waited=0
+  [[ -n "$hold_sampler" ]] || return 0
+  kill -TERM "$hold_sampler" 2>/dev/null || true
+  while kill -0 "$hold_sampler" 2>/dev/null && ((waited < 150)); do
+    sleep 0.2
+    waited=$((waited + 1))
+  done
+  if kill -0 "$hold_sampler" 2>/dev/null; then
+    kill -KILL "$hold_sampler" 2>/dev/null || true
+    echo "Hold sampler (BYR-1841): it did not stop within 30 s and was ended; its files may be incomplete." >&2
+  fi
+  hold_sampler=
+}
+trap 'end_hold_sampler; rm -rf "$scratch"' EXIT
+times="$scratch/test-times.tsv"
+taps="$scratch/cancelled-taps.log"
+: >"$times"
+: >"$taps"
+
+# The lines, as they are logged. `cat` keeps the stream writing to a pipe: into a pipe it handed
+# over each line as it was logged (seen in run 45119132156), and into a file it may hold lines back.
+# The first clause is the one stop_watcher looks for; keep it first and keep its words.
+xcrun simctl spawn "$simulator_id" log stream --style compact --level default \
+  --predicate 'process == "backboardd" AND (eventMessage CONTAINS "unknown digitizer" OR eventMessage CONTAINS "KCMD: " OR eventMessage CONTAINS "cache miss for Keyboard event" OR eventMessage CONTAINS "sequence starting with Keyboard event" OR eventMessage CONTAINS "new key command registrations for pid:" OR (eventMessage CONTAINS "Connection added: " AND eventMessage CONTAINS " process:Thorbis "))' </dev/null 2>/dev/null |
+  cat >"$taps" &
+watcher=$!
+
+# Evidence for BYR-1841 (scripts/ci_hold_sampler.py), only when asked for. Its own stream has its
+# own predicate, so stop_watcher's pkill pattern never matches it, and it never signals the
+# filter above. It reads nothing of ours and writes nothing to standard output; its standard
+# error is the job's log.
+if [[ -n "${THORBIS_HOLD_SAMPLES:-}" ]]; then
+  python3 "$here/ci_hold_sampler.py" watch "$simulator_id" "$THORBIS_HOLD_SAMPLES" </dev/null >/dev/null &
+  hold_sampler=$!
+fi
+
+# Stop the reader and the stream. Never wait for either: a stream that outlived both signals
+# would hold the step until the job's time ran out, and it holds nothing of the step's.
+stop_watcher() {
+  kill "$watcher" 2>/dev/null || true
+  pkill -f 'eventMessage CONTAINS "unknown digitizer"' 2>/dev/null || true
+}
+
+# Run the tests with their output copied to the job's log through `stamp`, which notes each test
+# fact in <times file>. Sets $ran to xcodebuild's own exit status. The script waits for
+# xcodebuild, not for the end of its output: the copy is given ten seconds after xcodebuild
+# exits and is then stopped, so a process xcodebuild started that still holds its output cannot
+# hold the step. A copy stopped early loses facts, and lost facts never lead to a re-run.
+stamped() { # <times file> <result bundle> <-only-testing:...>...
+  local times_file=$1 output="$scratch/xcodebuild-output" stamper waited=0
+  shift
+  ran=0
+  rm -f "$output"
+  if ! mkfifo "$output"; then
+    run_tests "$@" 2>&1 | python3 "$here/ci_cancelled_taps.py" stamp "$times_file" || ran=${PIPESTATUS[0]}
+    return 0
+  fi
+  python3 "$here/ci_cancelled_taps.py" stamp "$times_file" <"$output" &
+  stamper=$!
+  run_tests "$@" >"$output" 2>&1 || ran=$?
+  while kill -0 "$stamper" 2>/dev/null && ((waited < 50)); do
+    sleep 0.2
+    waited=$((waited + 1))
+  done
+  kill "$stamper" 2>/dev/null || true
+  rm -f "$output"
+}
+
+stamped "$times" "$result_bundle" "$@"
+status=$ran
+stop_watcher
+stop_hold_sampler
+
+# Say on every run whether that filter started. The log tool prints the filter it accepted as
+# its first line, so a filter it refused shows on a green run too, not only when a test failed.
+if [[ -s "$taps" ]]; then
+  echo "Simulator log filter: $(head -n 1 "$taps")" >&2
+else
+  echo "Simulator log filter: the log stream wrote nothing, so no failed test in this shard can be run once more." >&2
+fi
+
+if ((status == 0)); then
+  exit 0
+fi
+
+mkdir -p "$evidence"
+cp "$times" "$taps" "$evidence/" 2>/dev/null || true
+
+# 65 is xcodebuild's status when tests failed. Any other status (the run itself failed, the
+# result bundle could not be written) is not a test's failure and is never run again.
+if ((status != 65)); then
+  echo "xcodebuild exited $status, not 65 (tests failed). Nothing is run again." | tee "$evidence/decision.txt" >&2
+  exit "$status"
+fi
+
+decided=0
+again=$(python3 "$here/ci_cancelled_taps.py" decide "$evidence/test-times.tsv" "$evidence/cancelled-taps.log" 2>"$evidence/decision.txt") || decided=$?
+cat "$evidence/decision.txt" >&2
+if ((decided != 0)) || [[ -z "$again" ]]; then
+  exit "$status"
+fi
+
+# The job stops at 90 minutes. A re-run started after 70 minutes of this script may not finish,
+# and a cancelled job would lose this decision from its summary, so the failure stands instead.
+count=0
+for test in $again; do
+  count=$((count + 1))
+  if ((SECONDS > 4200)); then
+    echo "::error::No time is left to run $test once more before the job's limit. The failure stands."
+    exit "$status"
+  fi
+  if grep -qF "$test: the simulator did not deliver the key chord" "$evidence/decision.txt"; then
+    why="the simulator did not deliver the key chord it failed on (backboardd sent the app the bare key before the app had registered its key commands). BYR-1843."
+  else
+    why="the simulator cancelled the tap it failed on (backboardd logged \"unknown digitizer\"). BYR-1835."
+  fi
+  echo "::warning::Running $test once more by itself: $why The first run's result is in this shard's result bundle."
+  rerun_times="$evidence/rerun-$count-times.tsv"
+  : >"$rerun_times"
+  stamped "$rerun_times" "$evidence/rerun-$count.xcresult" "-only-testing:$test"
+  if ((ran != 0)) || ! python3 "$here/ci_cancelled_taps.py" confirm "$rerun_times" "$test"; then
+    echo "::error::$test did not pass when run once more by itself (xcodebuild exited $ran). The failure stands."
+    exit "$status"
+  fi
+done
+
+echo "Every failed test failed on a tap the simulator cancelled or a key chord it did not deliver, and each passed when run once more by itself:"
+echo "$again"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  {
+    echo "### Tests run once more after a cancelled tap or a lost key chord"
+    echo
+    echo "Each of these failed on the wait right after a tap the simulator cancelled (backboardd logged \"unknown digitizer\", BYR-1835) or right after a key chord it did not deliver (backboardd sent the app the bare key before the app had registered its key commands, BYR-1843), and passed when run once more by itself. The decision below says which. The first run's failure is in this shard's result bundle; the times, the log lines and each re-run are in this shard's re-run evidence."
+    echo
+    while IFS= read -r test; do echo "- \`$test\`"; done <<<"$again"
+    echo
+    echo "The decision:"
+    echo
+    echo '```'
+    cat "$evidence/decision.txt"
+    echo '```'
+  } >>"$GITHUB_STEP_SUMMARY"
+fi
+exit 0

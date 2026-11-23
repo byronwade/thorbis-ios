@@ -44,7 +44,8 @@ struct EquipmentRecord: Codable, Identifiable, Hashable {
     }()
 }
 
-/// The fields a person edits. Nil means "leave out"; on update the server leaves absent fields alone.
+/// The fields a person edits. Encoded as it stands it is an edit: an emptied field is sent as
+/// null, which clears it on the server. A new unit goes out as `NewEquipmentBody` instead.
 struct EquipmentInput: Encodable, Equatable {
     var name: String
     var locationId: String?
@@ -58,11 +59,19 @@ struct EquipmentInput: Encodable, Equatable {
 
     /// Empty strings become null so clearing a field in the form clears it on the server.
     func encode(to encoder: Encoder) throws {
+        try encode(to: encoder, emptyFieldsAsNull: true)
+    }
+
+    fileprivate func encode(to encoder: Encoder, emptyFieldsAsNull: Bool) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(name, forKey: .name)
         func put(_ value: String?, _ key: CodingKeys) throws {
             let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-            try c.encode(trimmed?.isEmpty == false ? trimmed : nil, forKey: key)
+            if let trimmed, !trimmed.isEmpty {
+                try c.encode(trimmed, forKey: key)
+            } else if emptyFieldsAsNull {
+                try c.encodeNil(forKey: key)
+            }
         }
         try put(locationId, .locationId)
         try put(kind, .kind)
@@ -74,6 +83,15 @@ struct EquipmentInput: Encodable, Equatable {
         try put(notes, .notes)
     }
     private enum CodingKeys: String, CodingKey { case name, locationId, kind, brand, model, serialNumber, installedOn, warrantyExpiresOn, notes }
+}
+
+/// A new unit on the wire. The server refuses null when adding equipment, so empty fields are
+/// left out; only an edit may send null.
+private struct NewEquipmentBody: Encodable {
+    let input: EquipmentInput
+    func encode(to encoder: Encoder) throws {
+        try input.encode(to: encoder, emptyFieldsAsNull: false)
+    }
 }
 
 struct MembershipPlan: Codable, Identifiable, Hashable {
@@ -200,21 +218,23 @@ struct MemberPricing: Codable, Hashable {
         Int((Double(cents) * Double(100 - discountPercent) / 100).rounded())
     }
 
-    /// A saved line the server already charged at the member price: it stored the lower price and
-    /// marked `unit_price` overridden. Discounting it again would show a price nobody pays.
-    static func alreadyMemberPriced(_ source: FieldLineSource?) -> Bool {
-        source?.overriddenFields?.contains("unit_price") == true
+    /// The server charges the member price only on an estimate's price book line sent at the list
+    /// price it came from. A typed line, a credit and an edited price are charged as saved. A line
+    /// the server already charged at the member price is saved below its list price, with
+    /// `unit_price` marked overridden, so it is not discounted a second time.
+    static func chargesMemberPrice(_ line: FieldLine) -> Bool {
+        guard let source = line.source, source.kind == "price_book", line.unitPrice.amount > 0,
+              source.overriddenFields?.contains("unit_price") != true,
+              let list = source.originalUnitPrice else { return false }
+        return list.amount == line.unitPrice.amount && list.currency == line.unitPrice.currency
     }
 
-    /// What a member pays for saved lines, for the hint under a total: nil when this is not a
-    /// member, or when the total already is the member price (every priced line member-priced).
+    /// What a member pays for saved estimate lines, for the hint under a total: nil when this is
+    /// not a member, or when no line would be charged the member price.
     func memberTotal(of lines: [FieldLine]) -> Int? {
-        guard isMember, discountPercent > 0, !lines.isEmpty else { return nil }
-        let open = lines.filter { $0.unitPrice.amount > 0 && !Self.alreadyMemberPriced($0.source) }
-        guard !open.isEmpty else { return nil }
+        guard isMember, discountPercent > 0, lines.contains(where: { Self.chargesMemberPrice($0) }) else { return nil }
         return lines.reduce(0) { sum, line in
-            let price = Self.alreadyMemberPriced(line.source) || line.unitPrice.amount <= 0
-                ? line.unitPrice.amount : memberPrice(line.unitPrice.amount)
+            let price = Self.chargesMemberPrice(line) ? memberPrice(line.unitPrice.amount) : line.unitPrice.amount
             return sum.addingClamped(line.quantity, times: price)
         }
     }
@@ -283,21 +303,44 @@ enum JobServiceContextLoader {
     }
 }
 
-private struct ItemsPage<T: Decodable>: Decodable { let items: [T] }
+private struct ItemsPage<T: Decodable>: Decodable {
+    let items: [T]
+    /// Set by the company-wide books while more rows remain. A customer's own list arrives whole.
+    let nextCursor: String?
+}
 
 extension APIClient {
+    /// Every page of a company-wide book. The server sends 200 rows a page and a `nextCursor`
+    /// while more remain, so one read is not the whole book.
+    private func allBookPages<T: Decodable>(_ path: String) async throws -> [T] {
+        let generation = requestGeneration
+        var items: [T] = []
+        var cursor: String?
+        var seen = Set<String>()
+        repeat {
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            let page: ItemsPage<T> = try await send("GET", path, cursor: cursor)
+            items.append(contentsOf: page.items)
+            cursor = page.nextCursor
+            if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
+                throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")
+            }
+        } while cursor != nil
+        return items
+    }
+
     func customerEquipment(_ customerID: String) async throws -> [EquipmentRecord] {
         let page: ItemsPage<EquipmentRecord> = try await send("GET", "/v1/customers/\(try uuid(customerID))/equipment")
         return page.items
     }
 
     func allEquipment() async throws -> [EquipmentRecord] {
-        let page: ItemsPage<EquipmentRecord> = try await send("GET", "/v1/equipment")
-        return page.items
+        try await allBookPages("/v1/equipment")
     }
 
     func addEquipment(_ customerID: String, _ input: EquipmentInput) async throws -> EquipmentRecord {
-        try await send("POST", "/v1/customers/\(try uuid(customerID))/equipment", body: input)
+        try await send("POST", "/v1/customers/\(try uuid(customerID))/equipment", body: NewEquipmentBody(input: input))
     }
 
     func updateEquipment(_ customerID: String, equipmentID: String, _ input: EquipmentInput) async throws -> EquipmentRecord {
@@ -330,8 +373,7 @@ extension APIClient {
     }
 
     func allMemberships() async throws -> [MembershipRecord] {
-        let page: ItemsPage<MembershipRecord> = try await send("GET", "/v1/memberships")
-        return page.items
+        try await allBookPages("/v1/memberships")
     }
 
     func customerMemberships(_ customerID: String) async throws -> [MembershipRecord] {

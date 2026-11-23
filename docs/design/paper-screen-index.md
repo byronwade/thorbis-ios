@@ -28,11 +28,11 @@ Scope:
 - Phone codes come from the main phone file, Missing screens, Navigation, Long descriptions, Field mode, and the Second, Third and Fourth pass files. Light, Archive and backup copies are skipped because they match the dark screens one for one.
 - Every phone row also has a tablet twin, named `T` plus the code (for example T21S, TF3A, TP2). The twin uses the same Swift view with the iPad layout (`TabletLayout.swift`, `TabletRoot`). Field mode is TF1 to TF8. Tablet uses rails instead of the 29, 57 and 58 sidebars, and has no 18A. Tablet-only screens have their own table at the end.
 - Rows marked "superseded by …N" have a newer Navigation screen. Build to the N screen.
-- The Coverage artboard in the Navigation file compares Paper with the React Native app and the web, not with iOS. Its "no route yet" notes, such as call detail and bottom tabs, are not iOS evidence. Swift already has `CallDetailView` and a left drawer.
+- The Coverage artboard in the Navigation file compares Paper with the React Native app and the web, not with iOS. Its "no route yet" notes, such as call detail and bottom tabs, are not iOS evidence. Swift has the call thread (`CommsCallThreadView`) and a left drawer.
 - "API exists" means one of three things: the iOS client already calls the route, the route is in `Thorbis-TanStack/services/api/openapi.json`, or Better Auth has it built in (organization invitations, password reset and change, update user). A screen that needs no server, such as an OS permission prompt or a static page, counts as New.
-- The OpenAPI file in that checkout is older than the server iOS talks to. It has no calls, equipment or memberships, for example. So any New or Needs API row outside the known-missing list is not verified against the current server.
-- Routes known to be missing always win: pipeline and leads, marketing, workflows, banking, bills, payroll runs, vendors and purchase orders, call and message threads, customer-wide media, equipment and fleet sync, time clock, truck stock, receipts and training. Two-step sign-in is also missing, because the auth config has no `twoFactor` plugin.
-- `Theme.swift` already carries Paper's tokens: dark `#1F1F1F`, brand `#2F6BFF`, and the light set. Screen layouts and words have not been compared with Paper one by one yet, so every existing screen is Update and none is Match.
+- Check API rows against `Thorbis-TanStack` main: `services/api/src/routes/manifest.ts` (the source) and `services/api/openapi.json` (generated from it). A route that exists only on an open web PR counts as Needs API and is listed in [GAPS.md](../GAPS.md).
+- Routes known to be missing always win: pipeline and leads, marketing, workflows, banking, bills, payroll runs, vendors and purchase orders, message threads, customer-wide media, fleet sync, time clock, truck stock, receipts and training. Two-step sign-in is also missing, because the auth config has no `twoFactor` plugin.
+- `Theme.swift` already carries Paper's tokens: dark `#1F1F1F`, brand `#2F6BFF` (drawn one shade off as `#2F6AFF`), and the light set. Screen layouts and words have not been compared with Paper one by one yet, so every existing screen is Update and none is Match.
 
 Status legend:
 - **Match**: the code already has the screen. Its layout may still need Paper styling.
@@ -111,7 +111,7 @@ Preview names are `--paper-preview-screen <name>` (with `--paper-preview`). "she
 | F3 | Arrived | `JobDetailView` on site (TechnicianFlow) | job-onsite | Update | |
 | F3A | Can't start | — | — | New | Job progress/followups routes exist |
 | F4 | Working (capture) | `MediaCaptureFlow` | job-media | Update | |
-| F4A | Recording voice note | `DictateNoteButton` (NoteDictation.swift) | — | Update | Dictation, not audio |
+| F4A | Recording voice note | `JobVoiceNoteSheet` (NoteDictation) | — | Update | Dictation, not audio |
 | F5 | Wrap up | `JobCloseoutView` | job-closeout | Update | |
 | F6 | Paid — next stop | `InvoicePaymentCollectionSheet` → `NextStop` | invoice-payment | Update | |
 | F6A | Review request | `ReviewRequestsView` (settings only) | — | Needs API | Manual send has no route; auto send exists |
@@ -135,7 +135,7 @@ Preview names are `--paper-preview-screen <name>` (with `--paper-preview`). "she
 | 21D | Photo markup | `PhotoMarkupView` | — | Update | |
 | 21E | Job (pause with reason) | `JobStatusMenuPanel` / JobActionAPI | — | Update | Check the reason sheet |
 | 21F | Job checklist | `JobChecklistSheet` | tool-checklist | Update | |
-| 21G | On my way (customer notified) | `JobNoticesSection` / TechnicianFlow | job | Update | |
+| 21G | On my way (customer notified) | `JobAtAddressView` (notices) | job | Update | |
 | 21H | Book a follow-up | `FollowUpBookingSheet` / `JobFollowUpsView` | job-followups | Update | |
 | 21I | Parts used | — | — | Needs API | Truck stock |
 | 21J | Job time and profit | `JobHours` | — | Update | Profit needs cost data |
@@ -143,7 +143,7 @@ Preview names are `--paper-preview-screen <name>` (with `--paper-preview`). "she
 | 21L | Job details (long) | `JobDetailView` | job | Update | |
 | 21M | Scan data plate | `DataPlateScannerSheet` | tool-scan | Update | |
 | 21N | Measure | `SiteMeasureView` | — | Update | |
-| 21O | At this address | `JobPropertyHistorySection` | job-history | Update | |
+| 21O | At this address | `JobAtAddressView` | job-history | Update | |
 | 21P | Before and after | `MediaCompareView` | — | Update | before-after route |
 | 21Q | Job notes (read all) | `JobNoteDetailView` / notes list | job-notes | Update | |
 | 21S | Photo viewer | `MediaPhotoViewer` / `JobMediaDetailView` | — | Update | |
@@ -154,7 +154,7 @@ Preview names are `--paper-preview-screen <name>` (with `--paper-preview`). "she
 | 21X | Address actions | `AddressLink` / `Directions` | — | Update | |
 | 21Y | Log a reading | — | — | Needs API | No readings route |
 | 21Z | Ask the office | OnsiteTools call office | job-onsite | Update | |
-| 22 | Job details (add drawer) | `PaperQuickActions` | job | Update | |
+| 22 | Job details (add drawer) | `JobDetailView` add menu (`JobAddRow`) | job | Update | |
 | 23 | Job details (Money · estimates) | `JobCustomerDocumentsView` | job-estimates | Update | |
 | 24 | Job details (Money · invoice) | `JobCustomerDocumentsView` | job-invoice | Update | |
 | 25 | Job details (edit field sheet) | `JobDetailView` edit sheets | — | Update | |
@@ -283,7 +283,7 @@ Preview names are `--paper-preview-screen <name>` (with `--paper-preview`). "she
 | 50 | Channel thread (#dispatch) | — | — | Needs API | Team channels |
 | 50A | Message composer (extras) | `CommsTextComposer` / `CommsCannedRepliesSheet` | — | Update | |
 | 50B | Channel info | — | — | Needs API | |
-| 51 | Call detail (transcript) | `CallDetailView` (CallLog.swift) | inbox | Update | /v1/calls |
+| 51 | Call detail (transcript) | `CommsCallThreadView` / `CommsCallCard` (CommsInboxThread.swift) | inbox | Update | /v1/calls |
 | 73B | Saved on this phone | `SavedWorkReviewView` (the offline outbox; same sheet as 73A, shown when nothing was refused) | sheet: saved-work | Update | |
 
 ## Money & office
@@ -416,7 +416,7 @@ Preview names are `--paper-preview-screen <name>` (with `--paper-preview`). "she
 | 74 | Back online (syncing) | sync bar | bar-syncing | Update | |
 | 76 | Search | `SearchScreen` / `SearchRoutePage` | search | Update | Also search-typed etc. |
 | 76A | Search (no results) | `SearchScreen` | search-empty | Update | |
-| 77 | Notifications | `WorkspaceNoticesView` / `StaffNoticesPage` | inbox | Update | /v1/staff/notices |
+| 77 | Notifications | `NotificationsFeedView` / `StaffNoticesPage` | inbox | Update | /v1/staff/notices |
 | P1 | Date and time picker | `QuickScheduleSheet` | job-schedule | Update | |
 | P2 | Filter sheet | `RecordFilterBar` / jobs filters | jobs-filters | Update | |
 | P3 | Pick a record | `CustomerPickerSheet` | — | Update | |

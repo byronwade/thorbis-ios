@@ -1,6 +1,10 @@
 # Native offline and sync contract (source audit)
 
+> Snapshot, 26-28 October 2026. Not maintained. Current API gaps: [GAPS.md](../GAPS.md). Current screen coverage: [paper-screen-index.md](../design/paper-screen-index.md).
+
 This is a source contract, not evidence that a live PowerSync instance is configured. Primary CodeGraph exploration covered `syncScopeFor`, `SyncTokenClaims`, `PowerSyncWebOpener`, `PowerSyncMutationQueue`, and the offline registry; exact route and schema details below come from the named files. The existing `Thorbis-TanStack/apps/ios` project is an online SwiftUI client (`apps/ios/README.md`, `project.yml`, `Thorbis/Sources/API.swift`); it has **no native PowerSync SDK, native SQLite adapter, local command queue, or sync session lifecycle**. `apps/mobile` is an Expo placeholder (`apps/mobile/src/index.ts`, `mobile.manifest.json`). The TypeScript PowerSync package depends on `@powersync/common` and `@powersync/web`, and its concrete opener is web/IndexedDB-specific (`packages/sync-powersync/package.json`, `src/web-opener.ts`). Do not treat the web adapter as a drop-in Swift implementation.
+
+The app in this repository (not the old web copy described above) now queues field steps and notes in `FieldOutbox` and sends them through `POST /v1/commands`.
 
 ## Read replication authority and transport
 

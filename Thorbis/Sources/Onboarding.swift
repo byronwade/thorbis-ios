@@ -1234,7 +1234,7 @@ struct BusinessSetupView: View {
             case .payments: PaymentsSetupView().thorbisBackButton()
             case .services:
                 WorkspacePriceBookView(api: api, canList: true,
-                                       canViewDetail: session.can("organization.settings.edit", feature: "price_book")).thorbisBackButton()
+                                       canViewDetail: session.can("pricebook.edit", feature: "price_book")).thorbisBackButton()
             case .team: EmptyView()
             }
         }
@@ -1248,7 +1248,9 @@ struct BusinessSetupView: View {
         .fullScreenCover(isPresented: $guided, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
             NavigationStack { SetupWizardView() }
         }
-        .task(id: [session.authorityRevision, api.requestGeneration]) { await model.refresh(api: api, session: session) }
+        // Read again after every answered check too, so a step finished elsewhere (Stripe, the web) or one
+        // that could not be checked offline updates when the app comes back.
+        .task(id: [session.authorityRevision, session.verificationRevision, api.requestGeneration]) { await model.refresh(api: api, session: session) }
         .task { if !presented { await profile.load(api: api) } }
     }
 
@@ -1264,7 +1266,7 @@ struct BusinessSetupView: View {
     @ViewBuilder
     private func settingsGroups(_ steps: [BusinessSetupModel.Step], current: Bool, unfinished: Bool) -> some View {
         let editsSettings = session.can("organization.settings.edit")
-        let canImport = session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm")
+        let canImport = CustomerImportModel.permitted { session.can($0, feature: "core_crm") }
         var company: [BusinessPlace] {
             var rows: [BusinessPlace] = []
             if steps.contains(.details) { rows.append(.profile) }

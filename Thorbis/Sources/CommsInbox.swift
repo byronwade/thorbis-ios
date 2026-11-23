@@ -616,12 +616,6 @@ struct CommsInboxView: View {
 
     // MARK: Time words
 
-    private var calendarWithTimeZone: Calendar {
-        var result = calendar
-        result.timeZone = timeZone
-        return result
-    }
-
     private func timeLabel(_ raw: String?) -> String {
         guard let raw, let date = JobFiltering.date(raw) else { return "" }
         return date.tradeTime
@@ -706,36 +700,6 @@ enum CommsOpen: Hashable {
 }
 
 
-
-// MARK: - Day cards
-
-/// One day's rows: its label and the rows it holds, in list order.
-struct CommsDayGroup<Item>: Identifiable {
-    let id: String
-    let title: String
-    var items: [Item]
-}
-
-/// Splits an already-ordered list into days (presentation only), naming each with `label`.
-enum CommsDayGrouping {
-    static func groups<Item>(_ list: [Item], id: (Item) -> String, at: (Item) -> String?, calendar: Calendar, locale: Locale,
-                             label: (_ heading: String, _ raw: String?, _ item: Item) -> String) -> [CommsDayGroup<Item>] {
-        var groups: [CommsDayGroup<Item>] = []
-        for (index, item) in list.enumerated() {
-            let raw = at(item)
-            let heading = InboxNoticeDay.header(raw, after: index > 0 ? at(list[index - 1]) : nil,
-                                                hasPrevious: index > 0, calendar: calendar, locale: locale)
-            if let heading {
-                groups.append(CommsDayGroup(id: "day-\(id(item))", title: label(heading, raw, item), items: [item]))
-            } else if groups.isEmpty {
-                groups.append(CommsDayGroup(id: "day-\(id(item))", title: "", items: [item]))
-            } else {
-                groups[groups.count - 1].items.append(item)
-            }
-        }
-        return groups
-    }
-}
 
 /// Paper v2 section: a 13 Semibold muted label 8 above one card (radius 20), 16 from the screen's
 /// edges and 20 below the section before it.

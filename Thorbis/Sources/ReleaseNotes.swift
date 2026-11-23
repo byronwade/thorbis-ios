@@ -11,7 +11,47 @@ import Foundation
 /// - `symbol` is an SF Symbol outline name. A change nobody can see gets no note.
 /// `WhatsNewTests` checks every rule above.
 enum ReleaseNotes {
+    /// "A simpler Collect payment" (2026-11-16) describes the collect screen as it is now, so it
+    /// names only the ways that screen offers in this build (TapToPayReadiness.buildEnabled).
+    static func collectPaymentDetail(tapToPayEnabled: Bool) -> String {
+        tapToPayEnabled
+            ? "Tap to Pay leads, with a code to scan, check, cash or bank transfer underneath."
+            : "Show a code to scan leads, with Text a pay link, Check, Cash and Bank transfer or other underneath."
+    }
+
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            id: "2026-11-22-access-that-follows",
+            date: "2026-11-22",
+            highlights: [
+                .init(symbol: "lock.open", title: "New access shows up right away",
+                      detail: "When the office gives you more access, screens that were closed open next time, no restart."),
+                .init(symbol: "percent", title: "A clear word on too big a discount",
+                      detail: "Saving an estimate with more discount than your role allows says so, not that you lost access."),
+                .init(symbol: "sun.horizon", title: "Morning digest for the right people",
+                      detail: "The 6:30 digest switch shows for everyone allowed to see company totals, who are the ones who get it."),
+                .init(symbol: "iphone", title: "Customer view stays open",
+                      detail: "Locking the phone or a dropped signal no longer ends Customer view or closes an open estimate or invoice."),
+                .init(symbol: "mappin.and.ellipse", title: "Jobs show the customer\u{2019}s address",
+                      detail: "A new customer\u{2019}s address is saved as their property, and a job with no property shows the address on file."),
+            ],
+            fixes: 19),
+        ReleaseNote(
+            id: "2026-11-21-saves-that-stick",
+            date: "2026-11-21",
+            highlights: [
+                .init(symbol: "key", title: "Save a custom role",
+                      detail: "Making or changing a role in Team now saves and opens it instead of showing an error."),
+                .init(symbol: "wrench.and.screwdriver", title: "Add equipment with only a name",
+                      detail: "A unit saves with just what you know. Brand, model, serial and dates can be added later."),
+                .init(symbol: "doc.text", title: "Deposits say Deposit",
+                      detail: "A deposit invoice is labeled Deposit on the job and for the customer, apart from the job\u{2019}s invoice."),
+                .init(symbol: "tag", title: "Edit the price book as a manager",
+                      detail: "Anyone allowed to change the price book can open, edit and remove items, not only the owner."),
+                .init(symbol: "dollarsign.circle", title: "Collected counts part refunds",
+                      detail: "Money, Payments and Home count what a part-refunded payment still brings in, as the web does."),
+            ],
+            fixes: 3),
         ReleaseNote(
             id: "2026-11-21-cleaner-pages",
             date: "2026-11-21",
@@ -627,7 +667,7 @@ enum ReleaseNotes {
                 .init(symbol: "wrench.and.screwdriver", title: "Equipment, fleet and properties",
                       detail: "Lists and forms for equipment, vans, properties and maintenance plans now match the rest of the app."),
                 .init(symbol: "creditcard", title: "A simpler Collect payment",
-                      detail: "Tap to Pay leads, with a code to scan, check, cash or bank transfer underneath."),
+                      detail: collectPaymentDetail(tapToPayEnabled: TapToPayReadiness.buildEnabled)),
                 .init(symbol: "checkmark.seal", title: "Wrap up, reschedule and assign",
                       detail: "The close-out checklist, moving a visit and assigning a tech all use the new cards and buttons."),
             ]
