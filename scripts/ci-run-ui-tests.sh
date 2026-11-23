@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run one shard's UI tests, and run a failed test once more only when the simulator itself
-# cancelled the tap that test failed on.
+# cancelled the tap, or failed to deliver the key chord, that test failed on.
 #
 #   scripts/ci-run-ui-tests.sh <xctestrun> <simulator-id> <result-bundle> <evidence-dir> \
 #       -only-testing:ThorbisUITests/SomeClass [...]
@@ -9,22 +9,31 @@
 # the simulator's input server sometimes registers that touchscreen twice, drops the lift and
 # cancels the touch, and logs "*** unknown digitizer". The app sees a cancelled touch and does
 # nothing, so the test fails on a tap no person made (BYR-1835; scripts/ci_cancelled_taps.py
-# has the detail).
+# has the detail). XCTest also presses each keyboard chord through a virtual keyboard it attaches
+# for that one press. backboardd hands a ⌘ chord to the app as a key command only once the app
+# has registered its key commands with it, and on the iPad that registration now and then comes
+# only after the test has pressed twice. Until then it logs a cache miss and hands the app the
+# bare letter, so the test fails on a chord the app never received (BYR-1843).
 #
 # What this does NOT do: retry failures. A failed test is run again only when ALL of these hold.
 #   - xcodebuild exited 65, its status for failed tests, and nothing else went wrong.
 #   - The run is fully accounted for: one session, every started test finished, and xcodebuild's
 #     own count of tests and failures matches the log, with no unexpected failure.
 #   - EVERY failed test failed on the wait right after a tap, its first failure speaks of no
-#     crash or launch, and backboardd logged that error at that tap.
+#     crash or launch, and backboardd logged that error at that tap; or it failed on the wait
+#     right after a key chord, backboardd sent every chord of the test to the app as a bare key
+#     before the app had registered any key commands, matched no command against the app, and
+#     the app's first registration after the last chord lists that chord.
 #   - There are at most three of them, and the job has time left to run them.
 # Each is then run once, by itself. The step passes only if each of those runs shows that one
 # test passing. Anything else leaves the first run's failure standing. Every re-run is announced
 # as a warning on the job, with the reasons, and listed in the step summary.
 #
-# While the tests run, a filter on the simulator's log keeps only that one error. It reads the
-# log; it does not touch the app. Evidence (the times, the log lines, the decision, each re-run's
-# times and result bundle) goes to <evidence-dir>, which is created only when a test failed.
+# While the tests run, a filter on the simulator's log keeps only backboardd's lines for that
+# error and for how it routes keys: the app's connection, its key command registrations, each
+# key command match and each bare key it hands on. It reads the log; it does not touch the app.
+# Evidence (the times, the log lines, the decision, each re-run's times and result bundle) goes
+# to <evidence-dir>, which is created only when a test failed.
 set -uo pipefail
 
 if [[ $# -lt 5 ]]; then
@@ -60,10 +69,11 @@ taps="$scratch/cancelled-taps.log"
 : >"$times"
 : >"$taps"
 
-# The one error, as it is logged. `cat` keeps the stream writing to a pipe: into a pipe it handed
+# The lines, as they are logged. `cat` keeps the stream writing to a pipe: into a pipe it handed
 # over each line as it was logged (seen in run 45119132156), and into a file it may hold lines back.
+# The first clause is the one stop_watcher looks for; keep it first and keep its words.
 xcrun simctl spawn "$simulator_id" log stream --style compact --level default \
-  --predicate 'process == "backboardd" AND eventMessage CONTAINS "unknown digitizer"' </dev/null 2>/dev/null |
+  --predicate 'process == "backboardd" AND (eventMessage CONTAINS "unknown digitizer" OR eventMessage CONTAINS "KCMD: " OR eventMessage CONTAINS "cache miss for Keyboard event" OR eventMessage CONTAINS "sequence starting with Keyboard event" OR eventMessage CONTAINS "new key command registrations for pid:" OR (eventMessage CONTAINS "Connection added: " AND eventMessage CONTAINS " process:Thorbis "))' </dev/null 2>/dev/null |
   cat >"$taps" &
 watcher=$!
 
@@ -103,6 +113,14 @@ stamped "$times" "$result_bundle" "$@"
 status=$ran
 stop_watcher
 
+# Say on every run whether that filter started. The log tool prints the filter it accepted as
+# its first line, so a filter it refused shows on a green run too, not only when a test failed.
+if [[ -s "$taps" ]]; then
+  echo "Simulator log filter: $(head -n 1 "$taps")" >&2
+else
+  echo "Simulator log filter: the log stream wrote nothing, so no failed test in this shard can be run once more." >&2
+fi
+
 if ((status == 0)); then
   exit 0
 fi
@@ -133,7 +151,12 @@ for test in $again; do
     echo "::error::No time is left to run $test once more before the job's limit. The failure stands."
     exit "$status"
   fi
-  echo "::warning::Running $test once more by itself: the simulator cancelled the tap it failed on (backboardd logged \"unknown digitizer\"). The first run's result is in this shard's result bundle. BYR-1835."
+  if grep -qF "$test: the simulator did not deliver the key chord" "$evidence/decision.txt"; then
+    why="the simulator did not deliver the key chord it failed on (backboardd sent the app the bare key before the app had registered its key commands). BYR-1843."
+  else
+    why="the simulator cancelled the tap it failed on (backboardd logged \"unknown digitizer\"). BYR-1835."
+  fi
+  echo "::warning::Running $test once more by itself: $why The first run's result is in this shard's result bundle."
   rerun_times="$evidence/rerun-$count-times.tsv"
   : >"$rerun_times"
   stamped "$rerun_times" "$evidence/rerun-$count.xcresult" "-only-testing:$test"
@@ -143,13 +166,13 @@ for test in $again; do
   fi
 done
 
-echo "Every failed test failed on a tap the simulator cancelled, and each passed when run once more by itself:"
+echo "Every failed test failed on a tap the simulator cancelled or a key chord it did not deliver, and each passed when run once more by itself:"
 echo "$again"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
-    echo "### Tests run once more after a cancelled tap"
+    echo "### Tests run once more after a cancelled tap or a lost key chord"
     echo
-    echo "Each of these failed on the wait right after a tap the simulator cancelled (backboardd logged \"unknown digitizer\"), and passed when run once more by itself. The first run's failure is in this shard's result bundle; the times, the log lines and each re-run are in this shard's re-run evidence. BYR-1835."
+    echo "Each of these failed on the wait right after a tap the simulator cancelled (backboardd logged \"unknown digitizer\", BYR-1835) or right after a key chord it did not deliver (backboardd sent the app the bare key before the app had registered its key commands, BYR-1843), and passed when run once more by itself. The decision below says which. The first run's failure is in this shard's result bundle; the times, the log lines and each re-run are in this shard's re-run evidence."
     echo
     while IFS= read -r test; do echo "- \`$test\`"; done <<<"$again"
     echo

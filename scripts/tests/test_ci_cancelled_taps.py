@@ -221,6 +221,276 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(taps.decide(rows, [at(1, TAP)])[0], [B])
 
 
+# The shape of the failure in run 45148171838, iPad shard 2 (app pid 15145, SpringBoard 1558): two
+# presses of ⌘K, each sent to the app as a bare 'k' before it had registered its key commands, the
+# registration 0.17 s after the second, and the wait that failed. Offsets are from the test's start.
+K = "ThorbisUITests/KeyboardShortcutUITests/testCommandKOpensSearch"
+N = "ThorbisUITests/KeyboardShortcutUITests/testShiftCommandNOpensTheCreateMenu"
+CHORD_STEPS = (
+    (6.77, "Waiting 30.0s for StaticText (First Match) to exist"),
+    (10.74, "Waiting 30.0s for Button (First Match) to exist"),
+    (11.80, 'Checking existence of `"search-field" TextField`'),
+    (11.94, "Type 'k' key with modifiers '⌘' (0x10)"),
+    (12.72, 'Waiting 4.0s for "search-field" TextField to exist'),
+    (16.91, "Collecting debug information to assist test failure triage"),
+    (17.11, "Type 'k' key with modifiers '⌘' (0x10)"),
+    (17.74, 'Waiting 4.0s for "search-field" TextField to exist'),
+    (22.04, "Collecting debug information to assist test failure triage"),
+)
+APP, SPRINGBOARD = 15145, 1558
+CONNECTED, MISSES, REGISTERED = 4.790, (12.224, 17.405), 17.579
+COMMANDS = (
+    "    cmd|opt|shft: (v),\n"
+    '    cmd: ((51:downArrow), (52:upArrow), ",", c, 8, 9, f, 1, "?", v, 2, "[", w, 3, x, 4, k, 5, z, 6, 7, n, a, '
+    "(4F:rightArrow), (50:leftArrow)),\n"
+    '    glb|ctrl|opt|shft|capslock|numpad: (" "),\n'
+    "    cmd|shft: (n, z),\n"
+    "    glb: (e, d),\n"
+    "    cmd|opt: (w),\n"
+    '    cmd|ctrl: (s, " ")'
+)
+
+
+def connected(pid=APP):
+    return (f"Connection added: IOHIDEventSystemConnection uuid:7835800A-AF22-4F3A-B5A5-2D73BC0F71A4 pid:{pid} "
+            "process:Thorbis type:Passive entitlements:0x0 caller:BackBoardServices: ___getHIDEventSystemClient_"
+            'block_invoke + 276 attributes:{\n    HighFrequency = 0;\n    bundleID = "com.thorbis.field";\n}')
+
+
+def bare_key(pid=APP):
+    """What backboardd logs for a chord it finds no command for: the bare key goes to `pid`."""
+    return [f"KCMD: no match in pid:{SPRINGBOARD} systemKeyCommandOverlay",
+            f"KCMD: no match in pid:{SPRINGBOARD} keyboardFocus",
+            "cache miss for Keyboard event",
+            f"sequence starting with Keyboard event: <sq: 0x6000029317a0; (<keyboardFocus; display: builtin; "
+            f"pid: {pid}; token: 0xBDCDB732>)>"]
+
+
+def registration(pid=APP, commands=COMMANDS, environment="keyboardFocus"):
+    return (f"new key command registrations for pid:{pid} environment: {environment}; token: 0xBDCDB732; "
+            f"keyCommands: {{\n{commands}\n}}")
+
+
+def chord_keys(index=1, *, connect=(CONNECTED,), misses=MISSES, routed_to=APP, registered=(REGISTERED,),
+               commands=COMMANDS, extra=()):
+    """backboardd's records for test `index`, as read_keys returns them."""
+    records = [(at(index, offset), connected()) for offset in connect]
+    for offset in misses:
+        records += [(at(index, offset) + n * 0.0002, text) for n, text in enumerate(bare_key(routed_to))]
+    records += [(at(index, offset), registration(commands=commands)) for offset in registered]
+    records += [(at(index, offset), text) for offset, text in extra]
+    return sorted(records)
+
+
+def chord_case(name=K, index=1, steps=CHORD_STEPS, error="XCTAssertTrue failed - ⌘K opens Search", **extra):
+    return case(name, "failed", index, took=23.300, steps=steps, error=error, **extra)
+
+
+def compact(seconds, text):
+    """A record as `log stream --style compact` prints it."""
+    return (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(seconds))) + f".{round(seconds % 1 * 1000) % 1000:03d}"
+            f" Df backboardd[1580:466d] [com.apple.BackBoard:EventDelivery] {text}\n")
+
+
+class LostChordTests(unittest.TestCase):
+    def test_a_test_that_failed_on_the_wait_after_a_chord_sent_as_a_bare_key_is_run_again(self):
+        rows = session(case(A, "passed", 0), chord_case())
+        again, reasons = taps.decide(rows, [], keys=chord_keys())
+        self.assertEqual(again, [K])
+        self.assertIn("did not deliver the key chord it failed on", reasons[0])
+        self.assertIn("pid 15145", reasons[0])
+        self.assertIn("failed on the wait that came next", reasons[0])
+
+    def test_without_the_key_lines_the_failure_stands(self):
+        again, reasons = taps.decide(session(chord_case()), [])
+        self.assertEqual(again, [])
+        self.assertIn("connections from the app", reasons[0])
+
+    def test_a_chord_that_reached_the_app_stands(self):
+        # The app was handed ⌘K as a command, matched or not: whatever happened next is the app's.
+        for line in (f"KCMD: match in pid:{APP} keyboardFocus", f"KCMD: no match in pid:{APP} keyboardFocus"):
+            for offset in (12.225, 17.406, 20.0):
+                with self.subTest(line=line, offset=offset):
+                    keys = chord_keys(extra=((offset, line),))
+                    again, reasons = taps.decide(session(chord_case()), [], keys=keys)
+                    self.assertEqual(again, [])
+                    self.assertIn("so a chord reached it", reasons[0])
+
+    def test_a_registration_before_the_last_chord_stands(self):
+        for offset in (5.0, 12.5, 17.40):
+            with self.subTest(offset=offset):
+                keys = chord_keys(registered=(offset, REGISTERED))
+                again, reasons = taps.decide(session(chord_case()), [], keys=keys)
+                self.assertEqual(again, [])
+                self.assertIn("before its last chord", reasons[0])
+
+    def test_no_registration_after_the_chord_or_one_after_the_test_stands(self):
+        for registered in ((), (23.5,), (40.0,)):
+            with self.subTest(registered=registered):
+                again, reasons = taps.decide(session(chord_case()), [], keys=chord_keys(registered=registered))
+                self.assertEqual(again, [])
+                self.assertIn("registered no key commands", reasons[0])
+
+    def test_a_registration_without_that_chord_stands(self):
+        without_k = COMMANDS.replace(" k,", "")
+        only_shifted = COMMANDS.replace(" k,", "").replace("cmd|shft: (n, z)", "cmd|shft: (n, z, k)")
+        for commands in (without_k, only_shifted):
+            with self.subTest(commands=commands):
+                keys = chord_keys(commands=commands)
+                again, reasons = taps.decide(session(chord_case()), [], keys=keys)
+                self.assertEqual(again, [])
+                self.assertIn("do not include", reasons[0])
+        keys = chord_keys(registered=()) + [(at(1, REGISTERED), registration(environment="systemKeyCommandOverlay"))]
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=sorted(keys))[0], [])
+
+    def test_a_registration_that_cannot_be_read_stands(self):
+        cut = registration().rsplit("\n", 1)[0]          # the stream stopped before its last line
+        keys = chord_keys(registered=()) + [(at(1, REGISTERED), cut)]
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=sorted(keys))[0], [])
+        odd = registration(commands=COMMANDS + "\n    something else")
+        keys = chord_keys(registered=()) + [(at(1, REGISTERED), odd)]
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=sorted(keys))[0], [])
+
+    def test_the_app_must_be_known_by_one_connection_before_the_first_chord(self):
+        for connect, words in (((), "0 connections"), ((1.0, 4.79), "2 connections"),
+                               ((12.5,), "only after its first chord"), ((-1.0,), "0 connections")):
+            with self.subTest(connect=connect):
+                again, reasons = taps.decide(session(chord_case()), [], keys=chord_keys(connect=connect))
+                self.assertEqual(again, [])
+                self.assertIn(words, reasons[0])
+
+    def test_a_bare_key_sent_to_another_process_stands(self):
+        again, reasons = taps.decide(session(chord_case()), [], keys=chord_keys(routed_to=SPRINGBOARD))
+        self.assertEqual(again, [])
+        self.assertIn("another process than the app", reasons[0])
+
+    def test_every_chord_of_the_test_must_have_been_sent_as_a_bare_key(self):
+        for misses in ((17.405,), (12.224,), (10.5, 17.405), (12.224, 18.6), (12.224, 16.0)):
+            with self.subTest(misses=misses):
+                again, reasons = taps.decide(session(chord_case()), [], keys=chord_keys(misses=misses))
+                self.assertEqual(again, [])
+                self.assertIn("This failure stands", reasons[0])
+        # A bare key logged before the cache miss is not the chord's.
+        keys = [(when, text) for when, text in chord_keys() if not text.startswith("cache miss")]
+        keys.append((at(1, 17.41), "cache miss for Keyboard event"))
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=sorted(keys))[0], [])
+
+    def test_the_bare_key_may_fall_a_little_before_the_chord_and_just_after_the_wait_began(self):
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=chord_keys(misses=(10.95, 17.405)))[0], [K])
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=chord_keys(misses=(13.21, 17.405)))[0], [K])
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=chord_keys(misses=(10.90, 17.405)))[0], [])
+        self.assertEqual(taps.decide(session(chord_case()), [], keys=chord_keys(misses=(13.25, 17.405)))[0], [])
+
+    def test_a_failure_that_is_not_the_wait_right_after_a_chord_stands(self):
+        tap = CHORD_STEPS[:6] + ((17.11, 'Tap "search" Button'),) + CHORD_STEPS[7:]
+        typed = CHORD_STEPS[:6] + ((17.11, "Type 'k' into TextField"),) + CHORD_STEPS[7:]
+        later = CHORD_STEPS[:8] + ((19.0, "Type 'Kitchen' into Target Application 'com.thorbis.field'"),)
+        found = CHORD_STEPS[:7] + ((17.74, 'Find the "search-field" TextField'),)
+        for steps in (tap, typed, later, found, CHORD_STEPS[:3], ()):
+            with self.subTest(steps=steps):
+                again, reasons = taps.decide(session(chord_case(steps=steps)), [], keys=chord_keys())
+                self.assertEqual(again, [])
+                self.assertIn("This failure stands", reasons[0])
+
+    def test_a_crash_a_launch_failure_or_an_unexpected_failure_at_a_lost_chord_stands(self):
+        for error in ("Thorbis crashed in KeyboardCommand.search.post()",
+                      "Failed to launch <XCUIApplicationImpl com.thorbis.field>",
+                      "Application com.thorbis.field is not running",
+                      "failed: caught error: \"NSInternalInconsistencyException\""):
+            with self.subTest(error=error):
+                again, reasons = taps.decide(session(chord_case(error=error)), [], keys=chord_keys())
+                self.assertEqual(again, [])
+                self.assertIn("is not a wait", reasons[0])
+        self.assertEqual(taps.decide(session(chord_case(), unexpected=1), [], keys=chord_keys())[0], [])
+        self.assertEqual(taps.decide(session(chord_case(error=None)), [], keys=chord_keys())[0], [])
+        self.assertEqual(taps.decide(session(chord_case(begin=False)), [], keys=chord_keys())[0], [])
+
+    def test_the_chord_must_be_a_command_key_the_app_registered_with_those_modifiers(self):
+        def pressed(text):
+            return tuple((offset, text if step.startswith("Type") else step) for offset, step in CHORD_STEPS)
+        for text, expected in (("Type 'n' key with modifiers '⌘⇧' (0x12)", [N]),
+                               ("Type 's' key with modifiers '⌘⌃' (0x14)", [N]),
+                               ("Type 's' key with modifiers '⌘' (0x10)", []),
+                               ("Type 'n' key with modifiers '⇧' (0x2)", []),
+                               ("Type 'n' key with modifiers '⌘⇪' (0x11)", []),
+                               ("Type 'n' key with modifiers '⌘' (0x30)", []),
+                               ("Type 'kk' key with modifiers '⌘' (0x10)", [])):
+            with self.subTest(text=text):
+                rows = session(chord_case(name=N, steps=pressed(text), error="XCTAssertTrue failed"))
+                self.assertEqual(taps.decide(rows, [], keys=chord_keys())[0], expected)
+
+    def test_two_different_chords_stand(self):
+        steps = tuple((offset, "Type 'f' key with modifiers '⌘' (0x10)" if offset == 11.94 else text)
+                      for offset, text in CHORD_STEPS)
+        again, reasons = taps.decide(session(chord_case(steps=steps)), [], keys=chord_keys())
+        self.assertEqual(again, [])
+        self.assertIn("more than one chord", reasons[0])
+
+    def test_only_the_lines_inside_the_failed_test_count(self):
+        rows = session(case(A, "passed", 0), chord_case(index=1))
+        self.assertEqual(taps.decide(rows, [], keys=chord_keys(index=0))[0], [])
+        self.assertEqual(taps.decide(rows, [], keys=chord_keys(index=2))[0], [])
+
+    def test_a_cancelled_tap_and_a_lost_chord_in_one_shard_are_both_run_again(self):
+        rows = session(case(A, "failed", 0), chord_case(index=1), case(C, "passed", 2))
+        self.assertEqual(taps.decide(rows, [at(0, TAP)], keys=chord_keys(index=1))[0], [A, K])
+        again, reasons = taps.decide(rows, [], keys=chord_keys(index=1))
+        self.assertEqual(again, [])
+        self.assertIn("Not every failed test", reasons[-1])
+        self.assertEqual(taps.decide(rows, [at(0, TAP)], keys=chord_keys(index=1, registered=()))[0], [])
+        # A cancelled tap never excuses a chord, and a lost chord never excuses a tap.
+        self.assertEqual(taps.decide(session(chord_case()), [at(1, 17.2)], keys=[])[0], [])
+        rows = session(case(B, "failed", 1))
+        self.assertEqual(taps.decide(rows, [], keys=chord_keys(misses=(TAP - 0.3, TAP)))[0], [])
+
+    def test_the_limit_counts_lost_chords_too(self):
+        cases = [case(f"T/K/test{i}", "failed", i) for i in range(3)] + [chord_case(index=3)]
+        events = [at(i, TAP) for i in range(3)]
+        self.assertEqual(taps.decide(session(*cases), events, keys=chord_keys(index=3))[0], [])
+        self.assertEqual(len(taps.decide(session(*cases), events, limit=4, keys=chord_keys(index=3))[0]), 4)
+
+
+class ReadKeysTests(unittest.TestCase):
+    def test_messages_are_joined_and_only_backboardds_count(self):
+        with tempfile.TemporaryDirectory() as folder:
+            log = os.path.join(folder, "taps.log")
+            start = taps.local_seconds("2026-11-23 09:55:31.098")
+            Path(log).write_text(
+                'Filtering the log data using "process == "backboardd" AND (eventMessage CONTAINS "unknown digitizer" OR ...)"\n'
+                "Timestamp               Ty Process[PID:TID]\n"
+                + compact(start, registration())
+                + compact(start - 5, "cache miss for Keyboard event")
+                + "2026-11-23 09:55:32.000 E  backboardd[1580:3fcd5] [com.apple.BackBoard:TouchEvents] *** unknown digitizer <x>\n"
+                + "2026-11-23 09:55:33.000 Df Thorbis[15145:1] [app] new key command registrations for pid:15145 a\n"
+                + "    a later line of the app's own message\n"
+                + compact(start + 3, "KCMD: match in pid:15145 keyboardFocus"))
+            records = taps.read_keys(log)
+        self.assertEqual([text for _, text in records],
+                         ["cache miss for Keyboard event", registration(), "KCMD: match in pid:15145 keyboardFocus"])
+        self.assertAlmostEqual(records[1][0], start, places=3)
+        self.assertEqual(taps.key_commands(records[1][1])[0:2], (15145, "keyboardFocus"))
+        groups = taps.key_commands(records[1][1])[2]
+        self.assertIn("k", groups[frozenset({"cmd"})])
+        self.assertEqual(groups[frozenset({"cmd", "ctrl"})], {"s", '" "'})
+        self.assertIsNone(taps.key_commands("cache miss for Keyboard event"))
+
+    def test_the_command_reads_both_kinds_of_line_from_the_one_log(self):
+        with tempfile.TemporaryDirectory() as folder:
+            times = os.path.join(folder, "times.tsv")
+            log = os.path.join(folder, "taps.log")
+            rows = session(case(A, "failed", 0), chord_case(index=1))
+            Path(times).write_text("".join(f"{at_:.3f}\t{kind}\t{value}\n" for at_, kind, value in rows))
+            Path(log).write_text(
+                'Filtering the log data using "process == "backboardd" AND (eventMessage CONTAINS "unknown digitizer" OR ...)"\n'
+                + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(at(0, TAP)))) + f".{round(at(0, TAP) % 1 * 1000):03d}"
+                + " E  backboardd[5334:3fcd5] [com.apple.BackBoard:TouchEvents] *** unknown digitizer <x>\n"
+                + "".join(compact(when, text) for when, text in chord_keys(index=1)))
+            result = subprocess.run([sys.executable, str(TOOL), "decide", times, log], capture_output=True, text=True,
+                                    stdin=subprocess.DEVNULL, timeout=30)
+        self.assertEqual((result.returncode, result.stdout), (0, f"{A}\n{K}\n"), result.stderr)
+        self.assertIn("did not deliver the key chord", result.stderr)
+        self.assertIn("cancelled the tap", result.stderr)
+
 class ConfirmTests(unittest.TestCase):
     def test_the_one_test_passing_alone_counts(self):
         self.assertIsNone(taps.confirm(session(case(B, "passed", 0, steps=())), B))

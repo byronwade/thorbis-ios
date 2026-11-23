@@ -190,7 +190,8 @@ jobs:
           only_testing=$(python3 scripts/ui_test_shards.py --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
           simulator_id=$(scripts/ci-simulator-id.sh)
           # The tests, and one more run of a failed test only when the simulator's own log shows
-          # it cancelled that test's tap: scripts/ci-run-ui-tests.sh has the rule (BYR-1835).
+          # it cancelled that test's tap or did not deliver its key chord: scripts/ci-run-ui-tests.sh
+          # has the rule (BYR-1835, BYR-1843).
           # $only_testing is a list of -only-testing: arguments and must split on spaces.
           # shellcheck disable=SC2086
           scripts/ci-run-ui-tests.sh "$test_run" "$simulator_id" \
@@ -323,7 +324,7 @@ jobs:
           only_testing=$(python3 scripts/ui_test_shards.py --tablet --shards ${{ strategy.job-total }} --index ${{ matrix.shard }})
           simulator_id=$(scripts/ci-simulator-id.sh iPad)
           # As on the iPhone: one more run of a failed test only when the simulator cancelled
-          # its tap (scripts/ci-run-ui-tests.sh, BYR-1835).
+          # its tap or did not deliver its key chord (scripts/ci-run-ui-tests.sh, BYR-1835, BYR-1843).
           # $only_testing is a list of -only-testing: arguments and must split on spaces.
           # shellcheck disable=SC2086
           scripts/ci-run-ui-tests.sh "$test_run" "$simulator_id" \
