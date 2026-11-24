@@ -7,6 +7,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup"]
         app.launch()
+        XCTAssertTrue(app.buttons["customer-document-00000000-0000-4000-8000-000000031777"].waitForExistence(timeout: 20))
         let pending = app.buttons["customer-document-00000000-0000-4000-8000-000000031779"]
         for _ in 0..<25 where !pending.exists { app.swipeUp() }
         XCTAssertTrue(pending.waitForExistence(timeout: 20))
@@ -30,6 +31,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup"]
         app.launch()
         let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
         for _ in 0..<25 where !file.isHittable { app.swipeUp() }
         XCTAssertTrue(file.waitForExistence(timeout: 20))
         XCTAssertTrue(file.isHittable)
@@ -44,6 +46,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
         for _ in 0..<25 where !file.isHittable { app.swipeUp() }
         XCTAssertTrue(file.waitForExistence(timeout: 20))
         XCTAssertTrue(file.isHittable)
@@ -58,6 +61,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-photo-rollup", "--paper-preview-customer-long-job"]
         app.launch()
         let job = app.buttons.matching(identifier: "customer-records-job-00000000-0000-4000-8000-000000002214").firstMatch
+        XCTAssertTrue(job.waitForExistence(timeout: 20))
         for _ in 0..<30 where !job.isHittable { app.swipeUp() }
         XCTAssertTrue(job.waitForExistence(timeout: 20))
         XCTAssertTrue(job.label.contains("Air conditioning is not cooling the upstairs rooms after several hours of running"))
@@ -72,6 +76,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-photo-rollup", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         let job = app.buttons.matching(identifier: "customer-records-job-00000000-0000-4000-8000-000000002214").firstMatch
+        XCTAssertTrue(job.waitForExistence(timeout: 20))
         for _ in 0..<30 where !job.isHittable { app.swipeUp() }
         for _ in 0..<20 where !job.isHittable { app.swipeUp() }
         XCTAssertTrue(job.waitForExistence(timeout: 20))
@@ -94,6 +99,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-photo-rollup"]
         app.launch()
+        XCTAssertTrue(photosHeading(count: 35, in: app).waitForExistence(timeout: 20))
         let job = app.buttons.matching(identifier: "customer-records-job-00000000-0000-4000-8000-000000002201").firstMatch
         for _ in 0..<30 where !job.isHittable { app.swipeUp() }
         for _ in 0..<30 where !job.isHittable { app.swipeUp() }
@@ -108,6 +114,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-photo-rollup"]
         app.launch()
+        XCTAssertTrue(photosHeading(count: 35, in: app).waitForExistence(timeout: 20))
         let job = app.buttons.matching(identifier: "customer-records-job-00000000-0000-4000-8000-000000002214").firstMatch
         for _ in 0..<30 where !job.isHittable { app.swipeUp() }
         XCTAssertTrue(job.waitForExistence(timeout: 20))
