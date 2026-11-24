@@ -34,6 +34,12 @@ enum PropertiesUnion {
     }
 }
 
+/// The customer a new address is being added to from Properties.
+private struct PropertyNewAddress: Identifiable {
+    let customerID: String
+    var id: String { customerID }
+}
+
 struct PropertiesView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
@@ -45,55 +51,146 @@ struct PropertiesView: View {
     @State private var error: String?
     @State private var query = ""
     @State private var opened: PropertyRow?
+    /// Paper 87A's segments: All, With open work, Commercial.
+    @State private var filter = PropertiesView.allFilter
+    /// Customers the server marks commercial, and how many pieces of equipment sit at each
+    /// address. Both fill in after the list; either stays empty when this person can't read it.
+    @State private var commercialIDs: Set<String> = []
+    @State private var units: [String: Int] = [:]
+    /// Paper 87A's +: choose whose address it is, then the Add location sheet for that customer.
+    @State private var choosingCustomer = false
+    @State private var addingFor: PropertyNewAddress?
+    private var canAdd: Bool { session.can("customer.edit", feature: "core_crm") && !store.customers.isEmpty }
+
+    private static let allFilter = "All"
+    private static let openFilter = "With open work"
+    private static let commercialFilter = "Commercial"
+
+    /// Addresses with a job that is not finished or cancelled.
+    private var openLocations: Set<String> {
+        Set(store.jobs.filter { !["completed", "canceled"].contains($0.status) }.compactMap(\.locationId))
+    }
+
+    private func passes(_ row: PropertyRow, open: Set<String>) -> Bool {
+        if filter == PropertiesView.openFilter { return open.contains(row.location.id) }
+        if filter == PropertiesView.commercialFilter { return commercialIDs.contains(row.customer.id) }
+        return true
+    }
+
+    /// "Marlowe · 2 units · gate code on file": whose it is, what is installed there, and the
+    /// first thing a tech should know at the door.
+    private func subtitle(_ row: PropertyRow) -> String {
+        var parts: [String] = [row.customer.name]
+        if row.location.kind == "billing" { parts.append("Billing") }
+        if let count = units[row.location.id], count > 0 { parts.append(count == 1 ? "1 unit" : "\(count) units") }
+        parts.append(accessHint(row.location))
+        return parts.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+    }
+
+    private func accessHint(_ location: ServiceLocationRecord) -> String {
+        if let gate = location.gateCode, !gate.isEmpty { return "gate code on file" }
+        if let dogs = location.dogOnSite, !dogs.isEmpty { return "dog on site" }
+        if let parking = location.parking, !parking.isEmpty { return parking }
+        if let notes = location.notes, !notes.isEmpty { return notes }
+        return "no notes"
+    }
+
+    /// Paper 87A: "Search or ask" on the card with the filter circle inside it. The words hand
+    /// over to Search (which finds a street, a place or its customer); the circle holds the same
+    /// three choices as the segments.
+    private var searchField: some View {
+        PaperSearchBar(placeholder: "Search or ask") {
+            ThorbisMenu(items: [PropertiesView.allFilter, PropertiesView.openFilter, PropertiesView.commercialFilter].map { name in
+                ThorbisMenuItem(name, isSelected: name == filter) { filter = name }
+            }, title: "Show", accessibilityLabel: "Filter properties") {
+                PaperFilterCircle(active: filter != PropertiesView.allFilter)
+            }
+            .accessibilityValue(filter)
+            .accessibilityIdentifier("properties-filter")
+        }
+        .paperCardMargin()
+    }
+
+    /// Paper 87A: a 13 Semibold label with its count over one card of addresses: the address
+    /// (16 Medium) with "Open job" in the warning ink trailing it, over whose it is (14 muted).
+    @ViewBuilder private func addressSection(_ title: String, _ list: [PropertyRow], open: Set<String>) -> some View {
+        PaperCardLabel(title: title, count: list.count).padding(.top, 20)
+        PaperRowsCard {
+            ForEach(list) { row in
+                if row.id != list.first?.id { WellDivider(leading: 16) }
+                // Web parity: a property opens its own page (property-detail.tsx), not the customer.
+                Button { opened = row } label: {
+                    PaperRecordRow(title: row.location.address, subtitle: subtitle(row),
+                                   status: open.contains(row.location.id) ? "Open job" : nil, statusColor: Theme.warning)
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens the property")
+            }
+        }
+    }
 
     var body: some View {
-        let shown = rows.filter { $0.matches(query) }
+        let open = openLocations
+        let shown = rows.filter { $0.matches(query) && passes($0, open: open) }
+        let commercial = shown.filter { commercialIDs.contains($0.customer.id) }
+        let others = shown.filter { !commercialIDs.contains($0.customer.id) }
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Properties").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text(loaded ? (rows.count == 1 ? "1 address" : "\(rows.count) addresses") : "Every service address, across customers")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+            VStack(alignment: .leading, spacing: 0) {
+                // Paper 87A: the place header, then the addresses on one card 16 from the edges.
+                PaperHeader(title: "Properties",
+                            subtitle: loaded ? (rows.count == 1 ? "1 address" : "\(rows.count) addresses") : "Every service address, across customers",
+                            showsCreate: canAdd)
+                    .environment(\.paperCreate, canAdd ? PaperCreateAction(label: "Add property", run: { choosingCustomer = true }) : nil)
+                // Paper 87A: the search on the card, then All / With open work / Commercial.
+                searchField
+                PaperTabs(options: [PropertiesView.allFilter, PropertiesView.openFilter, PropertiesView.commercialFilter],
+                          selection: $filter)
+                    .padding(.top, 16)
                 if let error { ErrorBanner(message: error) { await load() } }
                 if !loaded && error == nil && rows.isEmpty { SkeletonRows(count: 6, leading: true) }
                 if loaded && rows.isEmpty && error == nil {
                     PaperEmptyState(symbol: "house", title: "No properties yet",
                                     message: "Service addresses added on a customer show here, across your whole book.")
-                } else if loaded && shown.isEmpty {
+                } else if loaded && shown.isEmpty && !query.isEmpty {
                     PaperEmptyState(symbol: "magnifyingglass", title: "No matches",
                                     message: "No address, place name or customer matches “\(query)”.",
                                     actionTitle: "Clear search") { query = "" }
+                } else if loaded && shown.isEmpty {
+                    PaperEmptyState(symbol: "house",
+                                    title: filter == PropertiesView.openFilter ? "No open work" : "No commercial addresses",
+                                    message: filter == PropertiesView.openFilter
+                                        ? "Addresses with a job that isn’t finished show here."
+                                        : "Addresses of customers marked commercial show here.",
+                                    actionTitle: "Show all") { filter = PropertiesView.allFilter }
                 }
-                ForEach(shown) { row in
-                    // Web parity: a property opens its own page (property-detail.tsx), not the customer.
-                    Button { opened = row } label: {
-                        // A plain list-room row, as Customers and Jobs: the address, then whose and what kind.
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.location.address).font(Theme.font(15, weight: .medium)).lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                            DotLine([row.customer.name, row.location.label, row.kindLabel])
-                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        }
-                        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint("Opens the property")
+                // Paper 87A: the addresses on a card, commercial places on their own under them.
+                if !others.isEmpty {
+                    addressSection("Addresses", others, open: open)
+                }
+                if !commercial.isEmpty {
+                    addressSection("Commercial", commercial, open: open)
                 }
                 if loaded && (capped || failedCustomers > 0) {
                     Text(footnote)
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, Theme.gutter).padding(.top, 16)
                 }
             }
             .padding(.bottom, 24)
         }
         .thorbisDestination(item: $opened) { PropertyDetailView(row: $0) }
-        .searchable(text: $query, prompt: "Address, place or customer")
+        .sheet(isPresented: $choosingCustomer) { SheetSurface {
+            CustomerPickerSheet(selectedID: "", canCreate: false, onNew: { _ in }) { id in
+                choosingCustomer = false
+                addingFor = PropertyNewAddress(customerID: id)
+            }
+        } }
+        .sheet(item: $addingFor) { new in SheetSurface {
+            ServiceLocationSheet(customerID: new.customerID, location: nil) { _ in Task { await load() } }
+        } }
+        .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
@@ -145,86 +242,254 @@ struct PropertiesView: View {
         failedCustomers = failures
         loaded = true
         error = (pairs.isEmpty && failures > 0) ? lastError?.localizedDescription : nil
+        // Who is commercial, and what is installed where: one read each, after the list shows.
+        if let records = try? await api.fieldCustomers() {
+            guard session.generation == generation, !Task.isCancelled else { return }
+            commercialIDs = Set(records.filter { $0.accountType == "commercial" }.map(\.id))
+        }
+        if let equipment = try? await api.allEquipment() {
+            guard session.generation == generation, !Task.isCancelled else { return }
+            var counts: [String: Int] = [:]
+            for item in equipment {
+                if let place = item.locationId { counts[place, default: 0] += 1 }
+            }
+            units = counts
+        }
     }
 }
 
 
+/// One "Access" fact on a property page.
+private struct PropertyFact: Identifiable {
+    let label: String
+    let value: String?
+    var id: String { label }
+}
+
 /// Web parity (property-detail.tsx): one address on its own. What kind of place it is and whose,
-/// the facts a tech needs at the door, the jobs booked there and the equipment on site. Read-only:
-/// the address is edited on its customer, where the rules live.
+/// the facts a tech needs at the door, who to reach, the equipment on site and the jobs booked there.
+/// Paper 87: Directions on the place card, Edit beside Access, Call and Text on each contact,
+/// open work apart from past jobs, and New job here as the page's one commit.
 struct PropertyDetailView: View {
     let row: PropertyRow
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
     @State private var openCustomer: Customer?
+    /// The place as last saved from Edit; nil until it is edited here.
+    @State private var saved: ServiceLocationRecord?
+    @State private var editing = false
+    @State private var showNewJob = false
+    @State private var contacts: [CustomerContactRecord] = []
 
-    private var location: ServiceLocationRecord { row.location }
+    private var location: ServiceLocationRecord { saved ?? row.location }
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private static let pinGlyph = PaperGlyph(box: 24, [
+        .stroke("M12 21C12 21 5.5 15.2 5.5 10.2C5.5 6.5 8.4 3.5 12 3.5C15.6 3.5 18.5 6.5 18.5 10.2C18.5 15.2 12 21 12 21Z", 1.6),
+        .circle(12, 10, 2.4, 1.6)])
+    private static let directionsGlyph = PaperGlyph(box: 14, [.stroke("M4.5 9.5L9.5 4.5M5.5 4.5H9.5V8.5", 1.5)])
+    /// "412 Birchwood Ln" of "412 Birchwood Ln, Sacramento, CA".
+    private var street: String {
+        location.address.split(separator: ",").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? location.address
+    }
+    /// The city, when the address carries one after the street.
+    private var city: String {
+        let parts = location.address.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        return parts.count > 1 ? parts[1] : ""
+    }
+    private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
+    private var canCreateJob: Bool { session.can("job.create", feature: "jobs") }
+    private var mapsURL: URL? { Directions.url(address: location.address, coordinates: location.coordinates) }
+    private var openJobs: [Job] { jobs.filter { !["completed", "canceled"].contains($0.status) } }
+    private var pastJobs: [Job] { jobs.filter { ["completed", "canceled"].contains($0.status) } }
     private var jobs: [Job] {
         store.jobs.filter { $0.locationId == location.id }
             .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantPast) > (JobFiltering.date($1.scheduledFor) ?? .distantPast) }
     }
-    private var facts: [(String, String)] {
-        [("Gate code", location.gateCode), ("Alarm", location.alarmCode), ("Dog", location.dogOnSite),
-         ("Parking", location.parking), ("Notes", location.notes)]
-            .compactMap { label, value in value.flatMap { $0.isEmpty ? nil : (label, $0) } }
+    /// Paper 87 "Access": what a tech needs at the door, each fact as a label and value.
+    private var facts: [PropertyFact] {
+        let all = [PropertyFact(label: "Gate code", value: location.gateCode), PropertyFact(label: "Alarm", value: location.alarmCode),
+                   PropertyFact(label: "Pets", value: location.dogOnSite), PropertyFact(label: "Parking", value: location.parking),
+                   PropertyFact(label: "Notes", value: location.notes)]
+        return all.filter { !($0.value ?? "").isEmpty }
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 6) {
-                    PaperEyebrow(text: [row.kindLabel, location.label].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
-                    Text(location.address).font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Button { openCustomer = row.customer } label: {
-                        HStack(spacing: 4) {
-                            Text(row.customer.name)
-                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
-                        }
-                        .font(Theme.font(15)).foregroundStyle(Theme.subtle)
-                        .frame(minHeight: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Customer, \(row.customer.name)")
-                    .accessibilityHint("Opens the customer")
-                }
-                if !facts.isEmpty {
-                    PaperSection("At the door") {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(facts, id: \.0) { label, value in
-                                PaperDetailRow(label: label) { Text(value) }
-                                    .padding(.horizontal, PaperCardMetrics.inset)
-                            }
-                        }
-                        .padding(.vertical, PaperCardMetrics.edge)
-                    }
-                }
-                PaperSection("Jobs here", count: jobs.isEmpty ? nil : jobs.count) {
-                    if jobs.isEmpty {
-                        Text("No jobs at this address yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
-                    } else {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(jobs) { job in
-                                NavigationLink(value: PaperRoute.job(job.id)) {
-                                    JobRoomRow(job: job, when: JobFiltering.date(job.scheduledFor).map {
-                                        $0.formatted(.dateTime.month(.abbreviated).day().year())
-                                    }, inset: PaperCardMetrics.inset)
+            VStack(alignment: .leading, spacing: 20) {
+                // Paper 87: the street as the 34 Bold title, then the place, its city and whose it
+                // is on one plain line 2 under it. Open customer is in Property actions.
+                PaperPageTitle(title: street, subtitle: [location.label, city, row.customer.name].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "), columnInset: PaperCardMetrics.margin)
+                if let mapsURL { placeCard(mapsURL) }
+                if !facts.isEmpty || canEdit {
+                    PaperSection(title: "Access") {
+                        if facts.isEmpty {
+                            Text("No gate code or access notes yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                        } else {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(facts) { fact in
+                                    if fact.id != facts.first?.id { WellDivider() }
+                                    PaperDetailRow(label: fact.label) { Text(fact.value ?? "") }
+                                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
                                 }
-                                .buttonStyle(RowPressStyle())
                             }
                         }
-                        .padding(.vertical, PaperCardMetrics.edge)
+                    } accessory: {
+                        // Paper 87: "Edit" in the brand ink beside the section label.
+                        if canEdit {
+                            Button { editing = true } label: {
+                                Text("Edit").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel("Edit property")
+                            .accessibilityIdentifier("property-edit")
+                        }
+                    }
+                }
+                if !contacts.isEmpty {
+                    PaperSection("Contacts", count: contacts.count) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(contacts) { contact in
+                                if contact.id != contacts.first?.id { WellDivider() }
+                                contactRow(contact)
+                            }
+                        }
                     }
                 }
                 CustomerEquipmentSection(customerID: row.customer.id, locations: [location],
                                          onlyLocationID: location.id, editable: false)
+                if !openJobs.isEmpty { jobsSection("Open work", openJobs) }
+                if !pastJobs.isEmpty { jobsSection("Past jobs", pastJobs) }
+                if jobs.isEmpty {
+                    PaperSection("Open work") {
+                        Text("No jobs at this address yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                    }
+                }
+                // At accessibility sizes a pinned commit would cover the page, so it follows the content.
+                if canCreateJob, typeSize.isAccessibilitySize {
+                    Button { showNewJob = true } label: { Text("New job here").inkCommit() }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("property-new-job")
+                }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.canvas)
+        .background(Theme.background)
+        // Paper 87: "+ New job here" is the page's one commit, pinned at the foot.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if canCreateJob, !typeSize.isAccessibilitySize {
+                PaperActionBar(title: "New job here", symbol: "plus", identifier: "property-new-job") { showNewJob = true }
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ThorbisToolbarItem(placement: .topBarTrailing) {
+                ThorbisMenu(items: menuItems, accessibilityLabel: "Property actions") {
+                    PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                }
+            }
+        }
+        .task(id: row.customer.id) {
+            guard session.can("customer.view", feature: "core_crm") else { return }
+            if let loaded = try? await api.fieldContacts(row.customer.id) { contacts = loaded }
+        }
+        .sheet(isPresented: $editing) { SheetSurface {
+            ServiceLocationSheet(customerID: row.customer.id, location: location) { record in saved = record }
+        } }
+        .sheet(isPresented: $showNewJob) { SheetSurface { NewJobSheet(preselected: row.customer, locationID: location.id) } }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+    }
+
+    /// Paper 87: the place card (140 tall, radius 20) with Directions on a brand-surface pill.
+    private func placeCard(_ url: URL) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            PaperIcon(Self.pinGlyph, size: 28, color: Theme.muted)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityHidden(true)
+            Button { openURL(url) } label: {
+                HStack(spacing: 6) {
+                    PaperIcon(Self.directionsGlyph, size: 14, color: Theme.brandText)
+                    Text("Directions")
+                }
+                .paperButton(.secondary, tone: .tinted)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityHint("Opens Maps")
+            .accessibilityIdentifier("property-directions")
+            .padding(12)
+        }
+        .frame(maxWidth: .infinity).frame(height: 140)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    /// Paper 87 "Contacts": the name over the role, then Call and Text on quiet 58 × 44 pills.
+    private func contactRow(_ contact: CustomerContactRecord) -> some View {
+        let digits = (contact.phone ?? "").filter { $0.isNumber || $0 == "+" }
+        let callURL: URL? = digits.count >= 7 ? URL(string: "tel:\(digits)") : nil
+        let textURL: URL? = digits.count >= 7 ? URL(string: "sms:\(digits)") : nil
+        let role = [contact.role ?? "", contact.primary ? "Primary" : ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        return HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(contact.name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !role.isEmpty {
+                    Text(role).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            if let callURL {
+                reachPill("Call", spoken: "Call \(contact.name)") { openURL(callURL) }
+            }
+            if let textURL {
+                reachPill("Text", spoken: "Text \(contact.name)") { inboxText(textURL, name: contact.name, openURL: openURL) }
+            }
+        }
+        .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 11)
+        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+    }
+
+    private func reachPill(_ title: String, spoken: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).paperButton(.secondary, tone: .quiet)
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(spoken)
+    }
+
+    private func jobsSection(_ title: String, _ list: [Job]) -> some View {
+        PaperSection(title, count: list.count) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(list) { job in
+                    if job.id != list.first?.id { WellDivider() }
+                    NavigationLink(value: PaperRoute.job(job.id)) {
+                        JobRoomRow(job: job, when: JobFiltering.date(job.scheduledFor).map {
+                            $0.formatted(.dateTime.month(.abbreviated).day().year())
+                        }, inset: PaperCardMetrics.inset)
+                    }
+                    .buttonStyle(RowPressStyle())
+                }
+            }
+        }
+    }
+
+    /// The page's ••• (Paper 87): Directions, the customer, and Edit for those who can.
+    private var menuItems: [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if let mapsURL {
+            items.append(ThorbisMenuItem("Directions", icon: "arrow.triangle.turn.up.right.diamond") { openURL(mapsURL) })
+        }
+        items.append(ThorbisMenuItem("Open customer", icon: "person") { openCustomer = row.customer })
+        if canEdit {
+            items.append(ThorbisMenuItem("Edit property", icon: "pencil") { editing = true })
+        }
+        return items
     }
 }

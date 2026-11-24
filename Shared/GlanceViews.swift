@@ -9,15 +9,23 @@ import WidgetKit
 
 /// Thorbis tokens for the widget extension, which cannot see the app's `Theme`. Same hex values.
 enum WidgetInk {
-    static let ground = adaptive(light: 0xF7F4EE, dark: 0x1F1F1F)
-    static let panel = adaptive(light: 0xFDFCFA, dark: 0x232323)
-    static let field = adaptive(light: 0xEDE9E2, dark: 0x2A2A2A)
-    static let ink = adaptive(light: 0x201B14, dark: 0xEDEDED)
-    static let onInk = adaptive(light: 0xFDFCFA, dark: 0x191919)
-    static let body = adaptive(light: 0x59544D, dark: 0xA0A0A0)
-    static let accent = adaptive(light: 0x2558E0, dark: 0x6090FF)
-    static let success = adaptive(light: 0x18743A, dark: 0x22C55E)
-    static let warning = adaptive(light: 0x895400, dark: 0xF59E0B)
+    // Paper v2 (2026-11-16), the same values as `Theme`.
+    static let ground = adaptive(light: 0xFAF9F6, dark: 0x1F1F1F)
+    static let panel = adaptive(light: 0xFFFFFF, dark: 0x232323)
+    static let field = adaptive(light: 0xECEAE5, dark: 0x2A2A2A)
+    static let ink = adaptive(light: 0x1A1A1A, dark: 0xEDEDED)
+    static let onInk = adaptive(light: 0xFFFFFF, dark: 0x1A1A1A)
+    static let body = adaptive(light: 0x555555, dark: 0xA0A0A0)
+    static let accent = adaptive(light: 0x1F55E0, dark: 0x6494FF)
+    static let success = adaptive(light: 0x137333, dark: 0x4ADE80)
+    static let warning = adaptive(light: 0xA44A08, dark: 0xFBBF24)
+    /// Paper `secondary-foreground` (`Theme.subtle`): the line under a title.
+    static let subtle = adaptive(light: 0x555555, dark: 0xB4B4B4)
+    /// Paper `brand` (`Theme.brand`, one shade off Paper's #2F6BFF so white type on it holds 4.5:1).
+    static let brand = Color(hex6: 0x2F6AFF)
+    /// The ground of a brand action pill (Paper brand at 16 to 24%, `Theme.brandSurface`); its
+    /// label is `accent`.
+    static let brandSurface = adaptive(light: 0xE3ECFF, dark: 0x182642)
     /// Kept for older callers: the muted line colour.
     static let muted = body
 
@@ -31,9 +39,11 @@ enum WidgetInk {
         static let warning = Color(hex6: 0xF59E0B)
     }
 
-    /// Inter (bundled in both targets) at weights 400 and 500 only, like `Theme.font`.
+    /// Inter (bundled in both targets) at weights 400 to 700, like `Theme.font`.
     static func font(_ size: CGFloat, weight: Font.Weight = .regular, relativeTo style: Font.TextStyle = .body) -> Font {
-        Font.custom("Inter-Regular", size: size, relativeTo: style).weight(weight == .regular ? .regular : .medium)
+        let resolved: Font.Weight = [.heavy, .black].contains(weight) ? .bold
+            : [.ultraLight, .thin, .light].contains(weight) ? .regular : weight
+        return Font.custom("Inter-Regular", size: size, relativeTo: style).weight(resolved)
     }
 
     /// Times and counts: Inter with tabular digits.
@@ -100,69 +110,80 @@ struct GlanceStatusWord: View {
 
 // MARK: - Live Activity
 
-/// The Lock Screen card: status word and timer, the street, the problem and customer, access
-/// facts once on site, and the one next step in ink.
+/// The Lock Screen card (Paper 94): the job number and the status word, the problem with the
+/// customer and street under it, access facts once on site, the big timer, and the one next step.
 struct JobLockScreenView: View {
     let attributes: JobActivityAttributes
     let state: JobActivityAttributes.ContentState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // iOS gives a Lock Screen card 160pt and clips the rest. Four short rows fit: the job
+        // and its step, who and where, what is on record for the site, then the time in this
+        // step beside the one next step.
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                GlanceStatusWord(text: state.label, tint: WidgetInk.tint(state.status))
-                StepTrack(step: state.step, tint: WidgetInk.tint(state.status), empty: WidgetInk.field)
-                Spacer(minLength: 8)
-                TimerLine(state: state, scheduledFor: attributes.scheduledFor, color: WidgetInk.ink, quiet: WidgetInk.body)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attributes.headline)
-                    .font(WidgetInk.font(20, weight: .medium, relativeTo: .title3))
+                Text(attributes.cardTitle)
+                    .font(WidgetInk.font(17, weight: .semibold, relativeTo: .headline))
                     .foregroundStyle(WidgetInk.ink)
                     .lineLimit(1)
-                Text(detailLine)
-                    .font(WidgetInk.font(13, relativeTo: .footnote))
-                    .foregroundStyle(state.waitingToSync ? WidgetInk.warning : WidgetInk.body)
+                Spacer(minLength: 8)
+                Text(state.label)
+                    .font(WidgetInk.font(13, weight: .semibold, relativeTo: .footnote))
+                    .foregroundStyle(WidgetInk.tint(state.status))
                     .lineLimit(1)
+                    .layoutPriority(1)
             }
+            Text(detailLine)
+                .font(WidgetInk.font(14, relativeTo: .subheadline))
+                .foregroundStyle(state.waitingToSync ? WidgetInk.warning : WidgetInk.subtle)
+                .lineLimit(1)
             if state.isOnSite, let access = attributes.access {
                 Label(access, systemImage: "key")
-                    .font(WidgetInk.font(13, weight: .medium, relativeTo: .footnote))
+                    .font(WidgetInk.font(14, weight: .medium, relativeTo: .subheadline))
                     .foregroundStyle(WidgetInk.ink)
                     .lineLimit(1)
                     .accessibilityLabel("On record for this site: \(access)")
             }
-            NextStepButton(jobID: attributes.jobID, state: state)
+            HStack(alignment: .center, spacing: 12) {
+                TimerRow(state: state, scheduledFor: attributes.scheduledFor)
+                NextStepButton(jobID: attributes.jobID, state: state, compact: true)
+            }
+            .padding(.top, 4)
         }
-        .padding(16)
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        // Text never grows past what the card's fixed height can hold.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 
-    /// "AC not cooling · Danielle Marlowe · JOB-2214", or the sync warning in its place.
+    /// "Danielle Marlowe · 412 Birchwood Ln", or the sync warning in its place.
     private var detailLine: String {
-        if state.waitingToSync { return "\(attributes.jobNumber) · Waiting to sync" }
-        return [attributes.subline, attributes.jobNumber].filter { !$0.isEmpty }.joined(separator: " · ")
+        state.waitingToSync ? "Waiting to sync" : attributes.cardDetail
     }
 }
 
-/// While driving: "Booked 10:30 AM" and the drive so far; on site: the time there, counting up.
-private struct TimerLine: View {
+/// The time in this step, big, and beside it where the person is: "On site" with its mark once
+/// there, or "Booked 10:30 AM" while driving.
+private struct TimerRow: View {
     let state: JobActivityAttributes.ContentState
     let scheduledFor: Date?
-    let color: Color
-    let quiet: Color
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            // The status word beside it already says on site or working; only the drive adds
-            // something: when the visit is booked.
-            if state.status == "en_route", let scheduledFor {
-                Text("Booked \(scheduledFor.formatted(date: .omitted, time: .shortened))")
-                    .font(WidgetInk.font(13, relativeTo: .footnote)).foregroundStyle(quiet).lineLimit(1)
-            }
-            ElapsedText(since: state.since)
-                .font(WidgetInk.number(15, relativeTo: .subheadline))
-                .foregroundStyle(color)
-                .frame(maxWidth: 64, alignment: .trailing)
+        HStack(alignment: .center, spacing: 12) {
+            ElapsedText(since: state.since, alignment: .leading)
+                .font(WidgetInk.number(26, weight: .bold, relativeTo: .title))
+                .foregroundStyle(WidgetInk.ink)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: 130, alignment: .leading)
                 .accessibilityLabel("Time in this step")
+            Spacer(minLength: 0)
+            // While driving, when the visit is booked for; the step itself is the word on row one.
+            if state.status == "en_route", let scheduledFor {
+                Text(scheduledFor.formatted(date: .omitted, time: .shortened))
+                    .font(WidgetInk.font(14, relativeTo: .subheadline))
+                    .foregroundStyle(WidgetInk.body)
+                    .lineLimit(1)
+                    .accessibilityLabel("Booked \(scheduledFor.formatted(date: .omitted, time: .shortened))")
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -170,9 +191,18 @@ private struct TimerLine: View {
 
 struct ElapsedText: View {
     let since: Date
+    var alignment: TextAlignment = .trailing
+
     var body: some View {
-        Text(timerInterval: since...Date.distantFuture, countsDown: false)
-            .multilineTextAlignment(.trailing)
+        // A step left open for more than a day reads "19d 15h" (as the app's on-site clock does),
+        // not "471:15:49", and short enough for the island's compact slot.
+        let seconds = Int(Date().timeIntervalSince(since))
+        if seconds >= 86_400 {
+            Text("\(seconds / 86_400)d \((seconds / 3600) % 24)h").multilineTextAlignment(alignment).lineLimit(1)
+        } else {
+            Text(timerInterval: since...Date.distantFuture, countsDown: false)
+                .multilineTextAlignment(alignment)
+        }
     }
 }
 
@@ -183,26 +213,31 @@ struct NextStepButton: View {
     let jobID: String
     let state: JobActivityAttributes.ContentState
     var island = false
+    /// Beside the timer on the Lock Screen card: as wide as its words, not the whole row.
+    var compact = false
 
     var body: some View {
         if let next = state.nextStep {
             Button(intent: AdvanceJobStepIntent(jobID: jobID, target: next.target)) {
-                label(next.buttonTitle, symbol: next.symbol)
+                label(next.buttonTitle)
             }
             .buttonStyle(.plain)
             .accessibilityHint("Updates this job's status.")
         } else if state.status == "in_progress", let url = JobActivityLink.url(jobID: jobID) {
-            Link(destination: url) { label("Wrap up", symbol: "checkmark") }
+            Link(destination: url) { label("Finish job") }
                 .accessibilityHint("Opens the job to finish it.")
         }
     }
 
-    private func label(_ title: String, symbol: String) -> some View {
-        Label(title, systemImage: symbol)
-            .font(WidgetInk.font(15, weight: .medium, relativeTo: .subheadline))
-            .foregroundStyle(island ? Color.black : WidgetInk.onInk)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Capsule().fill(island ? Color.white : WidgetInk.ink))
+    /// Paper 94: a 44pt pill, brand type on the brand surface; white on the always-black island.
+    private func label(_ title: String) -> some View {
+        Text(title)
+            .font(WidgetInk.font(15, weight: .semibold, relativeTo: .subheadline))
+            .foregroundStyle(island ? Color.black : WidgetInk.accent)
+            .lineLimit(1)
+            .padding(.horizontal, compact ? 18 : 0)
+            .frame(maxWidth: compact ? nil : .infinity, minHeight: 44)
+            .background(Capsule().fill(island ? Color.white : WidgetInk.brandSurface))
             .contentShape(Capsule())
     }
 }
@@ -293,6 +328,14 @@ struct TodayJobsView: View {
 
     private var countText: String? { entry.progress?.text }
 
+    /// Paper 94D's header count, "3 of 4 left": what is still to do out of today's visits.
+    private var leftOfTotalText: String {
+        if let progress = entry.progress, case .visit(_, let total) = progress, entry.items.count <= total {
+            return "\(entry.items.count) of \(total) left"
+        }
+        return TodayJobsView.leftText(entry.items.count)
+    }
+
     // MARK: Home Screen
 
     @ViewBuilder private var small: some View {
@@ -300,7 +343,7 @@ struct TodayJobsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(TodaySnapshot.liveStatuses.contains(next.status) ? "Now" : "Next stop")
-                        .font(WidgetInk.font(13, weight: .medium, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
+                        .font(WidgetInk.font(13, weight: .semibold, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
                     Spacer(minLength: 4)
                     if let countText {
                         Text(countText).font(WidgetInk.number(12, weight: .regular, relativeTo: .caption))
@@ -334,12 +377,10 @@ struct TodayJobsView: View {
         if entry.items.isEmpty {
             empty
         } else {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 header
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(entry.items.prefix(3)) { item in row(item) }
-                }
                 Spacer(minLength: 0)
+                rows(Array(entry.items.prefix(3)), leadFirst: true)
             }
         }
     }
@@ -352,25 +393,25 @@ struct TodayJobsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(TodaySnapshot.liveStatuses.contains(next.status) ? "Now" : glanceTime(next))
-                                .font(WidgetInk.number(15, relativeTo: .subheadline)).foregroundStyle(WidgetInk.ink)
+                                .font(WidgetInk.number(14, weight: .semibold, relativeTo: .subheadline))
+                                .foregroundStyle(WidgetInk.accent)
                             Spacer(minLength: 8)
                             GlanceStatusWord(text: WidgetInk.word(next.status), tint: WidgetInk.tint(next.status))
                         }
-                        Text(next.headline).font(WidgetInk.font(20, weight: .medium, relativeTo: .title3))
+                        Text(next.headline).font(WidgetInk.font(20, weight: .semibold, relativeTo: .title3))
                             .foregroundStyle(WidgetInk.ink).lineLimit(2)
                         Text(next.subline).font(WidgetInk.font(15, relativeTo: .subheadline))
-                            .foregroundStyle(WidgetInk.body).lineLimit(1)
+                            .foregroundStyle(WidgetInk.subtle).lineLimit(1)
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(WidgetInk.panel))
+                    // The widget's own ground is the card now, so the lead stop sits on the fill.
+                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(WidgetInk.field))
                 }
                 let rest = Array(entry.items.dropFirst().prefix(4))
                 if !rest.isEmpty {
-                    Text("Later today").font(WidgetInk.font(13, weight: .medium, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(rest) { item in row(item) }
-                    }
+                    Text("Later today").font(WidgetInk.font(13, weight: .semibold, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
+                    rows(rest, leadFirst: false)
                 }
                 Spacer(minLength: 0)
             }
@@ -379,34 +420,51 @@ struct TodayJobsView: View {
         }
     }
 
+    /// Paper 94D: "Today's jobs" and, trailing, "3 of 4 left".
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Today").font(WidgetInk.font(15, weight: .medium, relativeTo: .subheadline)).foregroundStyle(WidgetInk.ink)
-            Spacer()
-            Text(countText ?? TodayJobsView.leftText(entry.items.count))
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Today's jobs").font(WidgetInk.font(15, weight: .semibold, relativeTo: .subheadline))
+                .foregroundStyle(WidgetInk.ink).lineLimit(1)
+            Spacer(minLength: 4)
+            Text(leftOfTotalText)
                 .font(WidgetInk.number(13, weight: .regular, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
+                .lineLimit(1)
         }
     }
 
-    /// One row: time column, street (or title), problem · customer, status word on the right.
-    private func row(_ item: TodaySnapshot.Item) -> some View {
+    /// The rows under the header, 9 apart; the first one's time is the brand's when it leads.
+    private func rows(_ items: [TodaySnapshot.Item], leadFirst: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(items) { item in
+                row(item, lead: leadFirst && item.id == items.first?.id)
+            }
+        }
+    }
+
+    /// One row (Paper 94D): a 70pt time column, then the problem.
+    private func row(_ item: TodaySnapshot.Item, lead: Bool) -> some View {
         Link(destination: JobActivityLink.url(jobID: item.id) ?? Self.scheduleURL) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(TodaySnapshot.liveStatuses.contains(item.status) ? "Now" : glanceTime(item))
-                    .font(WidgetInk.number(13, relativeTo: .footnote))
-                    .foregroundStyle(WidgetInk.ink)
-                    .frame(width: 62, alignment: .leading)
+                    .font(WidgetInk.number(14, weight: lead ? .semibold : .medium, relativeTo: .subheadline))
+                    .foregroundStyle(lead ? WidgetInk.accent : WidgetInk.body)
+                    .frame(width: 70, alignment: .leading)
                     .lineLimit(1).minimumScaleFactor(0.8)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.headline).font(WidgetInk.font(15, weight: .medium, relativeTo: .subheadline))
-                        .foregroundStyle(WidgetInk.ink).lineLimit(1)
-                    Text(item.subline).font(WidgetInk.font(13, relativeTo: .footnote))
-                        .foregroundStyle(WidgetInk.body).lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                GlanceStatusWord(text: WidgetInk.word(item.status), tint: WidgetInk.tint(item.status), size: 12)
+                Text(item.title.isEmpty ? item.headline : item.title)
+                    .font(WidgetInk.font(15, weight: .medium, relativeTo: .subheadline))
+                    .foregroundStyle(WidgetInk.ink).lineLimit(1)
+                Spacer(minLength: 0)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(rowLabel(item))
         }
+    }
+
+    /// VoiceOver keeps what the row no longer draws: the status, the street and the customer.
+    private func rowLabel(_ item: TodaySnapshot.Item) -> String {
+        let time = TodaySnapshot.liveStatuses.contains(item.status) ? "Now" : glanceTime(item)
+        let parts: [String?] = [time, item.title, item.street, item.customer, WidgetInk.word(item.status)]
+        return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     // MARK: Lock Screen
@@ -479,10 +537,10 @@ struct GlanceEmpty: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Today").font(WidgetInk.font(13, weight: .medium, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
+            Text("Today").font(WidgetInk.font(13, weight: .semibold, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
             Spacer(minLength: 0)
             Text(signedOut ? "Open Thorbis to sign in" : "No more jobs today")
-                .font(WidgetInk.font(17, weight: .medium, relativeTo: .headline)).foregroundStyle(WidgetInk.ink)
+                .font(WidgetInk.font(17, weight: .semibold, relativeTo: .headline)).foregroundStyle(WidgetInk.ink)
             Text(signedOut ? "Your day shows here." : doneText)
                 .font(WidgetInk.font(13, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
         }
@@ -498,7 +556,8 @@ struct GlanceEmpty: View {
 
 // MARK: - Next stop widget
 
-/// One stop, big: where to go, what for, and the next step as an ink button.
+/// One stop, big (Paper 94D): "Next stop", the street, the booked time in large type, and the
+/// next step as a brand pill.
 struct NextStopView: View {
     let entry: TodayEntry
 
@@ -506,7 +565,8 @@ struct NextStopView: View {
         if let next = entry.items.first {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(glanceTime(next)).font(WidgetInk.number(13, relativeTo: .footnote)).foregroundStyle(WidgetInk.ink)
+                    Text(TodaySnapshot.liveStatuses.contains(next.status) ? "Now" : "Next stop")
+                        .font(WidgetInk.font(13, weight: .semibold, relativeTo: .footnote)).foregroundStyle(WidgetInk.body)
                         .lineLimit(1)
                     Spacer(minLength: 2)
                     if let count = entry.progress, case .visit(let index, let total) = count {
@@ -515,13 +575,18 @@ struct NextStopView: View {
                             .accessibilityLabel("Visit \(index) of \(total)")
                     }
                 }
-                Spacer(minLength: 4)
                 Text(next.headline)
-                    .font(WidgetInk.font(17, weight: .medium, relativeTo: .headline))
-                    .foregroundStyle(WidgetInk.ink).lineLimit(2).minimumScaleFactor(0.85)
-                Text(next.street == nil ? next.customer : next.title)
-                    .font(WidgetInk.font(13, relativeTo: .footnote)).foregroundStyle(WidgetInk.body).lineLimit(1)
-                Spacer(minLength: 6)
+                    .font(WidgetInk.font(14, weight: .medium, relativeTo: .subheadline))
+                    .foregroundStyle(WidgetInk.ink).lineLimit(1)
+                    .accessibilityLabel([next.headline, next.subline].filter { !$0.isEmpty }.joined(separator: ", "))
+                // Paper draws the drive time here; the widget has no route, so it is the booked
+                // time, or the status word once the job is under way.
+                Text(glanceTime(next))
+                    .font(WidgetInk.number(30, weight: .bold, relativeTo: .largeTitle))
+                    .foregroundStyle(WidgetInk.ink)
+                    .lineLimit(1).minimumScaleFactor(0.5)
+                    .padding(.top, 2)
+                Spacer(minLength: 4)
                 action(next)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -541,17 +606,17 @@ struct NextStopView: View {
             .accessibilityHint("Updates this job's status.")
         } else {
             GlanceStatusWord(text: WidgetInk.word(item.status), tint: WidgetInk.tint(item.status), size: 12)
-                .frame(minHeight: 36)
+                .frame(minHeight: 44)
         }
     }
 
     private func pill(_ title: String) -> some View {
         Text(title)
-            .font(WidgetInk.font(15, weight: .medium, relativeTo: .subheadline))
-            .foregroundStyle(WidgetInk.onInk)
+            .font(WidgetInk.font(14, weight: .semibold, relativeTo: .subheadline))
+            .foregroundStyle(WidgetInk.accent)
             .lineLimit(1).minimumScaleFactor(0.8)
-            .frame(maxWidth: .infinity, minHeight: 36)
-            .background(Capsule().fill(WidgetInk.ink))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Capsule().fill(WidgetInk.brandSurface))
             .contentShape(Capsule())
     }
 }

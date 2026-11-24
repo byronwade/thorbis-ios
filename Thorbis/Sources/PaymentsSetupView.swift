@@ -130,39 +130,73 @@ struct PaymentsSetupView: View {
     @State private var hosted: URL?
     @State private var busy = false
     @State private var error: String?
+    /// Money › Payouts (Paper 90): once Stripe is set up and nothing is asked of the owner, the
+    /// page is the balance and the recent payouts. Setup, or anything Stripe wants, keeps the
+    /// setup page below with its Open Stripe button.
+    var showsPayouts = false
+
+    private var payoutsSnapshot: MoneyAvailability? {
+        guard showsPayouts, let readiness, readiness.actionTitle == nil else { return nil }
+        return availability
+    }
 
     var body: some View {
         ScrollView {
+            if let snapshot = payoutsSnapshot {
+                PayoutsPage(snapshot: snapshot, company: session.activeOrganization?.name ?? "")
+            } else {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    // MA-05: large title and one muted subtitle line; the Stripe note follows as body.
-                    Text("Payments").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                // MA-05 / Paper v2: the 34 Bold title and one muted subtitle line.
+                PaperHeader(title: "Payments", subtitle: subtitle)
+                    .environment(\.paperMenuButton, false)
+                    .environment(\.paperDrawer, nil)
+                VStack(alignment: .leading, spacing: 20) {
+                    if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin) }
+                    if readiness == nil && error == nil { SkeletonSection(rows: 3) }
+                    if let readiness {
+                        // Paper 15/15A: "Customer payments" with its state as a pill, then what it means.
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .center, spacing: 8) {
+                                Text("Customer payments").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                                    .accessibilityAddTraits(.isHeader)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                stateBadge(readiness)
+                            }
+                            .frame(minHeight: 26)
+                            Text(readiness.headline).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(readiness.detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 4)
+                        PaperSection("Status") {
+                            statusRow("Card payments", on: readiness.chargesReady)
+                            WellDivider()
+                            statusRow("Payouts to your bank", on: readiness.payoutsReady)
+                        }
+                        if readiness.requirements.total > 0 {
+                            PaperSection("Stripe is asking for") {
+                                if readiness.requirements.pastDueCount > 0 { countRow("Past due", readiness.requirements.pastDueCount, urgent: true) }
+                                if readiness.requirements.currentlyDueCount > 0 {
+                                    if readiness.requirements.pastDueCount > 0 { WellDivider() }
+                                    countRow("Due now", readiness.requirements.currentlyDueCount, urgent: true)
+                                }
+                                if readiness.requirements.eventuallyDueCount > 0 {
+                                    if readiness.requirements.pastDueCount + readiness.requirements.currentlyDueCount > 0 { WellDivider() }
+                                    countRow("Due later", readiness.requirements.eventuallyDueCount, urgent: false)
+                                }
+                            }
+                        }
+                        if let availability { moneySection(availability) }
+                    }
                     Text("Card payments and payouts run through Stripe. Stripe holds your bank and identity details; Thorbis never sees them.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
                 }
-                .padding(.bottom, 12)
-                if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
-                if readiness == nil && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
-                if let readiness {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(readiness.headline).font(Theme.font(17, weight: .medium))
-                        Text(readiness.detail).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                    .padding(.vertical, 8)
-                    PaperGroupHeader(title: "Status").padding(.top, 10)
-                    statusRow("Card payments", on: readiness.chargesReady)
-                    statusRow("Payouts to your bank", on: readiness.payoutsReady)
-                    if readiness.requirements.total > 0 {
-                        PaperGroupHeader(title: "Stripe is asking for").padding(.top, 10)
-                        if readiness.requirements.pastDueCount > 0 { countRow("Past due", readiness.requirements.pastDueCount, urgent: true) }
-                        if readiness.requirements.currentlyDueCount > 0 { countRow("Due now", readiness.requirements.currentlyDueCount, urgent: true) }
-                        if readiness.requirements.eventuallyDueCount > 0 { countRow("Due later", readiness.requirements.eventuallyDueCount, urgent: false) }
-                    }
-                    if let availability { moneySection(availability) }
-                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
+            }
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
@@ -175,8 +209,7 @@ struct PaymentsSetupView: View {
                     Text("Opens Stripe in a secure browser. Tap Done there to come back.")
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-                .background(Theme.canvas)
+                .paperActionBarGround(Theme.canvas)
             }
         }
         .refreshable { await load() }
@@ -196,79 +229,96 @@ struct PaymentsSetupView: View {
 
     private struct HostedPage: Identifiable { let url: URL; var id: String { url.absoluteString } }
 
+    /// Paper 15A: a pill beside "Customer payments": Verified once Stripe takes cards and pays out.
+    private func stateBadge(_ readiness: MerchantReadiness) -> some View {
+        let ready = readiness.chargesReady && readiness.payoutsReady
+        return Text(ready ? "Verified" : "Stripe Connect")
+            .font(Theme.font(13, weight: .semibold))
+            .foregroundStyle(ready ? Theme.success : Theme.brandText)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(ready ? Theme.successSurface : Theme.brandSurface, in: Capsule())
+    }
+
     private func statusRow(_ title: String, on: Bool) -> some View {
-        HStack {
-            Text(title).font(Theme.font(15, weight: .medium))
-            Spacer()
-            // Status is a word with a shape; colour is not the signal.
-            Label(on ? "On" : "Not yet", systemImage: on ? "checkmark.circle.fill" : "circle.dashed")
-                .font(Theme.font(15)).foregroundStyle(on ? Theme.foreground : Theme.muted)
-        }
-        .frame(minHeight: 48)
-        .accessibilityElement(children: .combine)
+        // Status is a word with a dot; colour is not the only signal.
+        PaperListRow(title: title, status: StatusWord(text: on ? "On" : "Not yet", tint: on ? Theme.statusDone : nil))
+            .frame(minHeight: 56)
+            .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private func moneySection(_ snapshot: MoneyAvailability) -> some View {
         if let attention = snapshot.attention {
             // MA-15: body-colour words, only the mark is tinted.
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(attention.title).font(Theme.font(15, weight: .medium))
-                    Text(attention.explanation).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(attention.title).font(Theme.font(16, weight: .medium))
+                    Text(attention.explanation).font(Theme.font(14)).foregroundStyle(Theme.muted)
                 }
             }
             .foregroundStyle(Theme.foreground)
-            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .padding(.top, 14)
+            .padding(PaperCardMetrics.inset).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
         ForEach(snapshot.balances) { balance in
-            PaperGroupHeader(title: snapshot.balances.count > 1 ? "Balance · \(balance.currency)" : "Balance").padding(.top, 10)
-            amountRow("Available", balance.available, balance.currency)
-            amountRow("Pending", balance.pending, balance.currency)
-            Text(balance.explanation).font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 8) {
+                PaperSection(snapshot.balances.count > 1 ? "Balance · \(balance.currency)" : "Balance") {
+                    amountRow("Available", balance.available, balance.currency)
+                    WellDivider()
+                    amountRow("Pending", balance.pending, balance.currency)
+                }
+                Text(balance.explanation).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
         }
         if !snapshot.payouts.isEmpty {
-            PaperGroupHeader(title: "Recent payouts", count: snapshot.payouts.count).padding(.top, 14)
-            ForEach(Array(snapshot.payouts.enumerated()), id: \.offset) { _, payout in
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        if payout.responsibleActor == "owner" {
-                            Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
-                                .accessibilityLabel("Needs you")
+            PaperSection("Recent payouts", count: snapshot.payouts.count) {
+                ForEach(Array(snapshot.payouts.enumerated()), id: \.offset) { index, payout in
+                    if index > 0 { WellDivider() }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 8) {
+                            if payout.responsibleActor == "owner" {
+                                Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
+                                    .accessibilityLabel("Needs you")
+                            }
+                            Text(payout.title).font(Theme.font(16, weight: .medium))
+                            Spacer()
+                            Text(money(payout.amount, currency: payout.currency))
+                                .font(Theme.monoFont(16, weight: .semibold)).moneyStyle(.row)
                         }
-                        Text(payout.title).font(Theme.font(15, weight: .medium))
-                        Spacer()
-                        Text(money(payout.amount, currency: payout.currency)).moneyStyle(.row)
+                        Text(payout.explanation).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     }
-                    Text(payout.explanation).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(.vertical, 8)
-                .accessibilityElement(children: .combine)
             }
         }
     }
 
     private func amountRow(_ title: String, _ amount: Int, _ currency: String) -> some View {
         HStack {
-            Text(title).font(Theme.font(15, weight: .medium))
+            Text(title).font(Theme.font(16, weight: .medium))
             Spacer()
-            Text(money(amount, currency: currency)).moneyStyle(.row)
+            // Paper: a money row's figure in 16 Semibold tabular beside its 16 Medium label.
+            Text(money(amount, currency: currency)).font(Theme.monoFont(16, weight: .semibold)).moneyStyle(.row)
                 .foregroundStyle(amount < 0 ? Theme.warning : Theme.foreground)
         }
-        .frame(minHeight: 44)
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .frame(minHeight: 56)
         .accessibilityElement(children: .combine)
     }
 
     private func countRow(_ title: String, _ count: Int, urgent: Bool) -> some View {
         HStack {
-            Text(title).font(Theme.font(15, weight: .medium))
+            Text(title).font(Theme.font(16, weight: .medium))
             Spacer()
-            Text(count == 1 ? "1 item" : "\(count) items").font(Theme.font(14))
+            Text(count == 1 ? "1 item" : "\(count) items").font(Theme.font(15))
                 .foregroundStyle(urgent ? Theme.warning : Theme.muted)
         }
-        .frame(minHeight: 44)
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .frame(minHeight: 56)
         .accessibilityElement(children: .combine)
     }
 

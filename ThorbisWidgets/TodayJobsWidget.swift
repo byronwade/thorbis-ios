@@ -45,7 +45,8 @@ struct TodayJobsWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: TodaySnapshot.widgetKind, provider: TodayProvider()) { entry in
             TodayJobsView(entry: entry)
-                .containerBackground(for: .widget) { WidgetInk.ground }
+                // Paper 94D: a widget is a card.
+                .containerBackground(for: .widget) { WidgetInk.panel }
         }
         .configurationDisplayName("Today's jobs")
         .description("Your job under way, what's next today and how far through the day you are.")
@@ -59,7 +60,7 @@ struct NextStopWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: TodaySnapshot.nextStopKind, provider: TodayProvider()) { entry in
             NextStopView(entry: entry)
-                .containerBackground(for: .widget) { WidgetInk.ground }
+                .containerBackground(for: .widget) { WidgetInk.panel }
         }
         .configurationDisplayName("Next stop")
         .description("Where you're headed next, with On my way, Arrived or Start one tap away.")

@@ -15,9 +15,14 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
     private var token: String?
     private var signedIn = false
 
-    func start(api: APIClient, store: Store) {
+    /// Whether the workspace has staff push on (`staff_push_notifications`). With it off the
+    /// server refuses the device routes, so the app does not call them. Off until `start` sets it.
+    private var pushOn: @MainActor () -> Bool = { false }
+
+    func start(api: APIClient, store: Store, pushOn: @escaping @MainActor () -> Bool) {
         self.api = api
         self.store = store
+        self.pushOn = pushOn
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().setNotificationCategories(NotificationActions.categories)
     }
@@ -25,12 +30,20 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
     /// Called whenever the verified identity changes: a signed-in launch, a sign-in or a workspace switch.
     func identityChanged(signedIn: Bool) {
         self.signedIn = signedIn
+        if !signedIn, !Self.disabled {
+            // Signed out, possibly offline so the server never heard: stop this phone taking alerts
+            // meant for the person who just left, and take theirs off the Lock Screen. Signing in
+            // registers again.
+            UIApplication.shared.unregisterForRemoteNotifications()
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        }
         guard signedIn, !Self.disabled else { return }
         Task {
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined {
-                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+                // Paper 71: say what alerts are for first; its commit shows the system prompt.
+                await PermissionPrimerPresenter.ask(.notifications)
             }
             let granted = await center.notificationSettings().authorizationStatus
             guard [.authorized, .provisional, .ephemeral].contains(granted) else { return }
@@ -46,12 +59,14 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     /// Before sign-out or a workspace switch, while the session can still authorize the call.
     func unbind() async {
-        guard let api, !Self.disabled else { return }
+        // A workspace switch does not pass through a signed-out identity; drop the old company's alerts here.
+        if !Self.disabled { UNUserNotificationCenter.current().removeAllDeliveredNotifications() }
+        guard let api, !Self.disabled, pushOn() else { return }
         _ = try? await api.send("POST", "/v1/devices/unregister", body: ["installationId": Self.installationID]) as DeviceRemoval
     }
 
     private func register() async {
-        guard signedIn, let api, let token, !Self.disabled else { return }
+        guard signedIn, let api, let token, !Self.disabled, pushOn() else { return }
         let body = DeviceRegistration(installationId: Self.installationID, token: token, environment: Self.environment,
                                       appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                                       timeZone: TimeZone.current.identifier, morningDigest: Self.morningDigest)
@@ -74,9 +89,11 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         Task { await register() }
     }
 
-    /// Owners and managers: the people the server sends a digest to (it decides; this only hides the switch).
+    /// The people the server sends a digest to: members who may see company-wide totals
+    /// (organization.performance.view, owners and managers by default). The server decides; this
+    /// only hides the switch from everyone else.
     static func receivesMorningDigest(_ session: SessionController) -> Bool {
-        session.can("invoice.create", feature: "invoicing") && session.can("job.assign", feature: "jobs")
+        session.can("organization.performance.view")
     }
 
     // MARK: Notification center

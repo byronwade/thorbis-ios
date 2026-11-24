@@ -12,12 +12,18 @@ import SwiftUI
 enum PlaceSection: String, CaseIterable, Identifiable {
     case pinned = "Pinned", customized = "Your places", personal = "Personal", work = "Work", customers = "Customers"
     case money = "Money", reports = "Reports", operations = "Operations", other = "Other", phone = "On this phone"
-    var id: String { rawValue }
+    /// Paper v2 (Navigation 29N/57N/58N): the role's main places, listed with no heading, then the
+    /// role's second group (Tools, Manage or Business), then places Paper reaches from inside a hub.
+    case primary = "", tools = "Tools", manage = "Manage", business = "Business", more = "More"
+    var id: String { rawValue.isEmpty ? "primary" : rawValue }
+    /// Whether the section is drawn under a heading of its own.
+    var hasHeading: Bool { self != .primary }
 
     /// The order places take inside their section (C-Nav.dc.html).
     static let canonical: [MenuItem] = [.home, .inbox, .schedule, .jobs, .estimates, .invoices, .team,
                                         .customers, .properties, .money, .billing, .reports, .scorecard,
-                                        .priceBook, .attention, .notices, .drafts]
+                                        .priceBook, .attention, .notices, .drafts, .businessSettings,
+                                        .timeClock, .receipts, .truckStock, .training, .pipeline, .vendors, .marketing]
 }
 
 extension MenuItem {
@@ -34,7 +40,8 @@ extension MenuItem {
         case .money: .money
         case .reports: .reports
         case .priceBook: .operations
-        case .billing, .scorecard, .attention, .notices, .drafts: .other
+        case .billing, .scorecard, .attention, .notices, .drafts, .businessSettings, .timeClock, .receipts,
+             .truckStock, .training, .pipeline, .vendors, .marketing: .other
         }
     }
 
@@ -48,7 +55,8 @@ extension MenuItem {
         case .customers, .properties: Theme.markForest
         case .inbox: Theme.markPumpkin
         case .attention, .money: Theme.markBurnt
-        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts: Theme.markGrey
+        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts, .businessSettings,
+             .timeClock, .receipts, .truckStock, .training, .pipeline, .vendors, .marketing: Theme.markGrey
         }
     }
 }
@@ -56,11 +64,49 @@ extension MenuItem {
 /// Every place a person can reach, grouped as the sidebar lists it. Pure, so the owner's rule (every
 /// reachable place, each exactly once) is unit-tested per role.
 struct DrawerSections: Equatable {
+    /// One row of a Paper-ordered section: a place, or a record kept with the company's books.
+    enum Entry: Hashable, Identifiable {
+        case place(MenuItem), local(LocalWorkspaceSection)
+        var id: String {
+            switch self {
+            case .place(let item): item.rawValue
+            case .local(let section): "local-\(section.rawValue)"
+            }
+        }
+    }
+
     struct Section: Equatable, Identifiable {
         let kind: PlaceSection
         var places: [MenuItem]
         var local: [LocalWorkspaceSection] = []
-        var id: String { kind.rawValue }
+        /// Paper's row order when places and records interleave; nil lists places, then records.
+        var entries: [Entry]? = nil
+        var id: String { kind.id }
+        var rows: [Entry] { entries ?? (places.map(Entry.place) + local.map(Entry.local)) }
+    }
+
+    /// Paper v2's drawer for each role (Navigation 29N, 57N, 58N), in Paper's order. Time clock,
+    /// Receipts, Truck stock, Training, Pipeline, Marketing and Vendors and POs keep their records on
+    /// this phone until the server has them.
+    static func paperLayout(_ role: WorkRole) -> (primary: [Entry], heading: PlaceSection, secondary: [Entry]) {
+        switch role {
+        case .technician:
+            return (primary: [.place(.schedule), .place(.jobs), .place(.customers), .place(.inbox), .place(.timeClock)],
+                    heading: PlaceSection.tools,
+                    secondary: [.place(.priceBook), .place(.receipts), .place(.truckStock), .local(.equipment), .place(.training)])
+        case .office:
+            return (primary: [.place(.home), .place(.schedule), .place(.jobs), .place(.money), .place(.customers),
+                              .place(.pipeline), .place(.inbox)],
+                    heading: PlaceSection.manage,
+                    secondary: [.place(.team), .place(.vendors), .place(.properties), .local(.equipment), .local(.agreements),
+                                .place(.reports)])
+        case .owner:
+            // Paper 58N draws no Jobs row; it stays with the first group until the owner decides.
+            return (primary: [.place(.home), .place(.money), .place(.reports), .place(.schedule), .place(.jobs), .place(.inbox)],
+                    heading: PlaceSection.business,
+                    secondary: [.place(.customers), .place(.pipeline), .place(.marketing), .local(.agreements), .place(.properties),
+                                .local(.equipment), .local(.fleet), .place(.vendors), .place(.businessSettings)])
+        }
     }
 
     var sections: [Section]
@@ -68,18 +114,51 @@ struct DrawerSections: Equatable {
     /// The places in the order they are listed, pinned ones first.
     var places: [MenuItem] { sections.flatMap(\.places) }
 
+    /// Paper's rows for the role, and nothing else: the main places with no heading, then the
+    /// role's second group. A place Paper reaches from inside another screen (Estimates from Money,
+    /// My scorecard from Reports…) is not listed here; `PlaceDoors` says where each one opens, and
+    /// Search lists every place.
+    ///
     /// - Parameters:
-    ///   - pins: the layout's pinned places (company or this phone), from Edit menu.
-    ///   - explicitPins: true when the person or company chose pins; the role's own defaults never
-    ///     count, so a role that never edited its menu sees no Pinned section.
-    ///   - hidden: places the person or company turned off in Customize menu (none by default).
-    ///   - order: Edit menu's global order; customized menus keep this order across groups.
-    ///   - local: records kept on this phone (Fleet, Equipment, Agreements) this role may open.
+    ///   - pins: the places starred in Settings › Menu and start screen. They lead the main group.
+    ///   - explicitPins: true when the person or company chose pins; a role's defaults never move rows.
+    ///   - hidden: places a company layout turned off.
+    ///   - order: the person's order for the main group (Menu and start screen's drag handles).
+    ///   - local: records (Fleet, Equipment, Maintenance plans) this role may open.
     ///   - opens: whether this role can open the place.
+    ///   - role: whose menu it is. Nil lists every place grouped by kind (no screen uses it now).
     static func make(pins: [MenuItem] = [], explicitPins: Bool = false, roleDefaults: [MenuItem] = [],
                      hidden: Set<MenuItem> = [], order: [MenuItem] = [], local: [LocalWorkspaceSection] = [],
-                     opens: (MenuItem) -> Bool) -> DrawerSections {
+                     role: WorkRole? = nil, opens: (MenuItem) -> Bool) -> DrawerSections {
         func reachable(_ item: MenuItem) -> Bool { opens(item) && !hidden.contains(item) }
+        if let role {
+            let layout = paperLayout(role)
+            func keep(_ entries: [Entry]) -> [Entry] {
+                entries.filter { entry -> Bool in
+                    switch entry {
+                    case .place(let item): return reachable(item)
+                    case .local(let section): return local.contains(section)
+                    }
+                }
+            }
+            func section(_ kind: PlaceSection, _ rows: [Entry]) -> Section? {
+                guard !rows.isEmpty else { return nil }
+                let places = rows.compactMap { entry -> MenuItem? in
+                    if case .place(let item) = entry { return item }
+                    return nil
+                }
+                let records = rows.compactMap { entry -> LocalWorkspaceSection? in
+                    if case .local(let section) = entry { return section }
+                    return nil
+                }
+                return Section(kind: kind, places: places, local: records, entries: rows)
+            }
+            let primary = arranged(keep(layout.primary), pins: explicitPins ? pins : [], order: order)
+            var sections: [Section] = []
+            if let first = section(.primary, primary) { sections.append(first) }
+            if let second = section(layout.heading, keep(layout.secondary)) { sections.append(second) }
+            return DrawerSections(sections: sections)
+        }
         let pinned = explicitPins ? unique(pins.filter { reachable($0) && !roleDefaults.contains($0) }) : []
         var sections: [Section] = []
         if !pinned.isEmpty { sections.append(Section(kind: .pinned, places: pinned)) }
@@ -97,8 +176,56 @@ struct DrawerSections: Equatable {
         return DrawerSections(sections: sections)
     }
 
+    /// The main group in the person's order: starred places first (in star order), then the rows
+    /// they dragged, then the rest as Paper lists them. A saved order or star naming a place that
+    /// is not one of this role's main rows (older builds listed every place) is ignored.
+    static func arranged(_ rows: [Entry], pins: [MenuItem], order: [MenuItem]) -> [Entry] {
+        var left = rows
+        var result: [Entry] = []
+        for item in pins + order {
+            if let index = left.firstIndex(of: .place(item)) { result.append(left.remove(at: index)) }
+        }
+        return result + left
+    }
+
+    /// Every row Paper lists for the role, before permissions: what Menu and start screen arranges.
+    static func paperRows(_ role: WorkRole) -> [Entry] {
+        let layout = paperLayout(role)
+        return layout.primary + layout.secondary
+    }
+
     private static func unique(_ items: [MenuItem]) -> [MenuItem] {
         items.reduce(into: [MenuItem]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    /// The phone's menu as people use it (owner feedback 2026-11-18: one place to look). Places
+    /// already in the bottom bar are not repeated, and places Paper gives this role no row or
+    /// parent screen for (`PlaceDoor.settings`) are listed last under "Everything else" instead
+    /// of inside Settings. Each place stays listed once.
+    func phoneMenu(also orphans: [Entry], inBar tabs: [MenuItem]) -> DrawerSections {
+        func inBar(_ entry: Entry) -> Bool {
+            if case .place(let item) = entry { return tabs.contains(item) }
+            return false
+        }
+        func section(_ kind: PlaceSection, _ rows: [Entry]) -> Section? {
+            guard !rows.isEmpty else { return nil }
+            var places: [MenuItem] = []
+            var records: [LocalWorkspaceSection] = []
+            for row in rows {
+                switch row {
+                case .place(let item): places.append(item)
+                case .local(let local): records.append(local)
+                }
+            }
+            return Section(kind: kind, places: places, local: records, entries: rows)
+        }
+        var result = sections.compactMap { section($0.kind, $0.rows.filter { !inBar($0) }) }
+        let listed = Set(sections.flatMap(\.rows))
+        let extra = orphans.reduce(into: [Entry]()) { list, entry in
+            if !listed.contains(entry), !inBar(entry), !list.contains(entry) { list.append(entry) }
+        }
+        if let more = section(.more, extra) { result.append(more) }
+        return DrawerSections(sections: result)
     }
 }
 
@@ -134,11 +261,45 @@ struct PlaceCount: Equatable {
     var accent = false
     /// What VoiceOver reads as the row's value.
     var spoken: String
+    /// Paper v2: how the count is drawn — a plain number, a warning ("2 overdue"), a good word
+    /// ("2h 14m" on the clock) or the brand badge (unread messages).
+    enum Tone: Equatable { case plain, warning, success, badge }
+    var tone: Tone = .plain
 
     static func number(_ value: Int, spoken: String) -> PlaceCount? {
-        value > 0 ? PlaceCount(text: "\(value)", spoken: spoken) : nil
+        value > 0 ? PlaceCount(text: PaperCount.text(value), spoken: spoken) : nil
+    }
+    /// Unread messages: Paper's filled brand badge with the number.
+    static func badge(_ value: Int, spoken: String) -> PlaceCount? {
+        value > 0 ? PlaceCount(text: PaperCount.badge(value), accent: true, spoken: spoken, tone: .badge) : nil
     }
     static let unread = PlaceCount(text: nil, accent: true, spoken: "Unread")
+}
+
+/// The trailing count of a place row (Paper v2 drawer).
+struct PlaceCountLabel: View {
+    let count: PlaceCount
+
+    var body: some View {
+        if let text = count.text {
+            switch count.tone {
+            case .badge:
+                Text(text).font(Theme.font(12, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 6).frame(minWidth: 20, minHeight: 20)
+                    .background(Theme.brand, in: Capsule())
+                    .fixedSize()
+            case .warning:
+                Text(text).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.warning).lineLimit(1).fixedSize()
+            case .success:
+                Text(text).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.success).lineLimit(1).fixedSize()
+            case .plain:
+                Text(text).font(Theme.monoFont(14)).foregroundStyle(count.accent ? Theme.brandText : Theme.subtleForeground)
+                    .lineLimit(1).fixedSize()
+            }
+        } else if count.accent {
+            DrawerDot()
+        }
+    }
 }
 
 /// The day's numbers, shared by Today's numbers row and the sidebar's "N left" so they always agree.
@@ -235,6 +396,19 @@ func compactMoney(_ cents: Int, currency: String = "USD") -> String {
 
 // MARK: - The sidebar's list (phone drawer and iPad column)
 
+@MainActor private enum SidebarPreferenceStore {
+    static let work: UserDefaults = {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if PaperPreview.enabled, let index = args.firstIndex(of: "--paper-preview-menu-suite"),
+           args.indices.contains(index + 1), let uuid = UUID(uuidString: args[index + 1]) {
+            return UserDefaults(suiteName: "thorbis.preview.menu.\(uuid.uuidString)") ?? .standard
+        }
+        #endif
+        return .standard
+    }()
+}
+
 /// The grouped places: a 12 Medium heading per section, then rows. A row is the place's mark in its
 /// quiet hue (filled when it is the place), the word in body (lifted to ink when here) and a count in
 /// tabular figures at the trailing edge. The place showing sits on the selected fill.
@@ -244,6 +418,8 @@ struct PlacesList: View {
     @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
     @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
     @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
+    @AppStorage("thorbis.sidebar.workCollapsed", store: SidebarPreferenceStore.work) private var workCollapsed = false
+    @State private var workspaceExpansion: [PlaceSection: Bool] = [:]
     let sections: DrawerSections
     let title: (MenuItem) -> String
     let isCurrent: (MenuItem) -> Bool
@@ -252,7 +428,13 @@ struct PlacesList: View {
     /// "drawer" or "sidebar": rows are `<prefix>-<place>` (`drawer-jobs`, `sidebar-local-fleet`).
     let idPrefix: String
     var phoneHeading = PlaceSection.phone.rawValue
+    /// Paper's office and owner menus (57N / 58N) draw 40pt rows under a 34pt heading; the
+    /// technician's (29N) draws 46 under 38. The iPad sidebar keeps the taller rows.
+    var compactRows = false
     var savedWork: AppBottomBar.Sync? = nil
+    /// The iPad sidebar lists starred jobs and customers under the main places. The phone drawer is
+    /// Paper's rows alone (29N / 57N / 58N): starred records are in Search there.
+    var showsFavorites = true
     var savedWorkTitle = "Saved on this phone"
     let openPlace: (MenuItem) -> Void
     let openLocal: (LocalWorkspaceSection) -> Void
@@ -262,6 +444,9 @@ struct PlacesList: View {
     private struct FavoritesReload: Equatable {
         let scope: ScopedRecordFavorites.Scope?
         let entries: [ScopedRecordFavorites.Entry]
+        /// Titles are read again after every answered session check: which jobs a person can open is
+        /// checked per record, so a job they lost stops showing on the next foreground.
+        let verification: UUID
     }
     private var favoriteScope: ScopedRecordFavorites.Scope? { ScopedRecordFavorites.currentScope(session: session, api: api) }
     private func canOpenFavorite(_ kind: ScopedRecordFavorites.Kind) -> Bool {
@@ -277,8 +462,60 @@ struct PlacesList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            let projection = WebSidebarProjection.make(places: sections.places, current: sections.places.first(where: isCurrent))
-            ForEach(projection.personal) { item in place(item) }
+            // Paper v2: the role's places as flat rows; a heading only above the second group.
+            let listed = sections.sections.filter { ![.pinned, .customized, .phone].contains($0.kind) }
+            ForEach(Array(listed.enumerated()), id: \.element.id) { index, section in
+                if section.kind.hasHeading { heading(section.kind == .more ? "Everything else" : section.kind.rawValue) }
+                ForEach(section.rows) { entry in
+                    switch entry {
+                    case .place(let item): place(item)
+                    case .local(let local): localRows([local])
+                    }
+                }
+                if index == 0, showsFavorites { favorites }
+            }
+            if listed.isEmpty, showsFavorites { favorites }
+            if let custom = sections.sections.first(where: { $0.kind == .customized }), !custom.places.isEmpty {
+                disclosureHeading("Your places", collapsed: $customCollapsed, id: "custom")
+                if !customCollapsed {
+                    ForEach(custom.places) { item in place(item, prefix: "\(idPrefix)-custom") }
+                }
+            }
+            if let phone = sections.sections.first(where: { $0.kind == .phone }) {
+                // Equipment and Agreements read the company's shared books; only the rest is the phone's.
+                let shared = phone.local.filter { $0 == .equipment || $0 == .agreements }
+                let phoneOnly = phone.local.filter { $0 != .equipment && $0 != .agreements }
+                if !shared.isEmpty {
+                    heading("Records")
+                    localRows(shared)
+                }
+                if !phoneOnly.isEmpty || savedWork != nil {
+                    heading(phoneHeading)
+                    localRows(phoneOnly)
+                    if let savedWork { savedWorkRow(savedWork) }
+                }
+            }
+            // Saved work with no local places still gets its heading.
+            if let savedWork, !sections.sections.contains(where: { $0.kind == .phone }) {
+                heading(phoneHeading)
+                savedWorkRow(savedWork)
+            }
+        }
+        .onChange(of: sections.places.first(where: isCurrent)) { _, place in
+            if let place, place.placeSection != .work { workspaceExpansion[place.placeSection] = true }
+        }
+        .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
+        .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries, verification: session.verificationRevision)) {
+            let expected = favoriteScope
+            recordFavorites.bind(expected)
+            guard expected != nil else { return }
+            await recordFavorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
+        }
+    }
+
+    /// Pinned places and favorite records, under the role's main places.
+    @ViewBuilder private var favorites: some View {
+        VStack(alignment: .leading, spacing: 0) {
             let pins = sections.sections.first(where: { $0.kind == .pinned })?.places ?? []
             let hasSavedRecords = recordFavorites.isBound(to: favoriteScope) && !recordFavorites.entries.isEmpty
             if !pins.isEmpty || hasSavedRecords {
@@ -312,57 +549,18 @@ struct PlacesList: View {
                     }
                 }
             }
-            if let custom = sections.sections.first(where: { $0.kind == .customized }), !custom.places.isEmpty {
-                disclosureHeading("Your places", collapsed: $customCollapsed, id: "custom")
-                if !customCollapsed {
-                    ForEach(custom.places) { item in place(item, prefix: "\(idPrefix)-custom") }
-                }
-            }
-            ForEach(projection.groups) { group in
-                if group.items.count == 1, let item = group.items.first {
-                    place(item)
-                } else if let first = group.items.first {
-                    PlaceRow(title: group.section.rawValue, symbol: first.symbol, tint: first.sidebarTint,
-                             here: false, count: nil, id: "\(idPrefix)-workspace-\(group.section.rawValue.lowercased())") { openPlace(first) }
-                        .accessibilityValue(group.expanded ? "Expanded" : "Collapsed")
-                        .accessibilityHint("Opens \(title(first))")
-                    if group.expanded {
-                        ForEach(group.items) { item in place(item).padding(.leading, 16) }
-                    }
-                }
-            }
-            if let phone = sections.sections.first(where: { $0.kind == .phone }) {
-                // Equipment and Agreements read the company's shared books now; only the rest is the phone's.
-                let shared = phone.local.filter { $0 == .equipment || $0 == .agreements }
-                let phoneOnly = phone.local.filter { $0 != .equipment && $0 != .agreements }
-                if !shared.isEmpty {
-                    heading("Records")
-                    localRows(shared)
-                }
-                if !phoneOnly.isEmpty || savedWork != nil {
-                    heading(phoneHeading)
-                    localRows(phoneOnly)
-                    if let savedWork { savedWorkRow(savedWork) }
-                }
-            }
-            // Saved work with no local places still gets its heading.
-            if let savedWork, !sections.sections.contains(where: { $0.kind == .phone }) {
-                heading(phoneHeading)
-                savedWorkRow(savedWork)
-            }
         }
-        .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
-        .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
-            let expected = favoriteScope
-            recordFavorites.bind(expected)
-            guard expected != nil else { return }
-            await recordFavorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
-        }
+    }
+
+    private func toggleWorkspace(_ section: PlaceSection, expanded: Bool) {
+        if section == .work { workCollapsed = expanded }
+        else { workspaceExpansion[section] = !expanded }
     }
 
     private func place(_ item: MenuItem, prefix: String? = nil) -> some View {
         PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint,
-                 here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)") { openPlace(item) }
+                 here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)",
+                 height: compactRows ? 40 : 46) { openPlace(item) }
     }
 
     private func disclosureHeading(_ text: String, collapsed: Binding<Bool>, id: String, forceExpanded: Bool = false) -> some View {
@@ -376,12 +574,13 @@ struct PlacesList: View {
         .accessibilityIdentifier("\(idPrefix)-\(id)-disclosure")
     }
 
+    /// Paper 29N: 13/18 Medium in `subtle-foreground`, 14 above and 6 below (57N / 58N: 12 and 4).
     private func heading(_ text: String) -> some View {
         Text(text)
-            .font(Theme.font(12, weight: .medium))
-            .foregroundStyle(Theme.muted)
+            .font(Theme.font(13, weight: .medium))
+            .foregroundStyle(Theme.subtleForeground)
             .padding(.horizontal, 12)
-            .padding(.top, 16).padding(.bottom, 4)
+            .padding(.top, compactRows ? 12 : 14).padding(.bottom, compactRows ? 4 : 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityAddTraits(.isHeader)
     }
@@ -389,7 +588,8 @@ struct PlacesList: View {
     @ViewBuilder private func localRows(_ local: [LocalWorkspaceSection]) -> some View {
         ForEach(local, id: \.self) { section in
             PlaceRow(title: section.title, symbol: section.moreSymbol, tint: Theme.markGrey, here: isCurrentLocal(section),
-                     count: nil, id: "\(idPrefix)-local-\(section.rawValue)") { openLocal(section) }
+                     count: nil, id: "\(idPrefix)-local-\(section.rawValue)",
+                     height: compactRows ? 40 : 46) { openLocal(section) }
         }
     }
 
@@ -421,7 +621,7 @@ struct PlacesList: View {
     }
 }
 
-/// A place's mark in a row: the symbol in its quiet hue, outlined at rest and filled when here.
+/// A place's mark in a row (Paper v2): an 18pt line icon, never filled.
 struct PlaceRowIcon: View {
     let symbol: String
     let tint: Color
@@ -429,16 +629,23 @@ struct PlaceRowIcon: View {
     @ScaledMetric(relativeTo: .body) private var size: CGFloat = 18
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size, weight: .regular))
-            .symbolVariant(filled ? .fill : .none)
-            .foregroundStyle(tint)
-            .frame(width: size + 4)
-            .accessibilityHidden(true)
+        // Paper's own drawer glyph where it draws one (29N / 57N / 58N); the symbol otherwise.
+        if let glyph = PaperGlyph.place(symbol: symbol) {
+            PaperIcon(glyph, size: 18, color: tint, scales: true)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: size - 1, weight: .regular))
+                .foregroundStyle(tint)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
     }
 }
 
-/// One place: mark, word, count. Selected: filled mark, the selected fill and the word in ink.
+/// One place (Paper v2 drawer row): an 18pt line icon in the secondary grey, the word at 16 Medium
+/// and the count at the trailing edge, 14 apart, 40 tall. The place showing sits on the sidebar
+/// accent (radius 12) with its icon in brand text and its word in 16 Semibold.
+/// `tint` is kept so call sites compile; Paper draws every icon in the same grey.
 struct PlaceRow: View {
     let title: String
     let symbol: String
@@ -446,33 +653,28 @@ struct PlaceRow: View {
     let here: Bool
     let count: PlaceCount?
     let id: String
+    /// Paper 29N (technician) draws 46; 57N / 58N (office, owner) draw 40.
+    var height: CGFloat = 46
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .center, spacing: 12) {
-                PlaceRowIcon(symbol: symbol, tint: tint, filled: here)
+            HStack(alignment: .center, spacing: 14) {
+                PlaceRowIcon(symbol: symbol, tint: here ? Theme.brandText : Theme.subtle, filled: false)
                 Text(title)
-                    .font(Theme.font(15, weight: .medium))
-                    .foregroundStyle(here ? Theme.foreground : Theme.subtle)
+                    .font(Theme.font(16, weight: here ? .semibold : .medium))
+                    .foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                if let count {
-                    if let text = count.text {
-                        Text(text).font(Theme.monoFont(12, weight: .medium))
-                            .foregroundStyle(count.accent ? Theme.brandText : Theme.muted)
-                            .lineLimit(1).fixedSize()
-                    } else if count.accent {
-                        DrawerDot()
-                    }
-                }
+                if let count { PlaceCountLabel(count: count) }
             }
-            .padding(.horizontal, 12).padding(.vertical, 4)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
             .background {
-                if here { RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.fill) }
+                if here { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.sidebarAccent) }
             }
-            .contentShape(Rectangle())
+            // A 40pt row still takes a 44pt touch: the target reaches 2pt past the row each way.
+            .contentShape(Rectangle().inset(by: min(0, (height - 44) / 2)))
         }
         .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .ignore)
@@ -485,20 +687,31 @@ struct PlaceRow: View {
 
 // MARK: - Controls
 
-/// A round control on the canvas: the fill with a 1px rim (C-Today's menu and search circles).
+/// A round control on the canvas (Paper v2 header circles): 44pt on the card, no rim. `ink` is the
+/// create circle: brand blue with a white glyph.
 struct CreamCircleLabel: View {
     let symbol: String
-    var size: CGFloat = 40
+    var size: CGFloat = 44
     var ink = false
+    /// Paper's own glyph for this circle (the two-line menu, the +); wins over `symbol`.
+    var glyph: PaperGlyph? = nil
+    var glyphSize: CGFloat = 20
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 16, weight: ink ? .semibold : .medium))
-            .foregroundStyle(ink ? Theme.onInk : Theme.foreground)
+        Group {
+            // Paper's own mark wherever it draws one (share, search, back, "…", call, message), so
+            // this circle and `PaperCircleLabel` never draw the same button two ways.
+            if let glyph = glyph ?? PaperGlyph.chrome(symbol: symbol) {
+                PaperIcon(glyph, size: size >= 44 ? glyphSize : min(glyphSize, size >= 40 ? 18 : 16),
+                          color: ink ? .white : Theme.foreground)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 17, weight: ink ? .semibold : .medium))
+                    .foregroundStyle(ink ? Color.white : Theme.foreground)
+            }
+        }
             .frame(width: size, height: size)
-            .background(ink ? Theme.ink : Theme.fill, in: Circle())
-            .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
-            .shadow(color: .black.opacity(ink ? 0.22 : 0), radius: 0, x: 0, y: 1)
+            .background(ink ? Theme.brand : Theme.card, in: Circle())
             .frame(width: max(44, size), height: max(44, size))
             .contentShape(Circle())
     }
@@ -510,39 +723,24 @@ struct RimmedButtonLabel: View {
     let title: String
     let symbol: String
     var enabled = true
+    /// Paper's field stop card (F1) draws these pills 52 tall with a 17 Semibold word.
+    var height: CGFloat = 50
+    var size: CGFloat = 16
     @Environment(\.thorbisPressed) private var pressed
     /// The glyph grows with the word beside it.
     @ScaledMetric(relativeTo: .subheadline) private var glyph: CGFloat = 15
 
+    /// Paper v2: a pill on the field fill, the glyph and a 16 Semibold word, 50 tall.
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.system(size: glyph, weight: .medium)).accessibilityHidden(true)
-            Text(title).font(Theme.font(14, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+            Text(title).font(Theme.font(size, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
         }
         .foregroundStyle(Theme.foreground.opacity(enabled ? 1 : 0.4))
-        .padding(.horizontal, 8).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 44)
-        .background(Theme.selectedSegment, in: shape)
-        .overlay(shape.strokeBorder(Theme.border, lineWidth: 1))
-        .shadow(color: .black.opacity(pressed || !enabled ? 0 : 0.07), radius: 0, x: 0, y: 1)
-        .contentShape(shape)
-    }
-}
-
-/// The place header's mark: the place's symbol on a tinted tile (radius 10).
-struct PlaceMarkTile: View {
-    let symbol: String
-    var tint: Color = Theme.markAccent
-    @ScaledMetric(relativeTo: .title) private var size: CGFloat = 34
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.5, weight: .regular))
-            .foregroundStyle(Theme.onInk)
-            .frame(width: size, height: size)
-            .background(tint, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .accessibilityHidden(true)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: height)
+        .background(Theme.fill.opacity(pressed ? 0.7 : 1), in: Capsule())
+        .contentShape(Capsule())
     }
 }
 
@@ -686,75 +884,5 @@ extension EnvironmentValues {
     var paperSearch: PaperSearchAction? {
         get { self[PaperSearchKey.self] }
         set { self[PaperSearchKey.self] = newValue }
-    }
-}
-
-// MARK: - A place's header
-
-/// A place root's header (C-Today.dc.html): the menu circle on the left of the top bar, Search and
-/// the ink + on its right; then the place's mark on a tinted tile, its title and a muted line, with
-/// the place's own circles (view, layout) at the trailing edge. The title scrolls with the content.
-struct CreamPlaceHeader<Trailing: View>: View {
-    let title: String
-    let subtitle: String
-    let symbol: String
-    var tint: Color = Theme.markAccent
-    var titleIdentifier: String? = nil
-    var showsCreate = true
-    @ViewBuilder var trailing: Trailing
-    @Environment(\.paperCreate) private var create
-    @Environment(\.paperDrawer) private var drawer
-    @Environment(\.paperSearch) private var search
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 4) {
-                if let drawer { DrawerMenuCircle(control: drawer) }
-                Spacer(minLength: 0)
-                if let search {
-                    Button(action: search.run) { CreamCircleLabel(symbol: "magnifyingglass") }
-                        .buttonStyle(PressStyle())
-                        .accessibilityLabel("Search")
-                        .accessibilityIdentifier("header-search")
-                }
-                if showsCreate, let create {
-                    Button(action: create.run) { CreamCircleLabel(symbol: "plus", ink: true) }
-                        .buttonStyle(PressStyle())
-                        .contextMenu {
-                            ForEach(create.choices) { choice in
-                                Button(action: choice.run) { Label(choice.title, systemImage: choice.symbol) }
-                            }
-                        }
-                        .accessibilityLabel(create.label)
-                        .accessibilityIdentifier("header-create")
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 44)
-            let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
-                                                   : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
-            row {
-                HStack(alignment: .center, spacing: 10) {
-                    PlaceMarkTile(symbol: symbol, tint: tint)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(Theme.font(28, weight: .medium)).tracking(-0.5)
-                            .foregroundStyle(Theme.foreground)
-                            .lineLimit(1).minimumScaleFactor(0.7)
-                            .accessibilityAddTraits(.isHeader)
-                            .modifier(OptionalIdentifier(identifier: titleIdentifier))
-                        DotLine(subtitle)
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    }
-                }
-                // The title column takes every point the circles leave (a Spacer would split the
-                // room with it, and the subtitle would wrap with half the row empty).
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) { trailing }.fixedSize()
-            }
-            .padding(.leading, Theme.gutter).padding(.trailing, 14)
-            .padding(.top, 14)
-        }
     }
 }

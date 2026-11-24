@@ -57,6 +57,8 @@ struct JobHours: Equatable {
     /// Hours and minutes, rounded down to the minute: "0 h 24 min" (JH-02).
     static func duration(_ interval: TimeInterval) -> String {
         let minutes = max(0, Int(interval / 60))
+        // A visit left open for days reads "20 d 3 h", not "483 h 12 min".
+        if minutes >= 24 * 60 { return "\(minutes / 1440) d \((minutes / 60) % 24) h" }
         return "\(minutes / 60) h \(minutes % 60) min"
     }
 }

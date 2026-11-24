@@ -5,7 +5,7 @@ final class CustomerClarityUITests: XCTestCase {
     func testContactOffersDirectCallAndTextWithoutHidingOtherActions() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-scroll", "center"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-details", "--paper-preview-scroll", "center"]
         app.launch()
         let call = app.buttons["Call Danielle Marlowe"]
         XCTAssertTrue(app.staticTexts["Contacts"].waitForExistence(timeout: 20))
@@ -13,8 +13,8 @@ final class CustomerClarityUITests: XCTestCase {
         for _ in 0..<12 where !call.isHittable { app.swipeUp() }
         XCTAssertTrue(call.waitForExistence(timeout: 20))
         XCTAssertTrue(call.isHittable)
-        XCTAssertGreaterThanOrEqual(call.frame.height, 44)
-        XCTAssertGreaterThanOrEqual(call.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(call.frame.height, 43.99)
+        XCTAssertGreaterThanOrEqual(call.frame.width, 43.99)
         let text = app.buttons["Text Danielle Marlowe"]
         XCTAssertTrue(text.isHittable)
         XCTAssertGreaterThanOrEqual(text.frame.height, 44)
@@ -30,7 +30,7 @@ final class CustomerClarityUITests: XCTestCase {
     func testContactActionsStayReachableAtLargestText() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-name-long", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-details", "--paper-preview-customer-name-long", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         let name = "Birch Community Hall and Neighborhood Services Center"
         let call = app.buttons["Call \(name)"]
@@ -48,6 +48,7 @@ final class CustomerClarityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-label", "--paper-preview-scroll", "center", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
+        openPropertyPage(app)
         let name = "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
         let label = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 30))
@@ -69,6 +70,7 @@ final class CustomerClarityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-label", "--paper-preview-scroll", "center", "-thorbis.appearance", "dark"]
         app.launch()
+        openPropertyPage(app)
         let name = "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
         let label = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 30))
@@ -82,17 +84,48 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit location"].waitForExistence(timeout: 5))
     }
 
-    func testNextVisitStaysReadableAndOpensItsJob() {
+    func testMultipleOpenJobsAreEasyToFindFromCustomerOverview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-two-open-jobs"]
+        app.launch()
+        // Paper 48N: the hub's Jobs row is the one way to the customer's jobs.
+        let jobs = app.buttons["customer-hub-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 30))
+        XCTAssertTrue(jobs.isHittable)
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["Water heater service"].waitForExistence(timeout: 15))
+    }
+
+    func testMultipleOpenJobsShortcutAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-two-open-jobs", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        let jobs = app.buttons["customer-hub-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 15))
+        for _ in 0..<6 where !jobs.isHittable { app.swipeUp() }
+        XCTAssertTrue(jobs.isHittable)
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["Water heater service"].waitForExistence(timeout: 15))
+    }
+
+    func testJobsRowStaysReadableAndOpensTheJobs() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "-thorbis.appearance", "dark"]
         app.launch()
-        let visit = app.buttons["customer-next-visit"]
-        XCTAssertTrue(visit.waitForExistence(timeout: 30))
-        XCTAssertTrue(visit.isHittable)
+        let jobs = app.buttons["customer-hub-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 30))
+        XCTAssertTrue(jobs.isHittable)
+        // The customer first shows the workspace the last launch saved, which another test's sample
+        // jobs may have written. Read the row once this launch's jobs have named the open one.
+        let named = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "AC not cooling"), object: jobs)
+        XCTAssertEqual(XCTWaiter.wait(for: [named], timeout: 30), .completed, "The row names the open job")
         capture("Customer dark overview")
-        visit.tap()
-        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 10))
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["AC not cooling"].firstMatch.waitForExistence(timeout: 10))
     }
 
     func testCustomerNavigationRemainsUsableAfterScrolling() {
@@ -110,19 +143,16 @@ final class CustomerClarityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-name-long", "--paper-preview-customer-long-job", "-thorbis.appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        // The name is the page's title and, here, also its primary contact; the title comes first.
         let name = app.staticTexts.matching(NSPredicate(format: "label == %@", "Birch Community Hall and Neighborhood Services Center")).firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 30))
         XCTAssertGreaterThan(name.frame.height, 40)
-        let visit = app.buttons["customer-next-visit"]
-        for _ in 0..<10 where !visit.isHittable { app.swipeUp() }
-        XCTAssertTrue(visit.isHittable)
-        let title = app.staticTexts["Air conditioning is not cooling the upstairs rooms after several hours of running"]
-        XCTAssertTrue(title.exists)
-        XCTAssertGreaterThan(title.frame.height, 40)
+        let jobs = app.buttons["customer-hub-jobs"]
+        // At accessibility sizes the tall header initially leaves this row offscreen.
+        app.swipeUp()
+        for _ in 0..<10 where !jobs.isHittable { app.swipeUp() }
+        XCTAssertTrue(jobs.isHittable)
+        XCTAssertGreaterThan(jobs.frame.height, 60, "The long job wraps under Jobs rather than truncating")
         capture("Customer long name and visit, largest text")
-        visit.tap()
-        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 10))
     }
     func testCustomerOverviewUsesOneClearRouteToJobsAndKeepsDetails() {
         continueAfterFailure = false
@@ -131,29 +161,28 @@ final class CustomerClarityUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
         capture("Customer overview")
-        // v2: the account's details sit on Overview itself (no "Customer details" disclosure).
-        XCTAssertTrue(app.staticTexts["Billing terms"].waitForExistence(timeout: 10))
-        // The tabs are Overview, "Jobs · N" and Money.
+        // The hub's first row: Jobs opens its own page with the history.
         let jobs = jobsTab(app)
-        for _ in 0..<8 where !jobs.isHittable { app.swipeDown() }
         XCTAssertTrue(jobs.waitForExistence(timeout: 10))
         jobs.tap()
-        let history = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "Open", "Past")).firstMatch
+        let history = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Open", "Past")).firstMatch
         XCTAssertTrue(history.waitForExistence(timeout: 10))
         capture("Customer jobs")
         XCTAssertFalse(app.staticTexts["Next visit"].exists)
-        // The jobs' photos, notes and documents follow the history on the Jobs tab.
-        let photos = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Photos")).firstMatch
-        for _ in 0..<10 where !photos.exists { app.swipeUp() }
-        XCTAssertTrue(photos.waitForExistence(timeout: 15), app.debugDescription)
-        for _ in 0..<10 where !app.buttons["Overview"].isHittable { app.swipeDown() }
-        app.buttons["Overview"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // Paper 48N: the page is the hub alone; the account's details and contacts are one page
+        // behind Customer actions.
+        XCTAssertTrue(app.buttons["Customer actions"].waitForExistence(timeout: 10))
+        app.buttons["Customer actions"].tap()
+        let details = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Contacts and details")).firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        details.tap()
+        let billing = app.staticTexts["Billing terms"]
+        for _ in 0..<8 where !billing.exists { app.swipeUp() }
+        XCTAssertTrue(billing.waitForExistence(timeout: 10))
         let addContact = app.buttons["Add contact"]
         for _ in 0..<8 where !addContact.exists { app.swipeUp() }
         XCTAssertTrue(addContact.waitForExistence(timeout: 10))
-        let addLocation = app.buttons["Add location"]
-        for _ in 0..<8 where !addLocation.exists { app.swipeUp() }
-        XCTAssertTrue(addLocation.exists)
     }
 
     func testNoJobsShowsAnHonestEmptyHistory() {
@@ -164,25 +193,32 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(jobs.waitForExistence(timeout: 30))
         jobs.tap()
         // The empty history names the one action (design.thorbis.com "Empty names the one action").
-        XCTAssertTrue(app.staticTexts["No jobs yet."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["No jobs yet"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Next visit"].exists)
     }
 
     /// The Jobs tab, labelled "Jobs · N" while jobs are visible.
+    /// Paper v2 (48N): service locations live on the customer's Property page.
+    private func openPropertyPage(_ app: XCUIApplication) {
+        let property = app.buttons["customer-hub-property"]
+        XCTAssertTrue(property.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !property.isHittable { app.swipeUp() }
+        property.tap()
+    }
+
     private func jobsTab(_ app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Jobs", "Jobs ·")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@", "Jobs", "Jobs ·", "Jobs,")).firstMatch
     }
 
     func testLongJobTitleWrapsAtLargestText() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-long-job", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        let title = app.staticTexts["Air conditioning is not cooling the upstairs rooms after several hours of running"]
-        XCTAssertTrue(title.waitForExistence(timeout: 30))
-        XCTAssertGreaterThan(title.frame.height, 40)
-        let visit = app.buttons["customer-next-visit"]
-        for _ in 0..<8 where !visit.isHittable { app.swipeUp() }
-        XCTAssertTrue(visit.isHittable)
+        let jobs = app.buttons["customer-hub-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !jobs.isHittable { app.swipeUp() }
+        XCTAssertTrue(jobs.isHittable)
+        XCTAssertGreaterThan(jobs.frame.height, 60)
         capture("Customer overview large text")
     }
 

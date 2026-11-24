@@ -14,7 +14,7 @@ extension ContainerValues {
 
 extension View {
     /// No hairline between this row and the next one in its `JobPanel`.
-    func jobPanelJoinsNext() -> some View { containerValue(\.jobPanelJoinsNext, true) }
+    func jobPanelJoinsNext(_ joins: Bool = true) -> some View { containerValue(\.jobPanelJoinsNext, joins) }
 }
 
 /// A section's rows. On the job (a Record room, `paperRecordRoom`) they sit on the page with no
@@ -63,6 +63,9 @@ struct JobPanelLabel: View {
     var mark: String? = nil
     var markTint: Color = Theme.warning
     var actionTitle: String? = nil
+    /// Draws the action as this glyph instead of its words (Paper 21: the plus beside
+    /// "Contacts · 3"); `actionTitle` is then what VoiceOver says.
+    var actionSymbol: String? = nil
     var actionIdentifier: String? = nil
     var action: (() -> Void)? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -76,14 +79,15 @@ struct JobPanelLabel: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let mark {
                     Image(systemName: mark)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(markTint)
                         .accessibilityHidden(true)
                 }
-                // Cream sheet (C-Job): a cluster's heading is 16 Medium in the type colour, the count
-                // beside it in the marker grey.
-                (Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                 + Text(count.map { "  \($0)" } ?? "").font(Theme.font(14)).foregroundStyle(Theme.muted))
+                // Paper v2 (21 Job details): a section's label is 13 Semibold in the marker grey,
+                // its count after it in the same voice ("Contacts · 3").
+                Text(count.map { "\(title) · \($0)" } ?? title)
+                    .font(Theme.font(13, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
                     .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
@@ -91,22 +95,33 @@ struct JobPanelLabel: View {
             }
             if !stacked { Spacer(minLength: 8) }
             if let actionTitle, let action {
+                // Paper: the section's one action is a brand-text word at the label's trailing edge ("Edit").
                 Button(action: action) {
-                    Text(actionTitle)
-                        .font(Theme.font(15, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(minWidth: 44, minHeight: 44, alignment: stacked ? .leading : .trailing)
-                        .contentShape(Rectangle())
+                    Group {
+                        if let actionSymbol {
+                            Image(systemName: actionSymbol)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(Theme.brandText)
+                        } else {
+                            // Paper: 13 Semibold in the brand text tone ("Edit").
+                            Text(actionTitle)
+                                .font(Theme.font(13, weight: .semibold))
+                                .foregroundStyle(Theme.brandText)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(minWidth: 44, minHeight: 44, alignment: stacked ? .leading : .trailing)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
+                .accessibilityLabel(actionTitle)
                 .accessibilityIdentifier(actionIdentifier ?? "")
             }
         }
         .padding(.horizontal, 4)
-        .frame(minHeight: 32)
-        .padding(.vertical, actionTitle == nil || stacked ? 0 : -6)
+        .frame(minHeight: 26)
+        .padding(.vertical, actionTitle == nil || stacked ? 0 : -9)
     }
 }
 
@@ -122,7 +137,8 @@ struct JobPanelSection<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // Paper v2: 8 between a section's label and its card.
+        VStack(alignment: .leading, spacing: 8) {
             JobPanelLabel(title: title, count: count, mark: mark, actionTitle: actionTitle,
                           actionIdentifier: actionIdentifier, action: action)
             JobPanel(dividers: dividers) { content }
@@ -262,9 +278,10 @@ struct JobCircleLabel: View {
     }
 }
 
-/// Job sections as Linear text tabs (the style Today uses, `PaperTabs(textTabs:)`): plain
-/// words on the ground, the chosen one on a light well pill, left-aligned. A label with its own words and spoken form keeps
-/// `PaperTabs` out (it binds the label to the value and has no per-tab identifiers).
+/// Job sections as Paper's segmented control (21 Job details, as `PaperTabs` draws it): a card
+/// track (radius 11, inset 2), every segment the same width, the chosen one raised on a pill. A
+/// label with its own words and spoken form keeps `PaperTabs` out (it binds the label to the value
+/// and has no per-tab identifiers).
 struct JobSectionControl: View {
     let options: [(value: String, label: String, spoken: String)]
     @Binding var selection: String
@@ -272,9 +289,9 @@ struct JobSectionControl: View {
     @Namespace private var pill
 
     var body: some View {
-        // Each tab keeps its whole word; when four don't fit one row they flow onto a second, as
-        // Money's tabs do, instead of every tab shrinking to "Overvi…" and "Pho…".
-        FlowRow(spacing: 4, lineSpacing: 0) {
+        // Segments share the width fairly (`JobSectionRowLayout`); a label that can't fit its
+        // segment drops its "· amount" and keeps the word.
+        JobSectionRowLayout(spacing: 2, fills: true) {
             ForEach(options, id: \.value) { option in
                 let isOn = option.value == selection
                 Button { withMotion(.snappy) { selection = option.value } } label: {
@@ -284,13 +301,20 @@ struct JobSectionControl: View {
                         Text(option.label).fixedSize()
                         Text(Self.shortLabel(option.label)).lineLimit(1).minimumScaleFactor(0.8)
                     }
-                        .font(Theme.font(15, weight: .medium))
+                        // Paper v2 segment: 14 Semibold in ink when chosen, 14 Medium in the body grey otherwise.
+                        .font(Theme.font(14, weight: isOn ? .semibold : .medium))
                         .monospacedDigit()
-                        .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .frame(minHeight: Theme.chipHeight + 4)
-                        .background { if isOn { Capsule().fill(Theme.fill).matchedGeometryEffect(id: "pill", in: pill) } }
-                        .frame(minWidth: 44, minHeight: 44)
+                        .foregroundStyle(isOn ? Theme.foreground : Theme.subtle)
+                        .padding(.horizontal, 6)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background {
+                            if isOn {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedSegment)
+                                    .shadow(color: Theme.segmentShadow, radius: 2.5, y: 1)
+                                    .padding(.vertical, 3)
+                                    .matchedGeometryEffect(id: "pill", in: pill)
+                            }
+                        }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
@@ -299,6 +323,8 @@ struct JobSectionControl: View {
                 .accessibilityIdentifier("job-section-\(option.value.lowercased())")
             }
         }
+        .padding(.horizontal, 3)
+        .background(Theme.segmentTrack, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         // The pill glides on a small spring; the section below swaps with the existing snappy motion.
         .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
@@ -391,14 +417,97 @@ struct JobToolTile: View {
     }
 }
 
+/// Paper F4 "Working": one capture tile. A 108pt card, its mark in the brand tone at the top, the
+/// word at 17 Semibold over one 13pt line of what is already there ("4 added"). Two sit side by side.
+struct JobCaptureTile: View {
+    let title: String
+    let symbol: String
+    let detail: String
+    var enabled = true
+    var hint: String? = nil
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(height: 28)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                        .font(Theme.font(17, weight: .semibold))
+                        .foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(detail)
+                        .font(Theme.font(13))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 14)
+            .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
+            .panelBackground(cornerRadius: Theme.cardRadius)
+            .opacity(enabled ? 1 : 0.45)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(!enabled)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(detail)")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(hint ?? "")
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 /// OnSite.dc.html: what to know before touching anything, at the top while on site. Facts in
 /// bold, site notes after; codes copy on a long press.
 struct JobAccessBanner: View {
     let facts: [JobPropertyHistory.Fact]
     /// Set when the facts are the account's only address rather than the job's own site.
     var caveat: String? = nil
+    /// Paper F3: why the office sent the visit, as the last row of "Know before you knock".
+    var description: String? = nil
+    /// Paper F3: the equipment on file at this place ("Trane XR14 · 2019"), between the codes and
+    /// the description.
+    var equipment: String? = nil
+    /// False while driving (Paper F2), where the codes ride in the call card instead: only the
+    /// site's warning shows.
+    var showsCodes = true
 
-    private var headline: String {
+    /// One row of "Know before you knock".
+    private struct KnowRow: Identifiable {
+        let id: String
+        let symbol: String
+        let title: String
+        var subtitle: String? = nil
+    }
+
+    private var knowRows: [KnowRow] {
+        guard showsCodes else { return [] }
+        var rows: [KnowRow] = []
+        if !headline.isEmpty {
+            rows.append(KnowRow(id: "codes", symbol: "key", title: headline, subtitle: caveat))
+        } else if let caveat {
+            rows.append(KnowRow(id: "caveat", symbol: "house", title: caveat))
+        }
+        if let equipment, !equipment.isEmpty {
+            rows.append(KnowRow(id: "equipment", symbol: "wrench.adjustable", title: equipment))
+        }
+        if let description, !description.isEmpty {
+            rows.append(KnowRow(id: "description", symbol: "doc.text", title: description))
+        }
+        return rows
+    }
+
+    /// The codes and the dog on one line ("Gate 4482# · Dog: friendly").
+    var headline: String {
         facts.filter { $0.label != "Site notes" }.map { fact in
             switch fact.label {
             case "Gate code": "Gate \(fact.value)"
@@ -409,46 +518,146 @@ struct JobAccessBanner: View {
         }.joined(separator: " · ")
     }
 
-    private var notes: String? { facts.first { $0.label == "Site notes" }?.value }
+    var notes: String? { facts.first { $0.label == "Site notes" }?.value }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.warning)
-                .padding(.top, 1)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Before you go in")
-                    .font(Theme.font(13, weight: .medium))
-                    .foregroundStyle(Theme.warning)
-                    .accessibilityHidden(true)
-                (Text(headline.isEmpty ? "" : headline + ".").font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                 + Text(notes.map { (headline.isEmpty ? "" : " ") + $0 } ?? "").font(Theme.font(15)).foregroundStyle(Theme.subtle))
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let caveat {
-                    Text(caveat).font(Theme.font(13)).foregroundStyle(Theme.muted)
+        // Paper F3 "Arrived": the site's warning on its own warning-tone card, then "Know before
+        // you knock" over a card whose first row is the codes behind a key.
+        VStack(alignment: .leading, spacing: 16) {
+            if let notes {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Theme.warning)
+                        .frame(width: 28)
+                        .accessibilityHidden(true)
+                    Text(notes)
+                        .font(Theme.font(17, weight: .semibold))
+                        .foregroundStyle(Theme.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             }
-            Spacer(minLength: 0)
+            let rows = knowRows
+            if !rows.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Know before you knock")
+                        .font(Theme.font(13, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                    // Paper F3: one card, a 62pt row per fact (the codes behind a key, why the
+                    // office sent the visit behind a page), a hairline between rows from the words.
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(rows) { row in
+                            HStack(alignment: .center, spacing: 12) {
+                                Image(systemName: row.symbol)
+                                    .font(.system(size: 18, weight: .regular))
+                                    .foregroundStyle(Theme.muted)
+                                    .frame(width: 28)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(row.title)
+                                        .font(Theme.font(17, weight: .medium))
+                                        .monospacedDigit()
+                                        .foregroundStyle(Theme.foreground)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let subtitle = row.subtitle {
+                                        Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+                            .overlay(alignment: .top) {
+                                if row.id != rows.first?.id {
+                                    Rectangle().fill(Theme.hairline).frame(height: 1)
+                                        .padding(.leading, 56)
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                        }
+                    }
+                    .panelBackground(cornerRadius: Theme.cardRadius)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                }
+            }
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // v2: the warning reads from its words ("Before you go in") on the tinted ground; no edge rail.
-        .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .contentShape(Rectangle())
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .contextMenu {
             ForEach(facts.filter(\.isCode)) { fact in
-                Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { UIPasteboard.general.string = fact.value }
+                Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { AccessCodeCopy.copy(fact.value) }
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Before you go in. \(headline). \(notes ?? "")")
+        .accessibilityLabel(["Before you go in", showsCodes ? headline : "", notes ?? "",
+                             showsCodes ? (equipment ?? "") : "", showsCodes ? (description ?? "") : ""]
+            .filter { !$0.isEmpty }.joined(separator: ". "))
         .accessibilityHint(facts.contains(where: \.isCode) ? "Touch and hold to copy a code" : "")
         .accessibilityIdentifier("job-access-banner")
+    }
+}
+
+/// Paper F2 to F4 (field mode): where the visit is, as five bars over their words. Steps behind
+/// are green, the current one brand, the rest quiet. Only the visit's own statuses have a step.
+struct JobFieldSteps: View {
+    static let titles = ["Driving", "Arrived", "Working", "Wrap up", "Paid"]
+    /// The step the visit is on: 0 Driving, 1 Arrived, 2 Working.
+    let current: Int
+    /// Paper F6 "Paid": the last step is behind too, so every bar is green.
+    var allDone = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// The step for a job status; nil when the job is not out on its visit.
+    static func step(for status: String) -> Int? {
+        switch status {
+        case "en_route": return 0
+        case "arrived": return 1
+        case "in_progress": return 2
+        default: return nil
+        }
+    }
+
+    private var shown: Int { min(max(current, 0), Self.titles.count - 1) }
+
+    private func tint(_ index: Int) -> Color {
+        if index < shown || allDone { return Theme.statusDone }
+        return index == shown ? Theme.brand : Theme.fill
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(0..<Self.titles.count, id: \.self) { index in
+                    VStack(spacing: 6) {
+                        Capsule().fill(tint(index)).frame(height: 4)
+                        // Five words do not fit across at accessibility sizes; the current one reads below.
+                        if !typeSize.isAccessibilitySize {
+                            Text(Self.titles[index])
+                                .font(Theme.font(12, weight: .semibold))
+                                .foregroundStyle(index == shown ? Theme.foreground : Theme.muted)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            if typeSize.isAccessibilitySize {
+                Text(Self.titles[shown])
+                    .font(Theme.font(12, weight: .semibold))
+                    .foregroundStyle(Theme.foreground)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Visit progress")
+        .accessibilityValue("\(Self.titles[shown]), step \(shown + 1) of \(Self.titles.count)")
+        .accessibilityIdentifier("job-field-steps")
     }
 }
 
@@ -456,7 +665,23 @@ struct JobAccessBanner: View {
 enum JobOnSiteClock {
     static func line(arrived: Date, now: Date) -> String {
         let minutes = max(0, Int(now.timeIntervalSince(arrived) / 60))
+        if minutes >= 24 * 60 { return "On site \(minutes / 1440) d \((minutes / 60) % 24) h" }
         return minutes < 60 ? "On site \(minutes) min" : "On site \(minutes / 60) h \(minutes % 60) min"
+    }
+
+    /// Paper F4's timer card: hours, minutes and seconds since the arrival tap ("0:42:18").
+    static func timer(arrived: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(arrived)))
+        // A job left on site for days (never wrapped up) reads as days, not "471:13:58".
+        if seconds >= 86_400 { return "\(seconds / 86_400)d \((seconds / 3600) % 24)h" }
+        return String(format: "%d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+    }
+
+    /// Paper F5's Summary row: "1h 12m" since the arrival tap; "12m" under an hour.
+    static func short(arrived: Date, now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(arrived) / 60))
+        if minutes >= 24 * 60 { return "\(minutes / 1440)d \((minutes / 60) % 24)h" }
+        return minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
     }
 }
 
@@ -503,6 +728,180 @@ struct JobInvoiceLineRows: View {
             .accessibilityLabel("\(line.description), quantity \(line.quantity)\(amount.map { ", \($0)" } ?? "")")
             .accessibilityIdentifier(invoiceID.map { "job-invoice-line-\($0)-\(line.id)" } ?? "")
         }
+    }
+}
+
+// MARK: Money (Paper 23 and 24)
+
+/// Paper 23's totals card on the job's Money: what is waiting on the customer and what is approved,
+/// each a 13 Semibold label over its amount at 22 Bold, then "Build an estimate" as a quiet 48pt
+/// pill. Amounts are the validated sums of `JobEstimateSummary`; an approved total that can't be
+/// known says so instead of showing a number.
+struct JobEstimateSummaryCard: View {
+    let summary: JobEstimateSummary
+    // Owner 2026-11-21: the card's "Build an estimate" button is gone; Money adds from its one +.
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// Paper's order: awaiting approval first, then approved.
+    private var figures: [JobEstimateSummary.Amount] {
+        summary.amounts.filter { $0.status != "approved" } + summary.amounts.filter { $0.status == "approved" }
+    }
+
+    private var mixedCurrencies: Bool { Set(summary.amounts.map(\.currency)).count > 1 }
+
+    private func title(_ amount: JobEstimateSummary.Amount) -> String {
+        let word = amount.status == "approved" ? "Approved" : "Awaiting approval"
+        return mixedCurrencies ? "\(word) \u{00B7} \(amount.currency)" : word
+    }
+
+    private var optionsNote: String {
+        "\(summary.optionCount) \(summary.optionCount == 1 ? "estimate has" : "estimates have") pricing options. Review those options separately."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if !figures.isEmpty {
+                // Side by side as Paper draws them; one under the other at accessibility sizes.
+                let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                                                          : AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                layout {
+                    ForEach(figures) { amount in
+                        figure(title(amount), value: money(amount.cents, currency: amount.currency))
+                            .accessibilityIdentifier(amount.status == "approved" ? "job-estimates-approved" : "job-estimates-awaiting")
+                    }
+                }
+            }
+            if summary.approvedUnavailable || summary.optionCount > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    if summary.approvedUnavailable {
+                        Text("Approved total unavailable")
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        Text("Open approved estimates to review their amounts.")
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    }
+                    if summary.optionCount > 0 {
+                        Text(optionsNote).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private func figure(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(value).font(Theme.font(22, weight: .bold)).tracking(-0.44).monospacedDigit()
+                .foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Paper 24's totals under an invoice's lines: Subtotal (and credits, when there are any) at 15,
+/// a hairline, then Total at 22 Bold; what has been paid and what is left once money has come in.
+/// Lines carry no separate tax, so no Tax row is drawn. Nothing shows when the lines can't be
+/// added up safely.
+struct JobInvoiceTotals: View {
+    let invoice: InvoiceRecord
+
+    var body: some View {
+        if let amounts = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency,
+                                                 amountPaid: max(0, invoice.amountPaid)) {
+            VStack(alignment: .leading, spacing: 8) {
+                if amounts.credits != 0 {
+                    row("Subtotal", amounts.subtotal)
+                    row("Credits", amounts.credits)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Total").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                    Spacer(minLength: 8)
+                    Text(money(amounts.total, currency: invoice.currency))
+                        .font(Theme.font(22, weight: .bold)).tracking(-0.44).monospacedDigit()
+                        .foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                .padding(.top, 8)
+                .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+                .accessibilityElement(children: .combine)
+                if amounts.paid > 0 {
+                    row("Paid", amounts.paid)
+                    row("Balance due", amounts.due)
+                }
+            }
+            .accessibilityIdentifier("job-invoice-totals-\(invoice.id)")
+        }
+    }
+
+    private func row(_ label: String, _ cents: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 8)
+            Text(money(cents, currency: invoice.currency)).font(Theme.font(15)).monospacedDigit()
+                .foregroundStyle(Theme.foreground)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Paper 24's balance card, top half: "INV-2209 · Balance due" at 13 Semibold with the invoice's
+/// status on its tinted pill, then what is owed at 34 Bold. The card's Collect payment pill sits
+/// under it. One VoiceOver stop: reference, status, amount.
+struct JobInvoiceBalanceHeader: View {
+    let reference: String
+    /// "Deposit" for a deposit invoice, so it never reads as the job's bill.
+    var kind: String? = nil
+    let status: String
+    let amount: String
+    /// What is already paid, so a part-paid invoice reads "Partly paid" (the shared money word table).
+    var amountPaid = 0
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var statusWord: String {
+        guard status == "issued" else { return status.statusLabel }
+        return amountPaid > 0 ? "Partly paid" : "Unpaid"
+    }
+    private var caption: String {
+        [reference, kind, "Balance due"].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    var body: some View {
+        let tone = StatusWord.documentTone(status) ?? .unscheduled
+        // At accessibility sizes the status goes under the reference so neither is cut.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        return VStack(alignment: .leading, spacing: 6) {
+            layout {
+                Text(caption)
+                    .font(Theme.font(13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 6) {
+                    StatusGlyph(tone: tone, label: "", size: 12)
+                        .accessibilityHidden(true)
+                    Text(statusWord).font(Theme.font(13, weight: .semibold)).foregroundStyle(tone.text)
+                }
+                .padding(.leading, 8).padding(.trailing, 10)
+                .frame(minHeight: 26)
+                .background(tone.surface, in: Capsule())
+                .fixedSize()
+            }
+            Text(amount)
+                .font(Theme.font(34, weight: .bold)).tracking(-0.85).monospacedDigit()
+                .foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.5)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(caption), \(statusWord), \(amount)")
     }
 }
 
@@ -566,15 +965,40 @@ struct JobTimelineItem<Content: View>: View {
     var isLast = false
     /// Top padding of the row; the glyph sits level with the first line of text.
     var verticalPadding: CGFloat = 10
+    /// Paper 21B: the mark sits in a 32pt disc on the field fill, the way the job's Activity draws it.
+    var disc = false
     @ViewBuilder var content: Content
     @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 20
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            JobActivityGlyph(kind: kind, title: title, pending: pending)
-                .padding(.top, 1)
+            if disc {
+                JobActivityGlyph(kind: kind, title: title, pending: pending)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.fill, in: Circle())
+            } else {
+                JobActivityGlyph(kind: kind, title: title, pending: pending)
+                    .padding(.top, 1)
+            }
             content
         }
         .padding(.vertical, verticalPadding)
     }
+}
+
+/// Paper 21K "More": the eight rows' own 22pt line glyphs (stroke 1.6), from its SVGs.
+extension PaperGlyph {
+    static let moreTime = PaperGlyph(box: 22, [.rect(3.5, 4.5, 15, 14, rx: 3, 1.6), .stroke("M3.5 9h15M7.5 2.5v4M14.5 2.5v4", 1.6)])
+    static let morePerson = PaperGlyph(box: 22, [.circle(11, 8, 3.5, 1.6), .stroke("M4.5 18.5c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5", 1.6)])
+    static let moreEnvelope = PaperGlyph(box: 22, [.rect(3, 5, 16, 12, rx: 3, 1.6), .stroke("M4 7.5l7 5 7-5", 1.6)])
+    static let moreCamera = PaperGlyph(box: 22, [
+        .stroke("M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 19 8.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 3 15.5z", 1.6),
+        .circle(11, 12, 3.2, 1.6),
+    ])
+    static let morePhone = PaperGlyph(box: 22, [
+        .stroke("M7.2 3.5H5.5a2 2 0 0 0-2 2.2c.6 6.5 5.3 11.2 11.8 11.8a2 2 0 0 0 2.2-2v-1.7a1.5 1.5 0 0 0-1.1-1.4l-2.6-.8a1.5 1.5 0 0 0-1.5.4l-.9.9a8 8 0 0 1-3.3-3.3l.9-.9a1.5 1.5 0 0 0 .4-1.5l-.8-2.6a1.5 1.5 0 0 0-1.4-1.1z", 1.6),
+    ])
+    static let moreBubble = PaperGlyph(box: 22, [.stroke("M4 7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3h-4l-4 3.5V15a3 3 0 0 1-3-3z", 1.6)])
+    static let morePause = PaperGlyph(box: 22, [.circle(11, 11, 8, 1.6), .stroke("M9 8v6M13 8v6", 1.6)])
+    static let moreCancel = PaperGlyph(box: 22, [.circle(11, 11, 8, 1.6), .stroke("M8.2 8.2l5.6 5.6M13.8 8.2l-5.6 5.6", 1.6)])
 }

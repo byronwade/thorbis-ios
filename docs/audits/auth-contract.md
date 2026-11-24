@@ -1,5 +1,7 @@
 # Native auth and authority contract — 2026-10-26
 
+> Snapshot, 26-28 October 2026. Not maintained. Current API gaps: [GAPS.md](../GAPS.md). Current screen coverage: [paper-screen-index.md](../design/paper-screen-index.md).
+
 Use verified stable origin `https://app.thorbis.com` and append paths below. This describes the existing canonical web contract; fixture values are invented test data, never live credentials. Root verified signed-out GET session is JSON null. Authenticated fixtures are minimum decodable shapes, not a captured production response.
 
 ## HTTP calls

@@ -29,7 +29,15 @@ enum JobLiveActivity {
         let kept = previous.flatMap { $0.content.state.status == status ? $0.content.state.since : nil }
         let state = JobActivityAttributes.ContentState(status: status, since: JobFiltering.date(stamp(job, status)) ?? kept ?? Date(),
                                                        waitingToSync: waitingToSync)
-        let content = ActivityContent(state: state, staleDate: nil)
+        // A step that began more than 16 hours ago is a job nobody closed, not work under way:
+        // no Lock Screen card counts up for days. The job itself still shows the step.
+        if Date().timeIntervalSince(state.since) > 16 * 3600 {
+            let old = sameJob.map(\.id)
+            await lifecycle.perform(endCount: old.count, isAuthorized: isAuthorized,
+                                    end: { await end(id: old[$0]) }, finish: {})
+            return
+        }
+        let content = ActivityContent(state: state, staleDate: state.since.addingTimeInterval(16 * 3600))
         // Remove stale-address and duplicate cards before retaining or requesting one card.
         let toEnd = running.filter { $0.id != current?.id }.map(\.id)
         await lifecycle.perform(endCount: toEnd.count, isAuthorized: isAuthorized, end: { index in

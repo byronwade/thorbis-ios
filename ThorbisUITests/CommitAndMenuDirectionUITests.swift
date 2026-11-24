@@ -11,11 +11,10 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         let app = launchPriceBookEditor()
         let commit = app.buttons["price-book-item-commit"]
         XCTAssertTrue(commit.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(commit.isEnabled, "Add to price book is never pre-disabled")
+        XCTAssertTrue(commit.isEnabled, "Add is never pre-disabled")
         commit.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Add the name customers see")).firstMatch
-            .waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Add a price, like 125.00."].exists, app.debugDescription)
+        XCTAssertTrue(fieldProblem(app, "Add the name customers see").waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(fieldProblem(app, "Add a price, like 125.00.").exists, app.debugDescription)
         attach(app, "Price book commit pressed blank")
     }
 
@@ -28,32 +27,52 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         XCTAssertTrue(commit.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(commit.isEnabled, "Add equipment is never pre-disabled")
         commit.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Say what it is")).firstMatch
-            .waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(fieldProblem(app, "Say what it is").waitForExistence(timeout: 5), app.debugDescription)
         attach(app, "Equipment commit pressed blank")
+    }
+
+    /// The error under a field (Paper 09A): one element, `field-problem`, read as "Error: <message>".
+    private func fieldProblem(_ app: XCUIApplication, _ message: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "field-problem")
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Error: \(message)")).firstMatch
     }
 
     // MARK: Popover direction
 
-    /// Kind and Tax sit in the lower half of the price book editor: their menus open upward and
-    /// every row stays on screen.
+    /// Kind in the price book editor (Paper v2 34A moved it up the page; Taxable is a switch now):
+    /// a select in the lower half opens its menu upward; wherever it sits, every row stays on screen.
     func testLowerHalfSelectsOpenUpward() {
         continueAfterFailure = false
         let app = launchPriceBookEditor()
-        for (label, option) in [("Kind,", "Material"), ("Tax,", "Not taxable")] {
+        XCTAssertTrue(app.switches["price-book-item-taxable"].waitForExistence(timeout: 30), app.debugDescription)
+        for (label, option) in [("Kind,", "Material")] {
             let select = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
             XCTAssertTrue(select.waitForExistence(timeout: 30), app.debugDescription)
-            XCTAssertGreaterThan(select.frame.midY, app.windows.firstMatch.frame.midY, "\(label) sits in the lower half")
+            // The editor is a sheet that slides up; its controls exist from the first frame of the slide.
+            var lastFrame = CGRect.null
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let now = select.frame
+                defer { lastFrame = now }
+                return now == lastFrame
+            }, object: select)
+            XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed, "The editor sheet settles before Kind is measured: \(select.frame)")
+            let lowerHalf = select.frame.midY > app.windows.firstMatch.frame.midY
             select.tap()
-            let row = app.buttons[option]
-            assertMenuRow(row, opensAbove: select, in: app)
+            // Paper's price book also has a category tab with this name behind the sheet.
+            let row = app.thorbisFrontButton(matching: NSPredicate(format: "label == %@", option))
+            if lowerHalf {
+                assertMenuRow(row, opensAbove: select, in: app)
+            } else {
+                XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+                XCTAssertTrue(app.windows.firstMatch.frame.contains(row.frame), "\(option) must be fully on screen")
+            }
             attach(app, "\(label.dropLast()) menu open")
             row.tap()
             XCTAssertTrue(row.waitForNonExistence(timeout: 5))
         }
     }
 
-    /// The invite's Role select sits in the upper half: its menu opens downward, fully on screen.
+    /// The invite's Role row opens the role sheet (Paper 14B), fully on screen.
     func testInviteRoleSelectStaysOnScreen() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -66,14 +85,15 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         let up = Date().addingTimeInterval(5)
         while !app.keyboardShowing && Date() < up { usleep(200_000) }
         select.tap()
-        let row = app.buttons["Office manager"]
+        // Paper 14B: the roles open as their own sheet ("Office" is the office manager).
+        let row = app.buttons["role-picker-office_manager"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: row)
         waitForExpectations(timeout: 5)
         XCTAssertTrue(app.windows.firstMatch.frame.contains(row.frame), "\(row.frame)")
         // The email field has focus on appear; opening the select puts the keyboard away so the
         // menu's last rows aren't hidden behind it.
-        XCTAssertTrue(app.waitForKeyboardToHide(timeout: 5), "The keyboard goes away when a menu opens")
+        XCTAssertTrue(app.waitForKeyboardToHide(timeout: 5), "The keyboard goes away when the role sheet opens")
         attach(app, "Role menu open")
     }
 
@@ -84,12 +104,19 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-many-locations"]
         app.launch()
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        // Paper v2 (48N): service locations live on the customer's Property page.
+        let property = app.buttons["customer-hub-property"]
+        XCTAssertTrue(property.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !property.isHittable { app.swipeUp() }
+        property.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Options for ")).firstMatch
+            .waitForExistence(timeout: 30), app.debugDescription)
         let window = app.windows.firstMatch.frame
         let newJob = app.buttons["customer-new-job-action"]
         let menus = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Options for "))
         func lowerMenu() -> XCUIElement? {
             let floor = newJob.exists ? newJob.frame.minY - 8 : window.maxY - 60
-            return menus.allElementsBoundByIndex.first { $0.isHittable && $0.frame.midY > window.midY && $0.frame.maxY < floor }
+            return menus.allElementsBoundByIndex.first { $0.frame.midY > window.midY && $0.frame.maxY < floor && $0.isHittable }
         }
         for _ in 0..<20 where lowerMenu() == nil {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))

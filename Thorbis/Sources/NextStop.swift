@@ -4,8 +4,9 @@ import MapKit
 import SwiftUI
 
 // Next stop (technician home): the Schedule's lead card says where the tech is going, how long
-// the drive is and how to get there. The address is the job's own service location only; a
-// customer's other addresses never stand in for the job site (JobLocationPolicy).
+// the drive is and how to get there. The address is the job's own service location; a job that
+// records none is shown at the customer's only address on file, with that caveat
+// (JobFallbackAddress), and never at a guess between several of their addresses.
 
 /// The job's place and a number to call, as last read. Cached per job so the card still shows
 /// the address offline; it lives with the job detail cache and is cleared on sign-out with it.
@@ -17,13 +18,39 @@ struct NextStopPlace: Codable, Equatable {
     var address: String?
     var coordinates: FieldCoordinates?
     var phone: String?
+    /// True when the job records no site and `address` is the customer's only address on file.
+    /// Optional, so a copy saved on this phone before it existed still reads.
+    var fromCustomer: Bool?
 
     /// The street line: what a tech reads at a glance before tapping Directions.
-    var firstLine: String? {
+    var firstLine: String? { Self.firstLine(address) }
+
+    static func firstLine(_ address: String?) -> String? {
         guard let address else { return nil }
         let line = address.split(whereSeparator: { $0 == "," || $0 == "\n" }).first
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         return line.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Said with the street when it is the customer's address rather than the job's own site.
+    var caveat: String? { fromCustomer == true && firstLine != nil ? JobFallbackAddress.caveat : nil }
+
+    /// The place from the customer's locations as just read: the job's own site, or, when the job
+    /// records none, the customer's only address on file.
+    mutating func setPlace(from locations: [ServiceLocationRecord], customerAddress: String?) {
+        if let locationID {
+            // The job's own service location only, for its own customer (JobLocationPolicy).
+            let record = locations.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
+            address = record?.address
+            coordinates = record?.coordinates
+            fromCustomer = nil
+        } else {
+            let fallback = JobFallbackAddress.make(locationID: nil, customerID: customerID, organizationID: organizationID,
+                                                   locations: locations, customerAddress: customerAddress)
+            address = fallback?.address
+            coordinates = fallback?.coordinates
+            fromCustomer = fallback == nil ? nil : true
+        }
     }
 
     var directions: URL? {
@@ -64,10 +91,11 @@ enum NextStopDay {
 }
 
 extension NextStopDay {
-    /// "Fri, Oct 30 · 2 of 6 done": the day and how far through it the tech is, for the Today subtitle.
-    /// Nil when there are no visits; "all 6 done" once every visit is finished.
+    /// "Tuesday, July 21 · 2 of 6 jobs done": the day (Paper F1 spells it out) and how far through it
+    /// the tech is, for the Today subtitle. The date alone when there are no visits; "all 6 visits
+    /// done" once every visit is finished.
     static func subtitle(day: Date = .now, jobs: [Job], lead: Job?) -> String {
-        let date = day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        let date = day.formatted(.dateTime.weekday(.wide).month(.wide).day())
         let visits = jobs.filter { $0.status != "canceled" }.sorted {
             (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture)
         }
@@ -75,44 +103,77 @@ extension NextStopDay {
         if visits.allSatisfy({ $0.status == "completed" }) {
             return visits.count == 1 ? "\(date) · today's visit done" : "\(date) · all \(visits.count) visits done"
         }
-        // Redesign 2026-10-31: progress as Linear counts it, "4 of 6 done".
+        // Paper F1's words: "1 of 5 jobs done".
         let done = visits.filter { $0.status == "completed" }.count
-        return "\(date) · \(done) of \(visits.count) done"
+        return "\(date) · \(done) of \(visits.count) jobs done"
     }
 }
 
 /// Street lines for the jobs on screen, read from each customer's own service locations (one
-/// request per customer, cached). A job without a `locationId`, or whose place can't be read,
-/// has no street and its row leads with the job title instead (BYR-1593).
+/// request per customer, cached). A job whose place can't be read has no street and its row leads
+/// with the job title instead. A job without a `locationId` (BYR-1593) gets the customer's only
+/// address on file (JobFallbackAddress) on the screens that pass `customerAddresses`; elsewhere it
+/// has no street and its customer's places are not read for it.
 @MainActor
 final class JobAddressBook: ObservableObject {
     @Published private(set) var streets: [String: String] = [:]
     /// The full place behind each street, so a row's Directions needs no read of its own.
     private(set) var places: [String: (address: String, coordinates: FieldCoordinates?)] = [:]
+    /// For jobs without a site of their own: the customer's only address on file, by customer.
+    @Published private(set) var fallbacks: [String: JobFallbackAddress] = [:]
+    /// Each read customer's own locations, so `fallbacks` follows a customer's address that arrives
+    /// or changes later without reading their places again.
+    private var read: [String: [ServiceLocationRecord]] = [:]
     private var loaded: Set<String> = []
     private var key = ""
 
+    /// The part of a screen's `.task(id:)` that changes when a row's place or the address it falls
+    /// back to does, so `load` runs again for either.
+    static func taskKey(_ jobs: [Job], customerAddresses: [String: String]?) -> String {
+        jobs.map { job in
+            let fallback = job.locationId == nil ? job.customerId.flatMap { customerAddresses?[$0] } : nil
+            return "\(job.id):\(job.locationId ?? "")\(fallback.map { "@\($0)" } ?? "")"
+        }.joined(separator: ",")
+    }
+
     /// Keyed by customer and place, so a place is only ever read for its own customer's job.
     func street(_ job: Job) -> String? {
-        guard let locationID = job.locationId, let customerID = job.customerId else { return nil }
+        guard let customerID = job.customerId else { return nil }
+        guard let locationID = job.locationId else { return fallbacks[customerID]?.street }
         return streets["\(customerID)|\(locationID)"]
     }
 
-    /// Directions to the job's own service location (never another of the customer's addresses).
+    /// Said with `street` when it is the customer's only address on file, not the job's own site.
+    func caveat(_ job: Job) -> String? {
+        job.locationId == nil && street(job) != nil ? JobFallbackAddress.caveat : nil
+    }
+
+    /// Directions to the job's own service location (never another of the customer's addresses),
+    /// or, for a job without one, to the customer's only address on file.
     func directions(_ job: Job) -> URL? {
-        guard let locationID = job.locationId, let customerID = job.customerId,
-              let place = places["\(customerID)|\(locationID)"] else { return nil }
+        guard let customerID = job.customerId else { return nil }
+        guard let locationID = job.locationId else { return fallbacks[customerID]?.directions }
+        guard let place = places["\(customerID)|\(locationID)"] else { return nil }
         return Directions.url(address: place.address, coordinates: place.coordinates)
     }
 
     /// Reads the places for `jobs`, in their order (callers put the job that matters most first).
     /// Never more than `limit` customers per screen.
-    func load(_ jobs: [Job], api: APIClient, organizationID: String?, identity: String, limit: Int = 20) async {
-        if identity != key { key = identity; streets = [:]; places = [:]; loaded = [] }
+    /// - Parameter customerAddresses: each customer's own address, already loaded with the
+    ///   customer list (`Store.customerAddresses`). When given, the customers of jobs without a
+    ///   site are read too, after every customer of a job with one and only in the slots left under
+    ///   `limit`, so those jobs can show the only address on file without costing a job its own
+    ///   street; nil reads only the customers of jobs with a site.
+    func load(_ jobs: [Job], api: APIClient, organizationID: String?, identity: String, limit: Int = 20,
+              customerAddresses: [String: String]? = nil) async {
+        if identity != key { key = identity; streets = [:]; places = [:]; fallbacks = [:]; read = [:]; loaded = [] }
         guard let organizationID else { return }
+        // Customers already read follow the addresses as given now.
+        refreshFallbacks(customerAddresses, organizationID: organizationID)
         var seen = Set<String>()
-        let customers = jobs.compactMap { $0.locationId == nil ? nil : $0.customerId }
-            .filter { !loaded.contains($0) && seen.insert($0).inserted }.prefix(limit)
+        let sited = jobs.filter { $0.locationId != nil }.compactMap(\.customerId)
+        let unsited = customerAddresses == nil ? [] : jobs.filter { $0.locationId == nil }.compactMap(\.customerId)
+        let customers = (sited + unsited).filter { !loaded.contains($0) && seen.insert($0).inserted }.prefix(limit)
         for customerID in customers {
             guard !Task.isCancelled else { return }
             let places: [ServiceLocationRecord]
@@ -124,19 +185,38 @@ final class JobAddressBook: ObservableObject {
             guard identity == key else { return }
             loaded.insert(customerID)
             for place in places where place.customerId == customerID && place.organizationId == organizationID {
-                let line = NextStopPlace(jobID: "", organizationID: organizationID, customerID: customerID,
-                                         locationID: place.id, address: place.address).firstLine
+                let line = NextStopPlace.firstLine(place.address)
                 if !place.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     self.places["\(customerID)|\(place.id)"] = (place.address, place.coordinates)
                 }
                 if let line { streets["\(customerID)|\(place.id)"] = line }
             }
+            read[customerID] = places
+            if let customerAddresses {
+                fallbacks[customerID] = JobFallbackAddress.make(locationID: nil, customerID: customerID, organizationID: organizationID,
+                                                                locations: places, customerAddress: customerAddresses[customerID])
+            }
         }
+    }
+
+    /// Works out every read customer's fallback again from `customerAddresses` (nil: none shown).
+    private func refreshFallbacks(_ customerAddresses: [String: String]?, organizationID: String) {
+        guard let customerAddresses else {
+            if !fallbacks.isEmpty { fallbacks = [:] }
+            return
+        }
+        var next: [String: JobFallbackAddress] = [:]
+        for (customerID, places) in read {
+            next[customerID] = JobFallbackAddress.make(locationID: nil, customerID: customerID, organizationID: organizationID,
+                                                       locations: places, customerAddress: customerAddresses[customerID])
+        }
+        if next != fallbacks { fallbacks = next }
     }
 }
 
 /// Drive time from where the phone is to the stop, by MapKit. Location is asked When In Use and
-/// only when a card with a mapped address first needs it. Denied, no fix or no signal leaves the
+/// only when a card with a mapped address first needs it, after the explainer (Paper 70) says
+/// what it is for. Denied, "Not now", no fix or no signal leaves the
 /// card with its address and no ETA; nothing waits on it.
 @MainActor
 final class NextStopETA: ObservableObject {
@@ -165,7 +245,13 @@ final class NextStopETA: ObservableObject {
         }
         #endif
         guard enabled, let destination else { return }
-        let status = CLLocationManager().authorizationStatus
+        var status = CLLocationManager().authorizationStatus
+        if status == .notDetermined {
+            // Paper 70: say what Location is for before the system asks. "Not now" leaves the
+            // card with its address and no drive time, and the system is not asked.
+            guard await PermissionPrimerPresenter.ask(.location), !Task.isCancelled, self.key == key else { return }
+            status = CLLocationManager().authorizationStatus
+        }
         locationOff = status == .denied || status == .restricted
         guard !locationOff else { return }
         guard let here = await Self.currentLocation(), !Task.isCancelled else {
@@ -227,7 +313,7 @@ struct NextStopLocationNotice: View {
                 .accessibilityHidden(true)
             // The words are the way to Settings, so the notice stays one line.
             Button { if let url = DevicePermission.location.settingsURL { openURL(url) } } label: {
-                Text("Turn on location to see drive time").font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                Text("Turn on location to see drive time").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .underline()
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1).minimumScaleFactor(0.85)
                     .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
@@ -246,7 +332,8 @@ struct NextStopLocationNotice: View {
         }
         .padding(.leading, 12)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        // Paper v2: an inner tile on a radius-20 card is radius 14.
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("next-stop-location-off")
     }

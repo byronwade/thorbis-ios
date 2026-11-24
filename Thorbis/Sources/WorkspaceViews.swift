@@ -1,215 +1,5 @@
 import SwiftUI
 
-struct WorkspaceNoticesView: View {
-    @ObservedObject var api: APIClient
-    let available: Bool
-    /// The office call log (web Inbox calls), when call_recording is on for this role.
-    var calls = false
-
-    @State private var items: [StaffNotice] = []
-    @State private var nextCursor: String?
-    @State private var readCursor: String?
-    @State private var unreadState: StaffUnreadState = .unknown
-    @State private var loading = false
-    @State private var error: String?
-
-    @State private var filter = "All"
-    /// The job a row's swipe opened.
-    @State private var openingJob: String?
-    /// One open row at a time; scrolling closes it.
-    @StateObject private var swipes = RowSwipeState()
-    @Environment(\.calendar) private var calendar
-    @Environment(\.locale) private var locale
-    @Environment(\.timeZone) private var timeZone
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// Bumped by pull to refresh on the Calls tab, so the log reloads.
-    @State private var callsGeneration = 0
-
-    private var tabs: [String] {
-        guard available else { return calls ? ["Calls"] : [] }
-        return calls ? ["All", "Unread", "Calls"] : ["All", "Unread"]
-    }
-
-    private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
-
-    /// Paper 77: large title, All/Unread, unread dot, quiet rows.
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    // A place's title, Medium on the root-title step like the tab roots.
-                    Text("Inbox").font(Theme.font(34, weight: .medium)).tracking(-0.8).accessibilityAddTraits(.isHeader)
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
-                if !available && !calls {
-                    // Permission names what is missing (design.thorbis.com States).
-                    ListRoomEmpty(title: "Your role can\u{2019}t see notices.", message: "Ask your office for access to the Inbox.")
-                } else if filter == "Calls" || !available {
-                    if tabs.count > 1 { ListViewBar(options: tabs, selection: $filter) }
-                    CallLogList().id(callsGeneration)
-                } else {
-                    // v2 List room: All / Unread (and Calls) as text tabs on the view bar.
-                    ListViewBar(options: tabs, selection: $filter)
-                    if let error { ErrorBanner(message: error) { await refresh() } }
-                    if loading && items.isEmpty && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
-                    let notices = visible
-                    let displayCalendar = calendarWithTimeZone
-                    ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
-                        let heading = InboxNoticeDay.header(notice.at, after: index > 0 ? notices[index - 1].at : nil,
-                                                            hasPrevious: index > 0, calendar: displayCalendar, locale: locale)
-                        // Day groups on the canvas: a 13 Medium label, space above it, no lines.
-                        if let heading {
-                            ListGroupLabel(title: dayLabel(heading, raw: notice.at, calendar: displayCalendar), first: index == 0)
-                                .accessibilityAddTraits(.isHeader)
-                                .accessibilityIdentifier("inbox-day-heading")
-                        }
-                        // Each notice opens the job it is about. Swipe right offers the same, as a
-                        // shortcut. Read/Unread is not a swipe: the notices API only marks the whole
-                        // inbox read (POST /v1/staff/notices/read), not one notice.
-                        let open = RowSwipeAction(id: "row-swipe-open-\(notice.id)", title: "Open job",
-                                                  symbol: "arrow.up.right", tone: .ink, spokenName: "Open job") {
-                            openingJob = notice.jobId
-                        }
-                        RowSwipeContainer(id: notice.id, leading: [open], state: swipes) {
-                            NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                                // What happened, then the job; the time trails. Unread is Medium and the dot.
-                                InboxRoomRow(title: notice.title, detail: notice.meta, time: timeLabel(notice.at), unread: !notice.read)
-                            }
-                            .buttonStyle(RowPressStyle())
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel([notice.title, notice.meta, spokenTime(notice.at), notice.read ? "Read" : "Unread"]
-                                .filter { !$0.isEmpty }.joined(separator: ", "))
-                            .accessibilityHint("Opens the job")
-                            .accessibilityIdentifier("inbox-row-\(notice.id)")
-                            .rowSwipeAccessibility([open])
-                        }
-                    }
-                    if nextCursor != nil {
-                        Button { Task { await loadMore() } } label: {
-                            Text(loading ? "Loading…" : "Load older notices").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        .disabled(loading)
-                        .padding(.top, 12)
-                    }
-                    if visible.isEmpty && !loading && error == nil {
-                        if filter == "Unread" && !items.isEmpty {
-                            ListRoomEmpty(title: "No unread notices.", message: "All shows every notice.")
-                        } else {
-                            ListRoomEmpty(title: "No notices yet.", message: "New assignments and job changes land here.")
-                        }
-                    }
-                }
-            }
-            .padding(.bottom, 24)
-        }
-        .background(Theme.canvas)
-        .foregroundStyle(Theme.foreground)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if available && filter != "Calls" && (unreadState == .present || readCursor != nil) {
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    PaperCircleButton(symbol: "checkmark.circle", label: readCursor == nil ? "Mark all read" : "Continue marking read",
-                                      fill: Theme.card, bordered: true) { Task { await markReadBatch() } }
-                        .disabled(loading)
-                }
-            }
-        }
-        .refreshable {
-            if filter == "Calls" || !available { callsGeneration += 1 } else { await refresh() }
-        }
-        .onScrollPhaseChange { _, phase in if phase != .idle { swipes.close() } }
-        .thorbisDestination(item: $openingJob) { JobDetailView(jobId: $0).tabletReadable() }
-        .task { await refresh() }
-    }
-
-    private var subtitle: String {
-        if filter == "Calls" || (!available && calls) { return "Calls to your business" }
-        if !available { return "Job updates" }
-        switch unreadState {
-        case .present: return "Unread notices waiting"
-        case .unknown: return loading ? "Checking for new notices…" : "Job updates"
-        default: return "All caught up"
-        }
-    }
-
-    private var calendarWithTimeZone: Calendar {
-        var result = calendar
-        result.timeZone = timeZone
-        return result
-    }
-
-    /// The time of day ("7:40 a.m."), tabular at the row's end; the day is the group's label.
-    private func timeLabel(_ raw: String?) -> String {
-        guard let raw, let date = JobFiltering.date(raw) else { return "" }
-        return date.tradeTime
-    }
-
-    /// How long ago, for VoiceOver ("5 min. ago"), so the day is not lost when a row is read alone.
-    private func spokenTime(_ raw: String?) -> String {
-        guard let raw, let date = JobFiltering.date(raw) else { return "" }
-        return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
-    }
-
-    /// "Today" and "Yesterday" read faster than a date for the newest groups; older days keep theirs.
-    private func dayLabel(_ heading: String, raw: String?, calendar: Calendar) -> String {
-        guard let date = JobFiltering.date(raw) else { return heading }
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
-        return heading
-    }
-
-    private func refresh() async {
-        guard available, !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await api.staffNotices()
-            items = page.items
-            nextCursor = page.nextCursor
-            unreadState = page.unreadState
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func loadMore() async {
-        guard available, !loading, let cursor = nextCursor else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await api.staffNotices(cursor: cursor)
-            guard page.nextCursor != cursor else {
-                throw Problem(title: "Notice pagination stopped", status: nil, detail: "The server repeated its cursor.")
-            }
-            items.append(contentsOf: page.items)
-            nextCursor = page.nextCursor
-            unreadState = page.unreadState
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func markReadBatch() async {
-        guard available, !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let result = try await api.markStaffNoticesRead(cursor: readCursor)
-            guard result.nextCursor != readCursor || result.nextCursor == nil else {
-                throw Problem(title: "Notice acknowledgement stopped", status: nil, detail: "The server repeated its cursor.")
-            }
-            readCursor = result.nextCursor
-            let page = try await api.staffNotices()
-            items = page.items
-            nextCursor = page.nextCursor
-            unreadState = page.unreadState
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-}
-
 struct WorkspaceRevenueView: View {
     @ObservedObject var api: APIClient
     let available: Bool
@@ -218,6 +8,7 @@ struct WorkspaceRevenueView: View {
 
     @State private var report: RevenueReport?
     @State private var error: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     /// Paper 59/60: the month's number large, receivables beside it, six months as bars.
     var body: some View {
@@ -226,14 +17,12 @@ struct WorkspaceRevenueView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Money").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                        Text("Revenue and receivables · live").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                    .padding(.bottom, 16)
+                    PaperHeader(title: "Money", subtitle: "Revenue and receivables · live")
+                        .environment(\.paperMenuButton, false)
+                        .padding(.horizontal, -PaperCardMetrics.margin)
                     sections
                 }
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 40)
             }
             .foregroundStyle(Theme.foreground)
             .background(Theme.canvas)
@@ -266,48 +55,52 @@ struct WorkspaceRevenueView: View {
         let months = Array(report.months.suffix(6))
         let current = months.last
         let previous = months.dropLast().last
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Collected · \(current.map { monthName($0.month, long: true) } ?? "this month")")
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                Spacer()
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(money(current?.collected ?? 0, currency: "USD"))
-                    .font(Theme.moneyHeroFont).tracking(-0.6)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                if let current, let previous, previous.collected > 0 {
-                    let change = Double(current.collected - previous.collected) / Double(previous.collected) * 100
-                    Label("\(abs(Int(change.rounded())))% vs \(monthName(previous.month, long: false))", systemImage: change >= 0 ? "arrow.up" : "arrow.down")
-                        .font(Theme.font(12, weight: .medium))
-                        .foregroundStyle(change >= 0 ? Theme.success : Theme.destructive)
+        // Paper 59's lead card: the month's figure large, how it compares, the months as bars.
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Collected in \(current.map { monthName($0.month, long: true) } ?? "this month")")
+                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+            Text(money(current?.collected ?? 0, currency: "USD"))
+                // Paper 59: the lead figure in 44 Bold; it shrinks on one line before it would clip.
+                .font(Theme.display()).tracking(Theme.displayTracking())
+                .lineLimit(1).minimumScaleFactor(0.5)
+            if let current, let previous, previous.collected > 0 {
+                let change = Double(current.collected - previous.collected) / Double(previous.collected) * 100
+                HStack(spacing: 5) {
+                    Image(systemName: change >= 0 ? "arrow.up" : "arrow.down").font(.system(size: 11, weight: .semibold))
+                        .accessibilityHidden(true)
+                    Text("\(abs(Int(change.rounded())))%").font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                    Text("vs \(monthName(previous.month, long: false))").font(Theme.font(14)).foregroundStyle(Theme.muted)
                 }
+                .foregroundStyle(change >= 0 ? Theme.success : Theme.destructive)
+                .accessibilityElement(children: .combine)
             }
             bars(months)
-                .padding(.top, 8)
+                .padding(.top, 12)
         }
-        .padding(.bottom, 18)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.bottom, 10)
 
-        // v2: what's due as two quiet rows, not a pair of equal tiles. Each opens the invoices behind it.
-        PaperSection("Due") {
-            VStack(spacing: 0) {
-                NavigationLink(value: PaperRoute.invoices) {
-                    dueRow(word: "Outstanding", tone: .scheduled,
-                           detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")",
-                           amount: money(report.receivable.balance, currency: "USD"))
-                }
-                .buttonStyle(RowPressStyle())
-                NavigationLink(value: PaperRoute.invoices) {
-                    dueRow(word: "Overdue", tone: report.receivable.overdueInvoices > 0 ? .attention : .done,
-                           detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
-                           amount: money(report.receivable.overdueBalance, currency: "USD"))
-                }
-                .buttonStyle(RowPressStyle())
+        // Paper 59's two receivable cards. Each opens the invoices behind it.
+        let tiles = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+        tiles {
+            NavigationLink(value: PaperRoute.invoices) {
+                receivableTile(label: "Outstanding AR", value: money(report.receivable.balance, currency: "USD"),
+                               detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")",
+                               alert: false)
             }
-            .padding(.vertical, PaperCardMetrics.edge)
+            .buttonStyle(PressStyle())
+            NavigationLink(value: PaperRoute.invoices) {
+                receivableTile(label: "Overdue", value: money(report.receivable.overdueBalance, currency: "USD"),
+                               detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
+                               alert: report.receivable.overdueInvoices > 0)
+            }
+            .buttonStyle(PressStyle())
         }
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityHint("Opens invoices")
-        .padding(.bottom, 24)
+        .padding(.bottom, 20)
 
         // design 2026-10-30: plain rows on one panel, no calendar tiles.
         PaperSection("By month", count: months.count) {
@@ -324,20 +117,22 @@ struct WorkspaceRevenueView: View {
         }
     }
 
-    /// A receivable as a row: its word with its mark, how many invoices, the amount in the tabular column.
-    private func dueRow(word: String, tone: StatusTone, detail: String, amount: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                StatusLabel(tone: tone, word: word, size: 15)
-                Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-            }
-            Spacer(minLength: 8)
-            Text(amount).font(Theme.rowAmountFont(15)).foregroundStyle(Theme.foreground)
+    /// A receivable as Paper 59's card: 13 Semibold label, the amount in bold tabular, one line
+    /// under it (in the destructive word colour while something is overdue).
+    private func receivableTile(label: String, value: String, detail: String, alert: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.monoFont(24, weight: .bold)).foregroundStyle(Theme.foreground)
                 .lineLimit(1).minimumScaleFactor(0.7)
+            Text(detail).font(Theme.font(14)).monospacedDigit()
+                .foregroundStyle(alert ? Theme.destructive : Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-        .frame(minHeight: 56)
-        .contentShape(Rectangle())
+        // Paper 59: 14 above and under, 16 at the sides.
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -349,7 +144,9 @@ struct WorkspaceRevenueView: View {
                     Capsule()
                         .fill(index == months.count - 1 ? Theme.brand : Theme.muted.opacity(0.45))
                         .frame(width: 6, height: max(4, 44 * CGFloat(month.collected) / CGFloat(peak)))
-                    Text(monthName(month.month, long: false).uppercased()).font(Theme.monoFont(12, weight: .medium))
+                    // Paper 60's trend labels: "Feb", "Mar" in 13 Medium, this month in Semibold ink.
+                    Text(monthName(month.month, long: false))
+                        .font(Theme.font(13, weight: index == months.count - 1 ? .semibold : .medium))
                         .lineLimit(1).minimumScaleFactor(0.85)
                         .foregroundStyle(index == months.count - 1 ? Theme.foreground : Theme.muted)
                 }
@@ -442,20 +239,16 @@ struct WorkspacePriceBookView: View {
                 PaperEmptyState(symbol: "book.closed", title: "You can't see the price book",
                                 message: "Your role doesn't have the price book permission. An owner can turn it on in Team.")
             } else {
-                // design 2026-10-30: one selector per screen — the category chips moved behind the
-                // header's filter circle; the count and the chosen category read in the subtitle.
+                // Paper 34: the title and count, the search field on the card, then one segment per
+                // kind ("All · 212" first). The chosen kind also reads in the subtitle.
                 PaperHeader(title: "Price book",
-                            subtitle: "\(currentItems.count) item\(currentItems.count == 1 ? "" : "s")\(currentCursor == nil ? "" : " loaded")\(category == "All" ? "" : " · showing \(category.lowercased())")",
-                            filterMenu: categories.map { option in
-                                ThorbisMenuItem(option == "All" ? "All · \(currentItems.count)\(currentCursor == nil ? "" : " loaded")" : option,
-                                                isSelected: category == option) {
-                                    category = option
-                                    if option == "All" { collapsedGroups.removeAll() }
-                                    else { collapsedGroups.remove(option) }
-                                }
-                            },
-                            filterActive: category != "All")
+                            subtitle: "\(currentItems.count) item\(currentItems.count == 1 ? "" : "s")\(currentCursor == nil ? "" : " loaded")\(category == "All" ? "" : " · showing \(category.lowercased())")")
                     .environment(\.paperMenuButton, false)
+                searchBar.padding(.top, 2)
+                if categories.count > 1 {
+                    PaperTabs(options: categories.map { $0 == "All" ? allLabel : $0 }, selection: categorySelection)
+                        .padding(.top, 12)
+                }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() } }
@@ -478,17 +271,26 @@ struct WorkspacePriceBookView: View {
                                     if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
                                     else { collapsedGroups.insert(groupName) }
                                 } label: {
-                                    ListGroupLabel(title: groupName, count: grouped.count, first: groupName == firstVisibleGroup) {
-                                        Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
-                                            .font(.system(size: 10, weight: .medium))
+                                    // Paper 34: the fold chevron leads, the label in 13 Semibold, the count
+                                    // trails; 22 above (16 under the segments) and 8 above the card.
+                                    HStack(alignment: .center, spacing: 6) {
+                                        PaperIcon(.chevronDown, size: 12, color: Theme.muted)
+                                            .rotationEffect(.degrees(collapsedGroups.contains(groupName) ? -90 : 0))
+                                        Text(groupName).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Text("\(grouped.count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                                     }
+                                    .padding(.horizontal, PaperCardMetrics.margin + 4)
+                                    .padding(.top, groupName == firstVisibleGroup ? 16 : 22).padding(.bottom, 8)
+                                    .frame(minHeight: 44, alignment: .bottom)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("\(groupName), \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
                                 .accessibilityValue(collapsedGroups.contains(groupName) ? "Collapsed" : "Expanded")
                                 if !collapsedGroups.contains(groupName) {
-                                    // Redesign phase 3: the group's items on one well, hairlines between rows.
+                                    // Paper 34: the group's items on one card (radius 20, 16 from the
+                                    // edges), a hairline between rows.
                                     LazyVStack(spacing: 0) {
                                         ForEach(Array(grouped.enumerated()), id: \.element.id) { index, item in
                                             Group {
@@ -506,27 +308,28 @@ struct WorkspacePriceBookView: View {
                                                     } label: { row(item) }.buttonStyle(RowPressStyle())
                                                 }
                                             }
-                                            .environment(\.paperRowInset, ListRoom.gutter)
+                                            .environment(\.paperRowInset, PaperCardMetrics.inset)
+                                            .overlay(alignment: .top) { if index > 0 { WellDivider() } }
                                         }
                                     }
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                                    .padding(.horizontal, PaperCardMetrics.margin)
                                 }
                             }
                         }
                         if currentCursor != nil {
-                            Button("Load more items") {
-                                Task { await loadMore() }
+                            // Paper v2: the quiet pill (fill, 50 tall, 16 Semibold), 16 from the edges.
+                            Button { Task { await loadMore() } } label: {
+                                Text("Load more items").paperButton(.commit, tone: .quiet, fills: true)
                             }
-                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity).frame(minHeight: 44)
-                                .panelBackground(cornerRadius: Theme.controlRadius)
-                                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
-                                .buttonStyle(PressStyle())
-                                .disabled(loading)
-                                .padding(.horizontal, ListRoom.gutter).padding(.top, 16)
+                            .buttonStyle(PressStyle())
+                            .disabled(loading)
+                            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
                         }
                         if hasCurrentOwner && visibleItems.isEmpty && !loading && error == nil {
                             if currentItems.isEmpty {
-                                ListRoomEmpty(title: "No price book items.",
+                                ListRoomEmpty(glyph: .priceBook, title: "No price book items",
                                               message: canEdit ? "Services, parts and fees you add here fill estimates and invoices." : "Services, parts and fees your office adds show up here.",
                                               actionTitle: canEdit ? "Add an item" : nil, action: { creating = true })
                             } else {
@@ -545,13 +348,19 @@ struct WorkspacePriceBookView: View {
                 }
                 .onChange(of: search) { _, _ in collapsedGroups.removeAll() }
                 .onChange(of: localScope) { _, _ in localDetail = nil }
+                // A list that failed (offline, a server error) reads again after an answered check;
+                // a loaded list stays as it is.
+                .onChange(of: session.verificationRevision) { _, _ in
+                    if hasCurrentOwner, items.isEmpty, error != nil { Task { await refresh() } }
+                }
                 .safeAreaInset(edge: .bottom) {
                     if canEdit {
+                        // Paper 34: the brand pill, 50 tall, 16 from the edges.
                         Button { creating = true } label: {
-                            Label("Add price book item", systemImage: "plus").inkCommit()
+                            PaperPillLabel(title: "Add price book item", height: 50)
                         }
-                        .buttonStyle(PressStyle()).padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                        .background(Theme.canvas)
+                        .buttonStyle(PressStyle())
+                        .paperActionBarGround(Theme.canvas)
                     }
                 }
                 #if DEBUG
@@ -561,13 +370,25 @@ struct WorkspacePriceBookView: View {
                         ThorbisToolbarItem(placement: .topBarTrailing) {
                             Button("Change sample access shortly") {
                                 Task { @MainActor in
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-from-detail") {
+                                        // Count from the open item, as CustomerJobDocumentBook does from an open
+                                        // Description: on a slow simulator the tap that opens it can't use up the delay.
+                                        for _ in 0..<600 where !PaperPreview.priceBookDetailOpened {
+                                            try? await Task.sleep(for: .milliseconds(100))
+                                        }
+                                    }
                                     try? await Task.sleep(for: .seconds(5))
                                     guard !Task.isCancelled else { return }
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-switch") {
                                         PaperPreviewProtocol.switchSavedWorkWorkspace()
-                                    } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
+                                    } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
+                                        // Renewed authority: a real change with the same access. An identical
+                                        // answer would leave the list as it is.
+                                        PaperPreviewProtocol.reviseSampleAuthority()
+                                    } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-recheck") {
                                         PaperPreviewProtocol.revokePriceBookView()
                                     }
+                                    // `-recheck`: the server answers exactly what the session holds.
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-refresh-failure") {
                                         PaperPreviewProtocol.failPriceBookQuery()
                                     }
@@ -590,8 +411,56 @@ struct WorkspacePriceBookView: View {
         }
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
-        // Search at the bottom, as Estimates, Invoices and every list room.
-        .searchable(text: $search, prompt: "Search price book")
+    }
+
+    /// Paper 34's first segment: "All" with the number of items on the phone.
+    private var allLabel: String { "All · \(currentItems.count)" }
+
+    /// The segments choose the kind; choosing one opens its group if it was folded.
+    private var categorySelection: Binding<String> {
+        Binding(get: { category == "All" ? allLabel : category },
+                set: { option in
+                    let chosen = option == allLabel ? "All" : option
+                    category = chosen
+                    if chosen == "All" { collapsedGroups.removeAll() } else { collapsedGroups.remove(chosen) }
+                })
+    }
+
+    /// Paper 34: the search field on the card (46 tall, radius 14), under the title. It narrows the
+    /// items already on the phone, so it says what it searches.
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            PaperIcon(.search, size: 18, color: Theme.muted).accessibilityHidden(true)
+            TextField("Search price book", text: $search, prompt: .placeholder("Search or ask"))
+                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .submitLabel(.search)
+                .frame(minHeight: 46)
+                .accessibilityIdentifier("price-book-list-search")
+            if !search.isEmpty {
+                Button { search = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
+                        .frame(width: 32, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Clear search")
+            }
+            // Paper 34: the 40pt filter circle at the field's trailing edge chooses the kind, the
+            // same choice the segments under it make.
+            if categories.count > 1 {
+                ThorbisMenu(items: categories.map { name in
+                    ThorbisMenuItem(name == "All" ? "All items" : name, isSelected: category == name) {
+                        category = name
+                        if name == "All" { collapsedGroups.removeAll() } else { collapsedGroups.remove(name) }
+                    }
+                }, title: "Show", accessibilityLabel: "Filter by kind") {
+                    PaperFilterCircle(active: category != "All")
+                }
+            }
+        }
+        .padding(.leading, 12).padding(.trailing, 4)
+        .frame(minHeight: 46)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, PaperCardMetrics.margin)
     }
 
     private func row(_ item: PriceBookListItem, showFullDescription: Bool = false) -> some View {
@@ -604,11 +473,11 @@ struct WorkspacePriceBookView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     VStack(alignment: .leading, spacing: 2) {
                         itemTitle(item, showFullDescription: true)
-                        Text(unit).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        Text(unit).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     }
                     itemPrice(item).fixedSize(horizontal: true, vertical: false)
                 }
-                .padding(.horizontal, ListRoom.gutter).padding(.vertical, 12)
+                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
             } else {
                 let details = PriceBookPresentation.supportingDetails(item.description)
                 PaperListRow(title: PriceBookPresentation.title(item.description),
@@ -634,14 +503,15 @@ struct WorkspacePriceBookView: View {
 
     private func itemTitle(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
         Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
-            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
             .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Paper 34: the price in 16 Medium, tabular.
     private func itemPrice(_ item: PriceBookListItem) -> some View {
         Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-            .font(Theme.rowAmountFont(15)).lineLimit(1).minimumScaleFactor(0.7)
+            .font(Theme.monoFont(16, weight: .medium)).lineLimit(1).minimumScaleFactor(0.7)
             .foregroundStyle(Theme.foreground)
     }
 
@@ -736,10 +606,16 @@ private struct PriceBookLocalDetail: View {
                     .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
             .background(Theme.canvas)
-            .navigationTitle("Price book item")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            // A short read-only sheet: the shared sheet title row, Done on the close circle.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                ThorbisSheetHeader(title: "Price book item", closeLabel: "Done", onClose: { dismiss() }).background(Theme.canvas)
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
+        #if DEBUG
+        // `--paper-preview-pricebook-from-detail` counts the sample access change from here.
+        .task { PaperPreview.priceBookDetailOpened = true }
+        #endif
     }
 }
 
@@ -868,69 +744,116 @@ struct PriceBookItemEditor: View {
     private enum Field: Hashable { case name, price, unit }
 
     var body: some View {
-        NavigationStack {
-            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit.
+        VStack(spacing: 0) {
+            // Paper 34A: Cancel pill, the centred title and the brand Save pill in one row; then the
+            // name on its own card, price, unit and Taxable on one card, the kind on another, and
+            // what a change does under them.
+            // Never pre-disabled: pressed with something missing, it says what under the field.
+            ThorbisSheetHeader(title: existing == nil ? "New price book item" : "Edit item",
+                               closeLabel: "Cancel", onClose: { if !busy { dismiss() } },
+                               closeStyle: .headerPill,
+                               trailing: ThorbisSheetHeaderAction(title: existing == nil ? "Add" : "Save", busy: busy,
+                                                                  identifier: "price-book-item-commit") {
+                                   if valid { Task { await save() } } else { showProblems() }
+                               })
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    PaperFormField("Name customers see", error: nameProblem) {
-                        TextField("Replace capacitor", text: $content.description, prompt: .placeholder("Replace capacitor"), axis: .vertical).lineLimit(1...3)
-                            .font(Theme.font(16)).fieldWell()
-                            .focused($focus, equals: .name)
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Name").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .accessibilityHidden(true)
+                            TextField("Replace capacitor", text: $content.description, prompt: .placeholder("Replace capacitor"), axis: .vertical).lineLimit(1...3)
+                                .font(Theme.font(17, weight: .medium))
+                                .focused($focus, equals: .name)
+                                .accessibilityLabel("Name customers see")
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        if let nameProblem { FieldProblem(message: nameProblem).padding(.horizontal, 4) }
                     }
-                    PaperFormField("Price", error: priceProblem) {
-                        TextField("0.00", text: $priceText, prompt: .placeholder("0.00")).keyboardType(.decimalPad)
-                            .font(Theme.font(16, weight: .medium)).monospacedDigit().fieldWell()
-                            .focused($focus, equals: .price)
+                    VStack(alignment: .leading, spacing: 6) {
+                        VStack(spacing: 0) {
+                            editorRow("Price") {
+                                TextField("0.00", text: $priceText, prompt: .placeholder("0.00")).keyboardType(.decimalPad)
+                                    .font(Theme.font(16, weight: .semibold)).monospacedDigit()
+                                    .multilineTextAlignment(.trailing)
+                                    .focused($focus, equals: .price)
+                                    .accessibilityLabel("Price")
+                            }
+                            editorRow("Unit") {
+                                TextField("each, hour, foot…", text: $content.unit, prompt: .placeholder("each, hour, foot…"))
+                                    .font(Theme.font(16)).multilineTextAlignment(.trailing)
+                                    .focused($focus, equals: .unit)
+                                    .accessibilityLabel("Unit")
+                            }
+                            .overlay(alignment: .top) { WellDivider(leading: 0) }
+                            // Paper 34A: Taxable is a switch, on in the brand blue.
+                            Toggle(isOn: taxable) {
+                                Text("Taxable").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                            }
+                            .tint(Theme.brand)
+                            .frame(minHeight: 56)
+                            .overlay(alignment: .top) { WellDivider(leading: 0) }
+                            .accessibilityIdentifier("price-book-item-taxable")
+                        }
+                        .padding(.horizontal, 16)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        if let priceProblem { FieldProblem(message: priceProblem).padding(.horizontal, 4) }
+                        if let unitProblem { FieldProblem(message: unitProblem).padding(.horizontal, 4) }
                     }
-                    PaperFormField("Unit", error: unitProblem) {
-                        TextField("each, hour, foot…", text: $content.unit, prompt: .placeholder("each, hour, foot…")).font(Theme.font(16)).fieldWell()
-                            .focused($focus, equals: .unit)
-                    }
-                    PaperFormField("Kind") {
-                        ThorbisSelect(options: PriceBookContent.kinds.map { ($0, $0.capitalized) },
-                                      selection: $content.kind, label: "Kind").fieldWell()
-                    }
-                    PaperFormField("Tax") {
-                        ThorbisSelect(options: [("taxable", "Taxable"), ("non_taxable", "Not taxable")],
-                                      selection: $content.taxClassification, label: "Tax").fieldWell()
-                    }
+                    ThorbisSelect(options: PriceBookContent.kinds.map { ($0, $0.capitalized) },
+                                  selection: $content.kind, label: "Kind")
+                        .frame(minHeight: 56)
+                        .padding(.horizontal, 16)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    Text("Changes apply to new estimates and invoices. Ones already sent keep their price.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
                     if let error { ListErrorRow(message: error) }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.canvas)
-            .safeAreaInset(edge: .bottom) {
-                // Never pre-disabled: pressed with something missing, it says what under the field.
-                PaperActionBar(title: existing == nil ? "Add to price book" : "Save item", busy: busy,
-                               identifier: "price-book-item-commit") {
-                    if valid { Task { await save() } } else { showProblems() }
-                }
-            }
-            .onChange(of: content.description) { _, _ in nameProblem = nil }
-            .onChange(of: priceText) { _, _ in priceProblem = nil }
-            .onChange(of: content.unit) { _, _ in unitProblem = nil }
-            .navigationTitle(existing == nil ? "New price book item" : "Edit item")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-            }
-            .onAppear {
-                guard let existing, content.description.isEmpty else { return }
-                let r = existing.revision
-                content = PriceBookContent(description: r.description, unit: r.unit, sellPrice: r.sellPrice,
-                                           taxClassification: r.taxClassification, kind: r.kind)
-                priceText = paymentAmountText(r.sellPrice.amount)
-            }
-            #if DEBUG
-            // `--paper-preview-form-errors`: the commit pressed with the form blank, so the errors show.
-            .task {
-                guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-form-errors") else { return }
-                try? await Task.sleep(for: .milliseconds(600))
-                showProblems()
-            }
-            #endif
         }
+        .background(Theme.canvas)
+        .paperPageGround()
+        .onChange(of: content.description) { _, _ in nameProblem = nil }
+        .onChange(of: priceText) { _, _ in priceProblem = nil }
+        .onChange(of: content.unit) { _, _ in unitProblem = nil }
+        .onAppear {
+            guard let existing, content.description.isEmpty else { return }
+            let r = existing.revision
+            content = PriceBookContent(description: r.description, unit: r.unit, sellPrice: r.sellPrice,
+                                       taxClassification: r.taxClassification, kind: r.kind)
+            priceText = paymentAmountText(r.sellPrice.amount)
+        }
+        #if DEBUG
+        // `--paper-preview-form-errors`: the commit pressed with the form blank, so the errors show.
+        .task {
+            guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-form-errors") else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            showProblems()
+        }
+        #endif
+    }
+
+    /// On means "taxable"; turning it off writes the server's "non_taxable".
+    private var taxable: Binding<Bool> {
+        Binding(get: { content.taxClassification == "taxable" },
+                set: { content.taxClassification = $0 ? "taxable" : "non_taxable" })
+    }
+
+    /// One row of a Paper 34A card: the label on the left (16), the answer on the right.
+    private func editorRow<Field: View>(_ label: String, @ViewBuilder field: () -> Field) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(label).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                .accessibilityHidden(true)
+            field()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .frame(minHeight: 56)
     }
 
     /// Says what's missing under each field, and moves to the first one.
@@ -979,22 +902,3 @@ struct PriceBookItemEditor: View {
     }
 }
 
-// Presentation-only grouping of an already-ordered notice feed.
-enum InboxNoticeDay {
-    static func header(_ raw: String?, after previous: String?, hasPrevious: Bool, calendar: Calendar, locale: Locale) -> String? {
-        let date = JobFiltering.date(raw)
-        let prior = JobFiltering.date(previous)
-        if hasPrevious {
-            if let date, let prior, calendar.isDate(date, inSameDayAs: prior) { return nil }
-            if date == nil && prior == nil { return nil }
-        }
-        guard let date else { return "Date unavailable" }
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.locale = locale
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-}

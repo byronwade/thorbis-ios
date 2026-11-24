@@ -8,6 +8,7 @@ struct ScheduleMapView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var places: [String: ServiceLocationRecord] = [:]
     @State private var loaded = false
     /// iPad passes its sidebar selection so a row tap selects and centers the pin.
@@ -16,6 +17,17 @@ struct ScheduleMapView: View {
     private var selectionBinding: Binding<String?> { selection ?? $ownSelection }
     private var selectedID: String? { selectionBinding.wrappedValue }
     @State private var position: MapCameraPosition = .automatic
+    @EnvironmentObject private var session: SessionController
+    /// The number to call per customer, read when their stop is the one shown.
+    @State private var phones: [String: String] = [:]
+    @State private var newJobAt: NewJobTarget?
+
+    /// Paper 80's "+" on the stop card: another job for this customer at this address.
+    private struct NewJobTarget: Identifiable {
+        let customer: Customer
+        let locationID: String
+        var id: String { customer.id + "/" + locationID }
+    }
 
     private struct Stop: Identifiable {
         let number: Int
@@ -35,8 +47,14 @@ struct ScheduleMapView: View {
 
     var body: some View {
         let stops = stops
+        let shownCustomerID = (stops.first(where: { $0.id == selectedID }) ?? stops.first)?.job.customerId
         VStack(alignment: .leading, spacing: 0) {
             Map(position: $position, selection: selectionBinding) {
+                // Paper 80: a dotted brand line joins the stops in the order they are driven.
+                if stops.count > 1 {
+                    MapPolyline(coordinates: stops.map(\.coordinate))
+                        .stroke(Theme.brand, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [0.1, 8]))
+                }
                 ForEach(stops) { stop in
                     Annotation(stop.job.title, coordinate: stop.coordinate, anchor: .bottom) {
                         pin(stop, selected: stop.id == selectedID)
@@ -48,8 +66,8 @@ struct ScheduleMapView: View {
             }
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
             .mapControls { MapUserLocationButton(); MapCompass() }
-            .frame(height: 380)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .frame(height: 400)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay {
                 if !loaded {
                     Label("Finding today's stops…", systemImage: "mappin.and.ellipse")
@@ -58,41 +76,44 @@ struct ScheduleMapView: View {
                         .background(Theme.card, in: Capsule())
                 }
             }
-            .padding(.horizontal, Theme.gutter)
+            .padding(.horizontal, PaperCardMetrics.margin)
+            .padding(.top, 16)
             .accessibilityLabel("Map of today's stops")
 
             if let stop = stops.first(where: { $0.id == selectedID }) ?? stops.first {
-                card(stop).padding(.horizontal, Theme.gutter).padding(.top, 12)
+                let next = stops.first { $0.number > stop.number && !["completed", "canceled"].contains($0.job.status) }
+                card(stop, next: next).padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
             }
 
-            SectionHeader(title: "Stops", count: stops.count, horizontalPadding: Theme.gutter)
-                .padding(.top, 24)
-            ForEach(stops) { stop in
-                Button { select(stop) } label: { stopRow(stop) }.buttonStyle(.plain)
-            }
             let missing = loaded ? jobs.count - stops.count : 0
             if missing > 0 {
                 Text("\(missing) job\(missing == 1 ? " has" : "s have") no mapped address yet.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, Theme.gutter).padding(.top, 10)
+                    .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 10)
             }
         }
         .task(id: jobs.map(\.id)) { await loadPlaces() }
+        .task(id: shownCustomerID) { await loadPhone(shownCustomerID) }
+        .sheet(item: $newJobAt) { target in
+            SheetSurface { NewJobSheet(preselected: target.customer, locationID: target.locationID) }
+        }
         // A selection made outside the map (the iPad list) centers its pin too.
         .onChange(of: selectedID) { _, id in
             if let stop = stops.first(where: { $0.id == id }) { center(on: stop) }
         }
     }
 
+    /// Paper 80: the chosen stop is a 34pt brand circle with a heavy rim; the others are 28pt card
+    /// circles with a strong hairline. Finished stops read quieter.
     private func pin(_ stop: Stop, selected: Bool) -> some View {
-        let (_, color) = statusIcon(stop.job.status)
+        let done = stop.job.status == "completed"
         return Text("\(stop.number)")
-            .font(Theme.monoFont(12, weight: .medium))
-            .foregroundStyle(.white)
+            .font(Theme.font(selected ? 14 : 12, weight: selected ? .bold : .semibold))
+            .foregroundStyle(selected ? Color.white : (done ? Theme.muted : Theme.foreground))
             .frame(width: selected ? 34 : 28, height: selected ? 34 : 28)
-            .background(Circle().fill(stop.job.status == "completed" ? Theme.muted : (color == Theme.muted ? Theme.brand : color)))
-            .overlay(Circle().strokeBorder(.white, lineWidth: selected ? 2.5 : 1.5))
-            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+            .background(Circle().fill(selected ? Theme.brand : Theme.card))
+            .overlay(Circle().strokeBorder(selected ? Theme.foreground : Theme.border, lineWidth: selected ? 3 : 2))
+            .shadow(color: .black.opacity(selected ? 0.25 : 0.18), radius: selected ? 5 : 4, y: selected ? 3 : 2)
             .animation(.snappy, value: selected)
             .accessibilityLabel("Stop \(stop.number), \(stop.job.title)")
     }
@@ -102,63 +123,113 @@ struct ScheduleMapView: View {
         NextStopPlace(jobID: stop.job.id, organizationID: "", customerID: "", address: stop.place.address).firstLine ?? stop.job.title
     }
 
-    /// v2: the selected stop as one calm panel: the street, the problem and who, the status word
-    /// and the time, then the ink commit with a Directions circle beside it. No border box.
-    private func card(_ stop: Stop) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(street(stop)).font(Theme.font(17, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-            Text("\(stop.job.title) · \(store.customerName(stop.job.customerId))")
-                .font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(2)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                StatusLabel(jobStatus: stop.job.status, hasTime: stop.job.scheduledFor != nil)
-                Text(JobFiltering.date(stop.job.scheduledFor)?.clockTime ?? "Stop \(stop.number)")
-                    .font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
-            }
-            .padding(.top, 4)
-            HStack(spacing: 8) {
-                NavigationLink(value: stop.job) {
-                    Text("Open job").inkCommit(height: 44)
+    /// Paper 80: the chosen stop on one card. Its number on a brand circle, "AC not cooling —
+    /// Marlowe" over the street and time (the words open the job), then Start route in Maps, and
+    /// the next stop on the route in a quiet line.
+    private func card(_ stop: Stop, next: Stop?) -> some View {
+        let customer = store.customerName(stop.job.customerId)
+        let time = JobFiltering.date(stop.job.scheduledFor)?.clockTime
+        return VStack(alignment: .leading, spacing: 16) {
+            NavigationLink(value: stop.job) {
+                HStack(alignment: .center, spacing: 12) {
+                    Text("\(stop.number)")
+                        .font(Theme.font(13, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Theme.brand, in: Circle())
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(stop.job.title) \u{2014} \(customer)".dashKeptWithWordBefore)
+                            .font(Theme.font(17, weight: .semibold)).tracking(-0.17)
+                            .foregroundStyle(Theme.foreground)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text([street(stop), time].compactMap { $0 }.joined(separator: " · "))
+                            .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(PressStyle())
-                if let url = Directions.url(address: stop.place.address, coordinates: stop.place.coordinates) {
-                    PaperCircleButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps", size: 44) { openURL(url) }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens the job")
+            // Paper 80: Start route, then Call and + as 48pt circles on the field fill.
+            let route = Directions.url(address: stop.place.address, coordinates: stop.place.coordinates)
+            let call = callURL(stop)
+            let target = newJobTarget(stop)
+            if route != nil || call != nil || target != nil {
+                HStack(spacing: 8) {
+                    if let route {
+                        Button { openURL(route) } label: {
+                            PaperPillLabel(title: "Start route", glyph: .navigate)
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Start route")
+                        .accessibilityHint("Opens driving directions to stop \(stop.number) in Maps")
+                    } else {
+                        Spacer(minLength: 0)
+                    }
+                    if let call {
+                        Button { openURL(call) } label: { cardCircle("phone") }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel("Call \(customer)")
+                            .accessibilityIdentifier("schedule-map-call")
+                    }
+                    if let target {
+                        Button { newJobAt = target } label: { cardCircle("plus") }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel("New job at this address")
+                            .accessibilityIdentifier("schedule-map-new-job")
+                    }
                 }
             }
-            .padding(.top, 12)
+            if let next {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
+                    Text("Next: \(store.customerName(next.job.customerId)) · \(street(next))")
+                        .lineLimit(1)
+                }
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity)
+            }
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .panelBackground(cornerRadius: Theme.cardRadius)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    /// A stop: its number on the route, the time in a tabular column, the street over the problem,
-    /// and the status word trailing. One VoiceOver item.
-    private func stopRow(_ stop: Stop) -> some View {
-        let selected = stop.id == selectedID
-        return HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("\(stop.number)")
-                .font(Theme.monoFont(12, weight: .medium))
-                .foregroundStyle(selected ? Theme.onInk : Theme.foreground)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(selected ? Theme.ink : Theme.fill))
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-            Text(JobFiltering.date(stop.job.scheduledFor)?.columnTime ?? "—")
-                .font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
-                .frame(minWidth: 40, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(street(stop)).font(Theme.font(16, weight: .medium)).lineLimit(2)
-                Text(stop.job.title).font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            StatusLabel(jobStatus: stop.job.status, hasTime: stop.job.scheduledFor != nil, emphasis: .quiet)
-                .fixedSize()
+    /// A 48pt circle on the field fill (Paper 80's Call and +).
+    private func cardCircle(_ symbol: String) -> some View {
+        PaperRoundLabel(glyph: symbol == "phone" ? .phone : .plusLight)
+    }
+
+    private func callURL(_ stop: Stop) -> URL? {
+        guard let customerID = stop.job.customerId, let phone = phones[customerID] else { return nil }
+        return JobReach(phone: phone, email: nil).call
+    }
+
+    private func newJobTarget(_ stop: Stop) -> NewJobTarget? {
+        guard session.can("job.create", feature: "jobs"),
+              let customer = store.customers.first(where: { $0.id == stop.job.customerId }) else { return nil }
+        return NewJobTarget(customer: customer, locationID: stop.place.id)
+    }
+
+    /// The number the job screen's Call reaches, read once per customer when their stop is shown.
+    private func loadPhone(_ customerID: String?) async {
+        guard let customerID, phones[customerID] == nil,
+              session.can("customer.view", feature: "core_crm") else { return }
+        let organizationID = session.activeOrganization?.id
+        guard let contacts = try? await api.fieldContacts(customerID) else { return }
+        let verified = contacts.filter { $0.organizationId == organizationID && $0.customerId == customerID }
+        var account: CustomerRecord?
+        if NextStopPlace.phone(contacts: verified, account: nil) == nil,
+           let record = try? await api.fieldCustomer(customerID),
+           record.organizationId == organizationID, record.id == customerID {
+            account = record
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 9)
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Stop \(stop.number), \(street(stop)), \(stop.job.title), \(JobFiltering.date(stop.job.scheduledFor)?.tradeTime ?? "no time"), \(stop.job.status.statusLabel)")
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        guard !Task.isCancelled else { return }
+        if let phone = NextStopPlace.phone(contacts: verified, account: account) { phones[customerID] = phone }
     }
 
     private func select(_ stop: Stop) {

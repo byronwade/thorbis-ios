@@ -25,6 +25,32 @@ final class StartupDestinationTests: XCTestCase {
         XCTAssertEqual(Set(StartupDestination.allCases.map(\.rawValue)), menuIDs.union(localIDs).union(["automatic"]))
     }
 
+    /// A start screen saved for a place the menu no longer lists (Estimates, Message drafts, Team
+    /// additions…) still opens: the start screen is a place id, not a menu row.
+    func testSavedDestinationOutsideTheMenuStillOpens() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let preferences = StartupDestinationPreferences(defaults: defaults)
+        let scope = StartupDestinationScope(actor: "actor", workspace: "one", origin: "https://one.example")
+        for role in [WorkRole.technician, .office, .owner] {
+            let menu = Set(DrawerSections.make(local: LocalWorkspaceSection.allCases, role: role, opens: { _ in true })
+                .sections.flatMap(\.rows).map { entry -> String in
+                    switch entry {
+                    case .place(let item): item.rawValue
+                    case .local(let section): "local-" + section.rawValue
+                    }
+                })
+            for destination in StartupDestination.allCases where destination != .automatic && !menu.contains(destination.rawValue) {
+                preferences.set(destination, for: scope)
+                XCTAssertEqual(preferences.get(for: scope), destination)
+                XCTAssertEqual(destination.launchTarget(isPermitted: true, openedForReason: false), destination,
+                               "\(role): \(destination.rawValue) opens although the menu does not list it")
+                XCTAssertNil(destination.launchTarget(isPermitted: false, openedForReason: false),
+                             "\(role): without access it falls back to the role's default")
+                XCTAssertTrue(destination.menuItem != nil || destination.localSection != nil)
+            }
+        }
+    }
+
     func testUnknownPreferenceAndAmbiguousScopeComponents() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let preferences = StartupDestinationPreferences(defaults: defaults)

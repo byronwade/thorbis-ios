@@ -21,6 +21,11 @@ struct APIRead<Value> {
     let value: Value
     let provenance: APIReadProvenance
 }
+struct CustomerConditionalRead {
+    let value: CustomerRecord
+    let provenance: APIReadProvenance
+    let supportsConditionalWrites: Bool
+}
 extension APIRead: Sendable where Value: Sendable {}
 
 struct Customer: Codable, Identifiable, Hashable {
@@ -28,6 +33,9 @@ struct Customer: Codable, Identifiable, Hashable {
     let name: String
     let archived: Bool?
     let createdAt: String?
+    /// The customer record's own address (`customers.address`), as the list already sends it: where
+    /// a job with no site of its own is shown (JobFallbackAddress).
+    var address: String? = nil
 }
 
 /// `customers.create` input (createCustomerInputSchema); nil fields are omitted.
@@ -60,16 +68,130 @@ struct Items<T: Codable>: Codable {
     let nextCursor: String?
 }
 
+/// The handful of optional reads a job screen makes that a role may not be allowed (403) or a
+/// server may not have (404). Once one is refused it is remembered for the sign-in (`scope` is
+/// the client's request generation, which changes with the session and workspace), so the screen
+/// stops asking on every open. Only these routes: anything else is always asked.
+struct RefusedReads {
+    private var scope: UUID?
+    private var keys = Set<String>()
+
+    /// The route family a path belongs to, ids replaced; nil for every route that is not remembered.
+    static func key(_ path: String) -> String? {
+        let parts = path.split(separator: "/").map(String.init)
+        func isID(_ part: String) -> Bool { UUID(uuidString: part) != nil }
+        switch parts.count {
+        case 3 where parts[0] == "v1" && parts[1] == "organization" && ["profile", "assignees", "mobile-layout"].contains(parts[2]):
+            return path
+        case 4 where parts[0] == "v1" && parts[1] == "jobs" && isID(parts[2]) && parts[3] == "booking-call":
+            return "/v1/jobs/{id}/booking-call"
+        case 4 where parts[0] == "v1" && parts[1] == "customers" && isID(parts[2]) && parts[3] == "history":
+            return "/v1/customers/{id}/history"
+        case 4 where parts[0] == "v1" && parts[1] == "activity":
+            return "/v1/activity/\(parts[2])/{id}"
+        default:
+            return nil
+        }
+    }
+
+    /// A 403 says the role may not read the family. A 404 is remembered only where it means the
+    /// route itself is missing (no id in it); for a record it only means that record has none.
+    static func remembers(_ path: String, status: Int?) -> Bool {
+        guard let key = key(path) else { return false }
+        if status == 403 { return true }
+        return status == 404 && !key.contains("{id}")
+    }
+
+    func isRefused(_ path: String, scope: UUID) -> Bool {
+        guard self.scope == scope, let key = Self.key(path) else { return false }
+        return keys.contains(key)
+    }
+
+    mutating func note(_ path: String, status: Int?, scope: UUID) {
+        guard Self.remembers(path, status: status), let key = Self.key(path) else { return }
+        if self.scope != scope { self.scope = scope; keys = [] }
+        keys.insert(key)
+    }
+
+    /// The server's answer may have changed (a new grant, a feature switched on), so every
+    /// remembered refusal is asked again.
+    mutating func forgetAll() { keys = [] }
+}
+
+/// One idempotency key per change. Asking again for the same change after a lost answer, a
+/// timeout or a server failure sends the same key, so the server replays its first answer
+/// instead of applying the change twice. A different change, or any definite answer (a success
+/// or a refusal that is not a timeout or rate limit), starts a new key.
+struct RetryKey<Content: Hashable> {
+    private var content: Content?
+    private var value = UUID().uuidString
+
+    /// The key to send for this change.
+    mutating func key(for content: Content) -> String {
+        if self.content != content {
+            self.content = content
+            value = UUID().uuidString
+        }
+        return value
+    }
+
+    /// After the server answered: a success or a definite refusal retires the key.
+    mutating func settle(after error: Error?) {
+        if let error, !Self.isDefinite(error) { return }
+        content = nil
+        value = UUID().uuidString
+    }
+
+    static func isDefinite(_ error: Error) -> Bool {
+        guard !(error is CancellationError), let status = (error as? Problem)?.status else { return false }
+        return (400..<500).contains(status) && status != 408 && status != 429
+    }
+}
+
 struct Problem: Codable, Error, LocalizedError {
     let title: String?
     let status: Int?
     let detail: String?
+    /// The server's machine-readable reason, when it sends one (RFC 9457 extension member).
+    var code: String? = nil
+    /// The server's stable kind of refusal ("authorization", "feature_unavailable", "validation").
+    var category: String? = nil
+    /// The fields a validation refusal names (`errors[].path`), when the server sends them.
+    var errors: [ProblemIssue]? = nil
+    /// A "Network error" taken to mean the request never left the phone (no network, or the host
+    /// could not be found or connected to; `URLError.Code.neverLeavesThePhone` says where that is
+    /// not certain). Never read from a response.
+    var neverSent = false
     var errorDescription: String? { detail ?? title ?? "Request failed (\(status ?? 0))" }
+
+    /// True when a validation refusal names this field, or one under it ("multipart.parts.3").
+    func names(_ path: String) -> Bool {
+        errors?.contains { $0.path == path || $0.path?.hasPrefix(path + ".") == true } ?? false
+    }
 }
 
-struct MeAccount: Codable { let id: String; let name: String?; let email: String? }
-struct Me: Codable { let account: MeAccount }
-struct MeEnvelope: Codable { let me: Me? }
+/// One entry of a validation refusal: the field and what was wrong with it.
+struct ProblemIssue: Codable, Equatable {
+    let path: String?
+    let message: String?
+}
+
+extension Problem {
+    private enum Keys: String, CodingKey { case title, status, detail, code, category, errors }
+
+    /// Reads the answer leniently: an `errors` list in a shape this app doesn't know is dropped,
+    /// never a reason to lose the title and detail.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        self.init(title: try c.decodeIfPresent(String.self, forKey: .title),
+                  status: try c.decodeIfPresent(Int.self, forKey: .status),
+                  detail: try c.decodeIfPresent(String.self, forKey: .detail),
+                  code: try c.decodeIfPresent(String.self, forKey: .code),
+                  category: try c.decodeIfPresent(String.self, forKey: .category),
+                  errors: try? c.decodeIfPresent([ProblemIssue].self, forKey: .errors))
+    }
+}
+
 
 /// Thin client over the canonical Thorbis API (services/api, OpenAPI 3.1, RFC 9457 errors).
 @MainActor
@@ -111,7 +233,13 @@ final class APIClient: ObservableObject {
 
     private let session: URLSession
     @Published private(set) var requestGeneration = UUID()
+    /// Reads this sign-in was refused, so a job screen does not ask again on every open.
+    private var refusedReads = RefusedReads()
     var onUnauthorized: (() -> Void)?
+
+    /// Called when the session's authority changes within one sign-in, so a read refused under
+    /// the old capabilities or features is asked again.
+    func forgetRefusedReads() { refusedReads.forgetAll() }
 
     func invalidateRequests() {
         ScopedRecordFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
@@ -233,39 +361,51 @@ final class APIClient: ObservableObject {
     }
 
     func jobs() async throws -> [Job] { try await allPages("/v1/jobs") }
-    func job(_ id: String) async throws -> Job { try await send("GET", "/v1/jobs/\(id)") }
-    func customers() async throws -> [Customer] { try await allPages("/v1/customers") }
-    func customer(_ id: String) async throws -> Customer { try await send("GET", "/v1/customers/\(id)") }
-    func progress(_ id: String, to: String) async throws {
-        struct Arrival: Encodable { let method: String }
-        struct Body: Encodable { let to: String; let arrival: Arrival? }
-        let _: EmptyResponse = try await send("POST", "/v1/jobs/\(id)/progress",
-                                              body: Body(to: to, arrival: to == "arrived" ? Arrival(method: "manual") : nil))
+    func job(_ id: String) async throws -> Job {
+        guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: id) }
+        return try await send("GET", "/v1/jobs/\(id)")
     }
+
+    /// One path segment taken from a record id, cursor or type. It is refused unless every
+    /// character is unreserved (letters, digits, `-._~`) and it is not `.` or `..`, so it can
+    /// never add a segment or climb one. It is returned unchanged: URLComponents encodes the
+    /// path, and encoding here as well would send `%25` for every `%`.
+    nonisolated static func pathSegment(_ raw: String, invalid title: String = "Invalid record ID") throws -> String {
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard !raw.isEmpty, raw != ".", raw != "..",
+              raw.unicodeScalars.allSatisfy({ unreserved.contains($0) })
+        else { throw Problem(title: title, status: nil, detail: raw) }
+        return raw
+    }
+    func customers() async throws -> [Customer] { try await allPages("/v1/customers") }
     func createCustomer(name: String) async throws -> Customer {
         try await createCustomer(NewCustomerRequest(name: name))
     }
     func createCustomer(_ request: NewCustomerRequest) async throws -> Customer {
         try await send("POST", "/v1/customers", body: request)
     }
-    func createJob(customerId: String, title: String) async throws -> Job {
-        struct Body: Encodable { let customerId: String; let title: String }
-        return try await send("POST", "/v1/jobs", body: Body(customerId: customerId, title: title))
-    }
 
     struct EmptyResponse: Decodable { init(from decoder: Decoder) throws {} }
     private struct AuthError: Decodable { let code: String?; let message: String? }
+
+    private static func pageKey<R: Identifiable>(_ record: R) -> AnyHashable { AnyHashable(record.id) }
 
     private func allPages<T: Codable>(_ path: String) async throws -> [T] {
         let generation = requestGeneration
         var all: [T] = []
         var cursor: String?
         var seen: Set<String> = []
+        var ids: Set<AnyHashable> = []
         repeat {
             try Task.checkCancellation()
             guard generation == requestGeneration else { throw CancellationError() }
             let page: Items<T> = try await send("GET", path, cursor: cursor)
-            all.append(contentsOf: page.items)
+            // Pages can overlap when a record moves while the list is being read. Keep the first
+            // copy of each record so no list ever carries the same id twice.
+            for item in page.items {
+                if let record = item as? any Identifiable, !ids.insert(Self.pageKey(record)).inserted { continue }
+                all.append(item)
+            }
             cursor = page.nextCursor
             if let cursor, !seen.insert(cursor).inserted || cursor.isEmpty {
                 throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")
@@ -275,14 +415,38 @@ final class APIClient: ObservableObject {
     }
 
     func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, requireFresh: Bool = false) async throws -> T {
-        let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
-                                          cursor: cursor, authed: authed, requireFresh: requireFresh)
-        return try decodeResponse(response)
+        // A read this sign-in was already refused (a technician's 403 on the company profile, the
+        // roster, a booking call, a customer's history, an invoice's activity) or that this
+        // server does not have (the company layout's 404) is not asked for again this session.
+        let scope = requestGeneration
+        if method == "GET", refusedReads.isRefused(path, scope: scope) {
+            throw Problem(title: "Not available", status: 403, detail: "This sign-in can\u{2019}t read that.")
+        }
+        do {
+            let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
+                                              cursor: cursor, authed: authed, requireFresh: requireFresh)
+            return try decodeResponse(response)
+        } catch let problem as Problem {
+            if method == "GET" { refusedReads.note(path, status: problem.status, scope: scope) }
+            throw problem
+        }
     }
 
-    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil) async throws -> APIRead<T> {
-        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor)
+    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil, requireFresh: Bool = false,
+                                           saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> APIRead<T> {
+        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor, requireFresh: requireFresh, saveIfCurrent: saveIfCurrent)
         return APIRead(value: try decodeResponse(response), provenance: response.provenance)
+    }
+
+    /// Capability is valid only for this fresh, authorized response and its authority scope.
+    func customerConditionalRead(_ id: String) async throws -> CustomerConditionalRead {
+        guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: id) }
+        let response = try await sendData("GET", "/v1/customers/\(id)", body: Optional<String>.none, requireFresh: true)
+        guard response.provenance.generation == requestGeneration,
+              response.provenance.savedCopyScopeRevision == savedCopyScopeRevision,
+              response.provenance.savedCopyScope == savedCopyScope else { throw CancellationError() }
+        return CustomerConditionalRead(value: try decodeResponse(response), provenance: response.provenance,
+            supportsConditionalWrites: response.provenance.source == .urlSession(cacheBypassed: true) && response.conditionalWritesHeader == "1")
     }
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
@@ -454,9 +618,10 @@ final class APIClient: ObservableObject {
         let status: Int
         let contentType: String?
         let provenance: APIReadProvenance
+        var conditionalWritesHeader: String? = nil
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil, saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -468,6 +633,9 @@ final class APIClient: ObservableObject {
         origin.path = path
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
+        // URLComponents leaves "+" as it is in a query value, and the API reads a bare "+" as a
+        // space. Send it encoded, the way the web app does.
+        origin.percentEncodedQuery = origin.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
         let freshRead = requireFresh || (SavedCopies.liveOnly && method.uppercased() == "GET")
         var req = URLRequest(url: url, cachePolicy: freshRead ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
@@ -551,7 +719,8 @@ final class APIClient: ObservableObject {
             let detail = (error as? URLError).map { offline.contains($0.code) } == true
                 ? (isGET ? "No connection. Check your signal and try again." : "This needs a connection. Try again when you have signal.")
                 : error.localizedDescription
-            throw Problem(title: "Network error", status: nil, detail: detail)
+            throw Problem(title: "Network error", status: nil, detail: detail,
+                          neverSent: (error as? URLError)?.code.neverLeavesThePhone == true)
         }
         try Task.checkCancellation()
         guard generation == requestGeneration else { throw CancellationError() }
@@ -560,7 +729,7 @@ final class APIClient: ObservableObject {
         guard (200..<300).contains(code) else {
             if let decoded = try? JSONDecoder().decode(Problem.self, from: data),
                decoded.title != nil || decoded.detail != nil {
-                throw Problem(title: decoded.title, status: code, detail: decoded.detail)
+                throw Problem(title: decoded.title, status: code, detail: decoded.detail, code: decoded.code, category: decoded.category, errors: decoded.errors)
             }
             if let decoded = try? JSONDecoder().decode(AuthError.self, from: data),
                decoded.code != nil || decoded.message != nil {
@@ -569,13 +738,14 @@ final class APIClient: ObservableObject {
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
         let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"),
-                                    provenance: provenance(.urlSession(cacheBypassed: freshRead)))
-        if let reuseKey, mutationEpoch == epoch {
+                                    provenance: provenance(.urlSession(cacheBypassed: freshRead)),
+                                    conditionalWritesHeader: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Thorbis-Customer-Conditional-Writes"))
+        if let reuseKey, mutationEpoch == epoch, savedCopyScopeRevision == copyScopeRevision, saveIfCurrent() {
             recentReads[reuseKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
             if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }
         }
-        if savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }
-        if let copyScope, let keptKey, savedCopyScope == copyScope, code == 200,
+        if savedCopyScopeRevision == copyScopeRevision, saveIfCurrent(), savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }
+        if let copyScope, let keptKey, savedCopyScope == copyScope, savedCopyScopeRevision == copyScopeRevision, saveIfCurrent(), code == 200,
            response.contentType?.lowercased().hasPrefix("application/json") != false {
             SavedCopyStore.shared.write(data, scope: copyScope, key: keptKey)
         }

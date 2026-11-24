@@ -134,6 +134,25 @@ final class MediaTransferTests: XCTestCase {
         }
     }
 
+    func testSinglePUTRefusesASignInOrCookieHeaderFromTheServer() async {
+        for header in ["Authorization", "cookie", "Proxy-Authorization"] {
+            let answer = registration().replacingOccurrences(of: #""x-custom":"preserve""#, with: #""\#(header)":"x""#)
+            let session = URLProtocolFixture.session([.init(201, answer)])
+            let api = APIClient(session: session, baseURL: "https://app.thorbis.com")
+            let transfer = MediaTransfer(api: api, storageSession: session)
+            do {
+                _ = try await transfer.upload(jobID: jobID, clientAssetID: clientAssetID,
+                                              kind: "photo", mime: "image/jpeg", originalFilename: "work.jpg",
+                                              data: Data("hello".utf8))
+                XCTFail("Upload target with \(header) accepted")
+            } catch let problem as Problem {
+                XCTAssertEqual(problem.title, "Unsafe upload target")
+            } catch { XCTFail("Unexpected error: \(error)") }
+            XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "Nothing is sent to storage")
+        }
+        XCTAssertNoThrow(try MediaTransfer.checkStorageHeaders(["content-type": "image/jpeg", "x-amz-checksum-sha256": "abc"]))
+    }
+
     func testRejectsExpiredStorageTargetBeforePUT() async {
         let session = URLProtocolFixture.session([.init(201, registration(expiresAt: "2020-01-01T00:00:00Z"))])
         let api = APIClient(session: session, baseURL: "https://app.thorbis.com")

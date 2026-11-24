@@ -82,6 +82,48 @@ final class SessionControllerTests: XCTestCase {
         withExtendedLifetime(subscription) {}
     }
 
+    /// A foreground or reconnect check that finds the same authority keeps open work (a customer's
+    /// approval, an open document); a renewed authority generation still retires it.
+    func testIdenticalRevalidationKeepsAuthorityRevisionAndTicksTheCheckRevisions() async {
+        let renewed = catalog.replacingOccurrences(of: #""generation":"fixture-generation""#, with: #""generation":"fixture-generation-2""#)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, renewed), .init(200, features)
+        ])
+        await session.restore()
+        let authority = session.authorityRevision
+        let verification = session.verificationRevision
+        let recheck = session.recheckRevision
+        await session.revalidate()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertTrue(session.can("job.view", feature: "jobs"))
+        XCTAssertEqual(session.authorityRevision, authority, "An identical answer must not retire open work")
+        XCTAssertNotEqual(session.verificationRevision, verification, "Every answered check ticks the reload signal")
+        XCTAssertNotEqual(session.recheckRevision, recheck, "Per-job records re-check access on every answered check")
+        let verifiedAgain = session.verificationRevision
+        let recheckedAgain = session.recheckRevision
+        await session.revalidate()
+        XCTAssertNotEqual(session.authorityRevision, authority, "A renewed authority generation retires work captured under the old one")
+        XCTAssertNotEqual(session.verificationRevision, verifiedAgain)
+        XCTAssertNotEqual(session.recheckRevision, recheckedAgain)
+    }
+
+    /// A feature decision that changes at the same policy version and generation is still a change.
+    func testSameVersionFeatureChangeStillChangesAuthorityRevision() async {
+        let released = features.replacingOccurrences(of: #""price_book":{"enabled":false"#, with: #""price_book":{"enabled":true"#)
+        XCTAssertNotEqual(released, features)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, released)
+        ])
+        await session.restore()
+        let authority = session.authorityRevision
+        await session.revalidate()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotEqual(session.authorityRevision, authority, "A changed feature decision retires work captured under the old one")
+    }
+
     func testCustomerRecordsScopeRejectsStaleCompletionAfterSameVersionRevokeAndRegrant() async {
         let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
@@ -115,6 +157,51 @@ final class SessionControllerTests: XCTestCase {
         continuation.finish()
         await oldRequest.value
         XCTAssertFalse(stalePublished, "A request that completes after regrant must not publish its old data")
+    }
+
+    func testInFlightMoneyLoadCannotPublishAfterRealRevokeAndRegrant() async throws {
+        let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
+        let (session, api) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabledFeatures)
+        ])
+        await session.restore()
+        let oldScope = try XCTUnwrap(CustomerRecordsScope.capture(session: session, customerID: first))
+        let gate = URLProtocolFixture.Gate()
+        URLProtocolFixture.setRoutes(["/v1/jobs": .init(200, #"{ "items": [] }"#, gate: gate)])
+        let pending = Task { @MainActor in
+            _ = try await CustomerJobCompilationLoader.load(
+                customerID: oldScope.customerID, organizationID: oldScope.organizationID, api: api,
+                access: oldScope.access, moneyOnly: true, isCurrent: { oldScope.isCurrent(session: session) }
+            )
+        }
+        defer { gate.release(); pending.cancel() }
+        for _ in 0..<250 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs" }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/jobs" }, "The old Money request must actually be in flight")
+        URLProtocolFixture.setRoutes([
+            "/api/auth/get-session": .init(200, activeSession),
+            "/v1/query/catalog": .init(200, revoked),
+            "/v1/features": .init(200, enabledFeatures)
+        ])
+        await session.revalidate()
+        XCTAssertNil(CustomerRecordsScope.capture(session: session, customerID: first))
+        URLProtocolFixture.setRoutes([
+            "/api/auth/get-session": .init(200, activeSession),
+            "/v1/query/catalog": .init(200, catalog),
+            "/v1/features": .init(200, enabledFeatures)
+        ])
+        await session.revalidate()
+        XCTAssertNotNil(CustomerRecordsScope.capture(session: session, customerID: first))
+        XCTAssertFalse(oldScope.isCurrent(session: session))
+        gate.release()
+        do {
+            _ = try await pending.value
+            XCTFail("The in-flight Money request must not return under restored authority")
+        } catch is CancellationError {
+            // The loader rejected the stale scope.
+        }
     }
 
     func testRestoreNullSessionLeavesNoAuthority() async {
@@ -180,6 +267,64 @@ final class SessionControllerTests: XCTestCase {
         await session.signOut()
         XCTAssertEqual(session.phase, .signedOut)
         XCTAssertTrue(inbox.messages.isEmpty)
+    }
+
+    func testInboxStoreIsInvalidatedBeforeSignOutNetworkCompletes() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, "{}", gate: gate)
+        ])
+        session.onInvalidate = { CommsLocalStore.invalidateCached() }
+        session.onSignedOut = { CommsLocalStore.clearAll() }
+        await session.restore()
+        let old = CommsLocalStore.shared(actorID: actor, organizationID: first)
+        let mail = CommsLocalStore.Mail(to: ["person@example.invalid"], subject: "Private", body: "Old workspace")
+        XCTAssertNotNil(old.commitMail(mail, send: false))
+        let task = Task { await session.signOut() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 5 { try await Task.sleep(for: .milliseconds(10)) }
+        defer { gate.release() }
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, "/api/auth/sign-out")
+        XCTAssertFalse(old.isActive)
+        XCTAssertTrue(old.threads.isEmpty)
+        XCTAssertNil(old.commitMail(mail, send: false))
+        gate.release()
+        await task.value
+        XCTAssertEqual(session.phase, .signedOut)
+        let fresh = CommsLocalStore.shared(actorID: actor, organizationID: first)
+        XCTAssertTrue(fresh.threads.isEmpty, "Sign-out removes the prior saved local copy")
+        CommsLocalStore.clearAll()
+    }
+
+    func testInboxStoreIsInvalidatedBeforeWorkspaceSwitchCompletes() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let memberships = #"[{"id":"019f0000-0000-7000-8000-000000000001","name":"First"},{"id":"019f0000-0000-7000-8000-000000000002","name":"Second"}]"#
+        let selectedSession = activeSession.replacingOccurrences(of: first, with: second)
+        let selectedCatalog = catalog.replacingOccurrences(of: first, with: second)
+        let selectedFeatures = features.replacingOccurrences(of: first, with: second)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, memberships), .init(200, catalog), .init(200, features),
+            .init(200, "{}", gate: gate), .init(200, selectedSession), .init(200, selectedCatalog), .init(200, selectedFeatures)
+        ])
+        session.onInvalidate = { CommsLocalStore.invalidateCached() }
+        session.onSignedOut = { CommsLocalStore.clearAll() }
+        await session.restore()
+        let old = CommsLocalStore.shared(actorID: actor, organizationID: first)
+        let mail = CommsLocalStore.Mail(to: ["person@example.invalid"], subject: "Private", body: "Old workspace")
+        XCTAssertNotNil(old.commitMail(mail, send: false))
+        let task = Task { await session.selectOrganization(id: second) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 5 { try await Task.sleep(for: .milliseconds(10)) }
+        defer { gate.release() }
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, "/api/auth/organization/set-active")
+        XCTAssertFalse(old.isActive)
+        XCTAssertTrue(old.threads.isEmpty)
+        XCTAssertNil(old.commitMail(mail, send: false))
+        gate.release()
+        await task.value
+        XCTAssertEqual(session.activeOrganization?.id, second)
+        let other = CommsLocalStore.shared(actorID: actor, organizationID: second)
+        XCTAssertTrue(other.threads.isEmpty, "The next workspace cannot see the old workspace's draft")
+        CommsLocalStore.clearAll()
     }
 
     func testMultipleMembershipsRequireExplicitSelection() async {

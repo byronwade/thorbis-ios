@@ -1,5 +1,7 @@
 # Native beta coverage — 27 October 2026
 
+> Snapshot of build 16 (27 October 2026), kept as a release record. Current coverage: [paper-screen-index.md](../design/paper-screen-index.md); per-build changes: `build-<n>.md`.
+
 This is an initial staff beta, not full Thorbis-TanStack parity. The source reference is commit 448c238a11245d525d42cc542ce5fe9a512415ff. Native changes started at 811faf60fdcc929618292341c5081e84d65421db.
 
 ## Implemented native surfaces

@@ -108,14 +108,12 @@ struct ReportsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(includesRevenue ? "Money" : "Reports").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text(includesRevenue ? "Revenue, receivables and how work is moving" : "How work and money are moving")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-                // Text tabs, as on Customers, Team and the Inbox; wrapping keeps every report reachable.
-                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true, textTabs: true) }
+                // Paper 59/60: the 34 Bold title over the company and the day. A place root keeps the
+                // drawer's circle; pushed, the back button leads.
+                PaperHeader(title: includesRevenue ? "Full report" : "Reports", subtitle: headerSubtitle)
+                    .environment(\.paperMenuButton, false)
+                // Paper's segmented control; wrapping keeps every report reachable on a narrow phone.
+                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true).padding(.top, 4) }
                 if let error { ErrorBanner(message: error) }
                 Group {
                     if tabs.isEmpty {
@@ -133,9 +131,9 @@ struct ReportsView: View {
                         if let schedule { scheduleContent(schedule) } else { loadingState }
                     }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, 40)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
@@ -145,6 +143,14 @@ struct ReportsView: View {
         .task { await load() }
     }
 
+    /// "Wade's Plumbing · Tue, Jul 21" (Paper 59); Reports leads with what it covers (Paper 60).
+    private var headerSubtitle: String {
+        let company = session.activeOrganization?.name
+        let date = Date.now.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        if includesRevenue { return [company, date].compactMap { $0 }.joined(separator: " \u{00B7} ") }
+        return ["Work and payments", company].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
     private var loadingState: some View { SkeletonRows(count: 4, leading: false, inset: 0) }
 
     // design 2026-10-30: every figure on a panel under its 13pt label; list rows are PaperListRow
@@ -152,13 +158,13 @@ struct ReportsView: View {
     @ViewBuilder private func operationsContent(_ report: OperationsReport) -> some View {
         if report.truncated { incomplete }
         else {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 20) {
                 PaperSection("Estimates") {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("\(report.estimates.conversionBps / 100)%").font(Theme.moneyHeroFont).tracking(-0.6)
+                        Text("\(report.estimates.conversionBps / 100)%").font(Theme.monoFont(34, weight: .bold)).tracking(-0.8)
                         Text("of presented estimates approved").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
-                    .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 14)
+                    .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 4)
                     .accessibilityElement(children: .combine)
                     statRows( [
                         stat("Presented", report.estimates.presented),
@@ -186,8 +192,9 @@ struct ReportsView: View {
                             ForEach(activity.topCustomers) { row in
                                 PaperListRow(title: store.customerName(row.customerId),
                                              subtitle: row.jobs == 1 ? "1 job" : "\(row.jobs) jobs") {
-                                    Text(money(row.revenue, currency: "USD")).font(Theme.font(15)).monospacedDigit()
-                                        .foregroundStyle(Theme.muted)
+                                    // Paper 60: a row's figure in 16 Semibold tabular.
+                                    Text(money(row.revenue, currency: "USD")).font(Theme.monoFont(16, weight: .semibold))
+                                        .foregroundStyle(Theme.foreground)
                                 }
                                 .accessibilityElement(children: .combine)
                             }
@@ -203,7 +210,7 @@ struct ReportsView: View {
     @ViewBuilder private func scheduleContent(_ report: ScheduleReport) -> some View {
         if report.truncated { incomplete }
         else {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 20) {
                 PaperSection("Needs attention") {
                     statRows( [
                         stat("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0),
@@ -224,7 +231,7 @@ struct ReportsView: View {
     @ViewBuilder private func paymentsContent(_ report: PaymentActivityReport) -> some View {
         if report.truncated { incomplete }
         else {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 20) {
                 PaperSection("All time") {
                     statRows( [
                         .init(label: "Payments", value: money(report.totals.recorded, currency: "USD"),
@@ -273,30 +280,33 @@ struct ReportsView: View {
 
     /// v2: figures as quiet rows (label, then the tabular figure on the trailing edge), not a row of
     /// equal tiles. A figure that needs someone carries its word with the mark.
+    /// Paper 60's P&L rows: the label in 16 Medium, the figure in 16 Semibold tabular, 56 tall, a
+    /// hairline between rows inset to the words.
     private func statRows(_ stats: [PaperStatRow.Stat]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(stats) { stat in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(stats.enumerated()), id: \.element.id) { index, stat in
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 0) {
                         if stat.tint != Theme.foreground {
-                            StatusLabel(tone: .attention, word: stat.label, size: 15)
+                            StatusLabel(tone: .attention, word: stat.label, size: 16)
                         } else {
-                            Text(stat.label).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                            Text(stat.label).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         }
                         if let detail = stat.detail {
                             Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
                         }
                     }
                     Spacer(minLength: 8)
-                    Text(stat.value).font(Theme.rowAmountFont(15)).foregroundStyle(Theme.foreground)
+                    Text(stat.value).font(Theme.monoFont(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
-                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-                .frame(minHeight: 44)
+                .padding(.trailing, 16).padding(.vertical, 10)
+                .frame(minHeight: 56)
+                .overlay(alignment: .top) { if index > 0 { WellDivider(leading: 0) } }
+                .padding(.leading, 16)
                 .accessibilityElement(children: .combine)
             }
         }
-        .padding(.vertical, PaperCardMetrics.edge)
     }
 
     private func entries(_ count: Int) -> String { count == 1 ? "1 entry" : "\(count) entries" }

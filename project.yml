@@ -12,7 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "17"
+    # Local and CI builds only; scripts/testflight.sh sets the uploaded number from BUILD_NUMBER.
+    CURRENT_PROJECT_VERSION: "1"
 targets:
   Thorbis:
     type: application
@@ -30,7 +31,7 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Thorbis
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Thorbis uses the microphone only while you dictate a job note or photo caption, or record a video clip for a job."
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Thorbis turns what you say into job note text, on this iPhone when it can."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Thorbis turns what you say into job note text, on this device when it can."
         INFOPLIST_FILE: Thorbis/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Thorbis/Resources/Thorbis.entitlements
         DEVELOPMENT_TEAM: T677262U5B

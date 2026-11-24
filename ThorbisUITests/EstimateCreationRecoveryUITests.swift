@@ -15,9 +15,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         save.tap()
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 10))
-        let firstCreate = NSPredicate(format: "value == %@", "creates=1,links=0,estimateReads=0,jobReads=0")
-        expectation(for: firstCreate, evaluatedWith: counts)
-        waitForExpectations(timeout: 10)
+        waitForCounts(counts, "creates=1,links=0,estimateReads=0,jobReads=0")
         let revalidate = app.buttons["Revalidate sample"]
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
         revalidate.tap()
@@ -26,9 +24,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0", "The old authority must not issue a link")
         XCTAssertFalse(app.textFields["Estimate title"].isEnabled, "The known saved estimate stays locked")
         retry.tap()
-        let firstLink = NSPredicate(format: "value == %@", "creates=1,links=1,estimateReads=1,jobReads=1")
-        expectation(for: firstLink, evaluatedWith: counts)
-        waitForExpectations(timeout: 10)
+        waitForCounts(counts, "creates=1,links=1,estimateReads=1,jobReads=1")
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: retry)
         waitForExpectations(timeout: 10)
         retry.tap()
@@ -48,15 +44,17 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         save.tap()
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 10))
-        expectation(for: NSPredicate(format: "value == %@", "creates=1,links=0,estimateReads=0,jobReads=0"), evaluatedWith: counts)
-        waitForExpectations(timeout: 10)
+        waitForCounts(counts, "creates=1,links=0,estimateReads=0,jobReads=0")
         app.buttons["Revalidate sample"].tap()
         let retry = app.buttons["Retry adding to job"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
         retry.tap()
-        expectation(for: NSPredicate(format: "value == %@", "creates=1,links=0,estimateReads=1,jobReads=0"), evaluatedWith: counts)
-        waitForExpectations(timeout: 10)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch.waitForExistence(timeout: 5))
+        // The refusal is shown only after the retry's fresh read and before any job read or link,
+        // so once it is up the counts are final. Waiting for it first keeps a stalled simulator's
+        // slow accessibility reads from running out the counts' own window; every check stays exact.
+        let refused = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch
+        XCTAssertTrue(refused.waitForExistence(timeout: 30), "The retry must read the saved estimate fresh and refuse it")
+        waitForCounts(counts, "creates=1,links=0,estimateReads=1,jobReads=0")
         XCTAssertFalse(app.textFields["Estimate title"].isEnabled)
     }
 
@@ -84,12 +82,11 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
-        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+        waitForCounts(counts, "creates=1,links=0,estimateReads=0,jobReads=0")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved with a different location")).firstMatch.exists)
         retry.tap()
         let expected = jobMatches ? "creates=1,links=1,estimateReads=1,jobReads=1" : "creates=1,links=0,estimateReads=1,jobReads=1"
-        expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: counts)
-        waitForExpectations(timeout: 10)
+        waitForCounts(counts, expected)
         if jobMatches {
             expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: retry)
             waitForExpectations(timeout: 10)
@@ -118,8 +115,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         waitForExpectations(timeout: 10)
         retry.tap()
         let counts = app.staticTexts["estimate-recovery-request-counts"]
-        expectation(for: NSPredicate(format: "value == %@", "creates=1,links=1,estimateReads=1,jobReads=0"), evaluatedWith: counts)
-        waitForExpectations(timeout: 10)
+        waitForCounts(counts, "creates=1,links=1,estimateReads=1,jobReads=0")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch.waitForExistence(timeout: 5))
     }
 
@@ -149,7 +145,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "details differ from your submission")).firstMatch.waitForExistence(timeout: 5))
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
-        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+        waitForCounts(counts, "creates=1,links=0,estimateReads=0,jobReads=0")
     }
 
     func testLostGroupsRequireExplicitChoiceBeforeLinking() {
@@ -167,7 +163,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(continueButton.waitForExistence(timeout: 10))
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
-        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+        waitForCounts(counts, "creates=1,links=0,estimateReads=0,jobReads=0")
         continueButton.tap()
         XCTAssertTrue(app.staticTexts["Continue without item groups?"].waitForExistence(timeout: 5))
         let confirmation = app.buttons.matching(identifier: "Continue without groups").allElementsBoundByIndex.first { $0.isHittable }
@@ -198,7 +194,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertFalse(retry.isEnabled)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "details differ from your submission")).firstMatch.waitForExistence(timeout: 5))
         let counts = app.staticTexts["estimate-recovery-request-counts"]
-        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+        waitForCounts(counts, "creates=1,links=0,estimateReads=0,jobReads=0")
     }
 
     private func addSampleItem(in app: XCUIApplication) {
@@ -210,7 +206,11 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
         XCTAssertTrue(item.waitForExistence(timeout: 15))
         item.tap()
-        app.buttons["price-book-done"].tap()
+        let done = app.buttons["price-book-done"]
+        done.tap()
+        // Done must close the price book. If it does not, the next tap (Save, behind the sheet) lands
+        // on the open picker instead and the failure shows up later as missing requests.
+        XCTAssertTrue(done.waitForNonExistence(timeout: 10), "Done must close the price book and return to the estimate")
     }
 
     func testFailedLinkKeepsSavedEstimateLockedAndRetriesWithoutCreatingAgain() {
@@ -237,7 +237,9 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         save.tap()
         let retry = app.buttons["Retry adding to job"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "adding it to this job could not be confirmed")).firstMatch.exists)
+        // Retry appears as soon as the create answers, before the link request goes out; the link's
+        // failure arrives after it.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "adding it to this job could not be confirmed")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["Estimate title"].isEnabled)
         XCTAssertFalse(app.buttons.matching(identifier: "estimate-add-item").firstMatch.isEnabled)
         XCTAssertTrue(description.exists)
@@ -251,9 +253,18 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertFalse(price.isEnabled)
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
-        XCTAssertEqual(counts.value as? String, "creates=1,links=1,estimateReads=0,jobReads=0")
+        waitForCounts(counts, "creates=1,links=1,estimateReads=0,jobReads=0")
         retry.tap()
         assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
+    }
+
+    /// Waits for the sample request counts. When they never arrive, the failure names the last
+    /// value seen, so a run that went another way says which request it made.
+    private func waitForCounts(_ counts: XCUIElement, _ expected: String, timeout: TimeInterval = 10,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: counts)
+        XCTAssertEqual(XCTWaiter.wait(for: [reached], timeout: timeout), .completed,
+                       "Sample requests read \((counts.value as? String) ?? "nothing"), expected \(expected)", file: file, line: line)
     }
 
     private func assertOpenedSavedEstimate(in app: XCUIApplication, counts expected: String) {

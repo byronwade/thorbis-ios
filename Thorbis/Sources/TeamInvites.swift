@@ -14,10 +14,16 @@ struct TeamInvitation: Codable, Identifiable, Hashable {
 
     static let roles: [(id: String, label: String)] = [
         ("technician", "Technician"), ("apprentice", "Apprentice"), ("dispatcher", "Dispatcher"),
-        ("customer_service", "Customer service"), ("office_manager", "Office manager"), ("admin", "Admin"),
+        ("csr", "Customer service"), ("office_manager", "Office manager"), ("accountant", "Accountant"),
+        ("admin", "Admin"),
     ]
 
-    var roleLabel: String { Self.roles.first { $0.id == role }?.label ?? role.statusLabel }
+    /// The server's role ids (packages/permissions ROLE_IDS). An invite sent as "customer_service"
+    /// was refused; older rows may still carry it, so it keeps its label.
+    var roleLabel: String {
+        if role == "customer_service" { return "Customer service" }
+        return Self.roles.first { $0.id == role }?.label ?? role.statusLabel
+    }
 }
 
 private struct InvitationPage: Decodable { let items: [TeamInvitation]; let nextCursor: String? }
@@ -43,8 +49,10 @@ extension APIClient {
                 }
             }
             guard page.nextCursor != cursor else { break }
+            // A cursor seen before means the server is going in circles; stop with what we have.
+            if let next = page.nextCursor, !requireComplete, !seen.insert(next).inserted { break }
             cursor = page.nextCursor
-        } while cursor != nil && items.count < 500
+        } while cursor != nil && items.count < 500 && pages < 500
         return items
     }
 
@@ -54,9 +62,7 @@ extension APIClient {
     }
 
     func cancelInvitation(_ id: String) async throws -> TeamInvitation {
-        guard let safe = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_"))) else {
-            throw Problem(title: "Invalid invitation ID", status: nil, detail: id)
-        }
+        let safe = try Self.pathSegment(id, invalid: "Invalid invitation ID")
         return try await send("POST", "/v1/organization/invitations/\(safe)/cancel")
     }
 }
@@ -82,31 +88,99 @@ struct InviteMemberSheet: View {
         return trimmed.contains("@") && trimmed.contains(".") && trimmed.count <= 254
     }
 
-    /// v2 modal: one task, the email in a sunk well with help under it and the error in its place,
-    /// the role as a select well, and one ink commit that is never pre-disabled.
+    private var roleLabel: String {
+        RolePickerSheet.name(for: role) ?? roles.first { $0.id == role }?.label ?? role.statusLabel
+    }
+    @State private var pickingRole = false
+    private var companyName: String { session.activeOrganization?.name ?? "your company" }
+
+    private var roleDetail: String? {
+        RolePickerSheet.roles.first { $0.serverID == role }?.detail
+    }
+
+    /// Paper 62C: Cancel, the title and the blue "Send invite" pill over two cards: who it goes to
+    /// (the server invites by email only, so Paper's name and mobile fields are left out), then
+    /// the role with what it can do and how the invite is sent. The commit is never pre-disabled.
     var body: some View {
-        ThorbisModalSheet(title: "Invite to team", onClose: busy ? nil : { dismiss() },
-                          commitTitle: "Send invite", commitSymbol: "paperplane", busy: busy,
-                          commitIdentifier: "team-invite-send", commit: { Task { await press() } }) {
-            FormField(label: "Email", help: "They get an email to join and choose a password. Invites expire after 7 days.",
-                      error: emailProblem) {
-                TextField("", text: $email, prompt: .placeholder("mike@reyesplumbing.com"))
-                    .font(Theme.font(16))
-                    .keyboardType(.emailAddress).textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($emailFocused)
-                    .submitLabel(.send)
-                    .onSubmit { Task { await press() } }
-                    .onChange(of: email) { _, _ in emailProblem = nil }
-                    .accessibilityLabel("Email")
-                    .fieldWell()
+        VStack(spacing: 0) {
+            PaperTaskBar(title: "Invite member", cancelDisabled: busy,
+                         commit: ThorbisSheetHeaderAction(title: "Send invite", busy: busy, identifier: "team-invite-send") {
+                             Task { await press() }
+                         }) { dismiss() }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    TeamCard {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Email").font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                            TextField("", text: $email, prompt: .placeholder("mike@reyesplumbing.com"))
+                                .font(Theme.font(17, weight: .medium))
+                                .keyboardType(.emailAddress).textContentType(.emailAddress)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .focused($emailFocused)
+                                .submitLabel(.send)
+                                .onSubmit { Task { await press() } }
+                                .onChange(of: email) { _, _ in emailProblem = nil }
+                                .accessibilityLabel("Email")
+                        }
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let emailProblem { FieldProblem(message: emailProblem).padding(.horizontal, 4) }
+                    TeamCard {
+                        // Paper 14B: the role is chosen on its own sheet, each with what it can do.
+                        Button { ThorbisKeyboard.dismiss { pickingRole = true } } label: {
+                            HStack(alignment: .center, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Role").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    Text(roleLabel).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    if let roleDetail {
+                                        Text(roleDetail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                PaperIcon(.chevronRight, size: 16, color: Theme.muted).accessibilityHidden(true)
+                            }
+                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityLabel("Role, \(roleLabel)")
+                        .accessibilityHint("Chooses the role")
+                        .accessibilityIdentifier("team-invite-role")
+                        WellDivider(leading: 0)
+                        HStack(spacing: 8) {
+                            Text("Send invite by").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("Email").font(Theme.font(16)).foregroundStyle(Theme.muted)
+                        }
+                        .padding(.horizontal, PaperCardMetrics.inset)
+                        .frame(minHeight: 56)
+                        .accessibilityElement(children: .combine)
+                    }
+                    Text("They get a link to join \(companyName). It works for 7 days. You can change the role any time.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                    if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 20).padding(.bottom, 24)
             }
-            FormField(label: "Role", help: "What they can see and do. You can change it later in Team.") {
-                ThorbisSelect(options: roles.map { ($0.id, $0.label) }, selection: $role, menuTitle: "Role")
-            }
-            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
         }
-        .onAppear { emailFocused = true }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.canvas)
+        .presentationDetents([.large])
+        .onAppear {
+            emailFocused = true
+            #if DEBUG
+            if PaperPreview.opensSheet("team-role-picker") { emailFocused = false; pickingRole = true }
+            #endif
+        }
+        .sheet(isPresented: $pickingRole) {
+            RolePickerSheet(current: role, allowed: Set(roles.map(\.id))) { role = $0 }
+        }
         // MA-16: a typed address is not lost to a stray swipe.
         .interactiveDismissDisabled(busy || !email.isEmpty)
     }

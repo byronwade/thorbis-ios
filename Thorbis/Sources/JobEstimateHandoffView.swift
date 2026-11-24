@@ -8,6 +8,8 @@ private struct CustomerHandoffEstimateDetails: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var revision: CustomerIssuedEstimateRevision?
     @State private var loading = false
+    @State private var receipt: CustomerEstimateAcceptanceReceipt?
+    @State private var unsigned = false
     @State private var error: String?
 
     init(model: JobEstimateHandoffModel, record: EstimateRecord) {
@@ -44,7 +46,22 @@ private struct CustomerHandoffEstimateDetails: View {
                 } else if let revision, revisionMatches {
                     Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    if let options = revision.options, !options.isEmpty {
+                    if record.status == "approved", let receipt {
+                        Text("Approved · Signed by \(receipt.signerName)")
+                            .font(Theme.customerFont(type.body, weight: .medium))
+                        if let title = receipt.optionTitle {
+                            Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                        }
+                        if let option = revision.options?.first(where: { $0.id == receipt.optionId }), !option.description.isEmpty {
+                            ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: access,
+                                                        customerFacing: true, accessibilityContext: "Estimate EST-\(record.id.suffix(4).uppercased()), approved package")
+                        }
+                        lines(receipt.lines, currency: receipt.currency, total: receipt.totalAmount,
+                              context: "Estimate EST-\(record.id.suffix(4).uppercased()), approved work")
+                    } else if record.status == "approved", unsigned {
+                        Text("No signed customer receipt is available for this approval. Ask your technician for details.")
+                            .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    } else if let options = revision.options, !options.isEmpty {
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
@@ -69,7 +86,8 @@ private struct CustomerHandoffEstimateDetails: View {
                     CustomerSkeleton(caption: "Opening the current estimate…", heading: false)
                 }
             }
-            .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+            .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
         }
         .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("EST-\(record.id.suffix(4).uppercased())")
@@ -89,10 +107,9 @@ private struct CustomerHandoffEstimateDetails: View {
     #endif
 
     @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, total: Int, context: String) -> some View {
-        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == total,
-           let projected = customerEstimateProjection(lines, currency: currency) {
+        if let display = customerEstimateDisplay(lines, currency: currency), display.amounts.total == total {
             CustomerIncludedLabel(type: type)
-            CustomerIncludedLines(lines: projected, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false),
+            CustomerIncludedLines(lines: display.lines, type: type, rows: customerAmountRows(display.amounts, currency: currency, invoice: false),
                                   readingAccess: access, descriptionContext: context)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
@@ -102,11 +119,17 @@ private struct CustomerHandoffEstimateDetails: View {
 
     private func load() async {
         guard current, !loading else { return }
-        loading = true; revision = nil; error = nil
+        loading = true; revision = nil; receipt = nil; unsigned = false; error = nil
         defer { loading = false }
         do {
             let issued = try await model.issuedDetails(record, authority: authority)
             guard current, !Task.isCancelled else { return }
+            if record.status == "approved" {
+                let signed = try await model.approvedReceipt(record, revision: issued, authority: authority)
+                guard current, !Task.isCancelled else { return }
+                receipt = signed
+                unsigned = signed == nil
+            }
             revision = issued
         } catch is CancellationError {} catch {
             guard current else { return }
@@ -115,16 +138,95 @@ private struct CustomerHandoffEstimateDetails: View {
     }
 }
 
+/// Browse only fresh, verified estimates already loaded for this job. Each destination
+/// retains the existing issued-revision read and never changes the selected work.
+private struct CustomerHandoffEstimateBrowser: View {
+    @ObservedObject var model: JobEstimateHandoffModel
+    @State private var currentID: String
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    init(model: JobEstimateHandoffModel, initial: EstimateRecord) {
+        self.model = model
+        _currentID = State(initialValue: initial.id)
+    }
+
+    private var type: CustomerType { CustomerType(sizeClass) }
+    private var readable: [EstimateRecord] {
+        model.records.filter { model.detailsCurrent($0, authority: model.session.authorityRevision) }
+    }
+    private var index: Int? { readable.firstIndex { $0.id == currentID } }
+
+    var body: some View {
+        Group {
+            if let record = readable.first(where: { $0.id == currentID }) {
+                CustomerHandoffEstimateDetails(model: model, record: record)
+                    .id(record)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 50).onEnded { value in
+                            let horizontal = value.translation.width
+                            guard value.startLocation.x > 30,
+                                  abs(horizontal) > 70,
+                                  abs(horizontal) > abs(value.translation.height) * 2 else { return }
+                            move(horizontal < 0 ? 1 : -1)
+                        }
+                    )
+            } else {
+                CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                     message: "Hand the device back to your technician to reopen this estimate.")
+                    .padding(Theme.gutter)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let index, readable.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { browseControls(index: index) }
+                    VStack(spacing: 8) { browseControls(index: index) }
+                }
+                .padding(Theme.gutter)
+                .background(Theme.canvas)
+            }
+        }
+    }
+
+    @ViewBuilder private func browseControls(index: Int) -> some View {
+        CustomerSecondaryButton(title: "Previous estimate", type: type) { move(-1) }
+            .disabled(index == 0)
+            .accessibilityIdentifier("handoff-previous-estimate")
+        CustomerSecondaryButton(title: "Next estimate", type: type) { move(1) }
+            .disabled(index + 1 >= readable.count)
+            .accessibilityIdentifier("handoff-next-estimate")
+    }
+
+    private func move(_ offset: Int) {
+        let current = readable
+        guard let index = current.firstIndex(where: { $0.id == currentID }),
+              current.indices.contains(index + offset) else { return }
+        currentID = current[index + offset].id
+    }
+}
+
 /// Customer-only destinations inside the existing protected customer navigation owner.
 struct JobEstimateHandoffView: View {
     @ObservedObject var model: JobEstimateHandoffModel
     let handBack: () -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @State private var reviewing = false
     @State private var checkpointID: String?
     @State private var detailsID: String?
+    @State private var footerHeight: CGFloat = 0
+    /// Approving several with one signature (Paper 38C): the name and ink, kept only on this screen.
+    @State private var batchName = ""
+    @State private var batchStrokes: [[CGPoint]] = []
+    @State private var batchConsent: String?
+    @State private var preparingBatch = false
+    @State private var batchError: String?
+    private var signsTogether: Bool { reviewing && model.reviewed.count > 1 }
+    /// Whether an estimate or an approval step is pushed over this page. A swipe back shows the
+    /// page while one still is, and SwiftUI clears it only when the pop commits.
+    private var coveredByDestination: Bool { detailsID != nil || checkpointID != nil }
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -132,24 +234,49 @@ struct JobEstimateHandoffView: View {
             if model.isCurrent {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if reviewing { selectedReview } else { overview }
+                        if signsTogether { batchSign } else if reviewing { selectedReview } else {
+                            overview.task(id: model.overviewPriceGeneration) { await model.loadOverviewPrices() }
+                        }
                     }
-                    .padding(Theme.gutter).frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
+                    // Paper v2: cards sit 16 from the screen edge.
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+                    .padding(.bottom, footerHeight)
+                    .frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("job-estimate-handoff")
-                .safeAreaInset(edge: .bottom) { footer }
+                .safeAreaInset(edge: .bottom) {
+                    footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                }
             } else {
                 VStack(spacing: 20) {
                     Text("Hand the device back to your technician").font(Theme.customerFont(type.heading, weight: .medium))
                     Text("This workspace or your access changed. Your technician needs to unlock and reopen the job.")
                         .font(Theme.customerFont(type.body))
-                    CustomerSecondaryButton(title: "Hand back to the technician", type: type, action: handBack)
+                    CustomerSecondaryButton(title: "Hand back to technician", type: type, action: handBack)
                 }.padding(Theme.gutter)
             }
         }
         .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("Estimates").navigationBarTitleDisplayMode(.inline)
-        .task { await model.refresh() }
+        // Reload when the person has come back, not when a swipe back begins. The swipe shows this
+        // page while the estimate is still pushed over it, and a swipe the person lets go of without
+        // going back leaves it there. The task starts again when the page first appears and when what
+        // was pushed is cleared: by Back, by a finished swipe or by the page itself. A reload still
+        // running when something is pushed stops then, as it stopped before when the page left.
+        .task(id: coveredByDestination) {
+            #if DEBUG
+            NSLog("%@", "[pop-gesture] keyed task started covered=\(coveredByDestination)")
+            #endif
+            guard !coveredByDestination else { return }
+            await model.refresh()
+        }
+        #if DEBUG
+        // BYR-1842, DEBUG only: when this page appears, leaves and is uncovered, read in the app log
+        // beside the pop probe's lines and the task's line above. They change nothing on screen.
+        .onAppear { NSLog("%@", "[pop-gesture] overview appeared covered=\(coveredByDestination)") }
+        .onDisappear { NSLog("%@", "[pop-gesture] overview disappeared covered=\(coveredByDestination)") }
+        .onChange(of: coveredByDestination) { _, covered in NSLog("%@", "[pop-gesture] overview covered=\(covered)") }
+        #endif
         .onChange(of: api.requestGeneration) { _, _ in
             if !model.isCurrent { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
         }
@@ -161,72 +288,130 @@ struct JobEstimateHandoffView: View {
             if !current { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
         }
         .onChange(of: model.approvalAuthority) { _, allowed in
-            if !allowed { checkpointID = nil; reviewing = false; model.cancelApprovals() }
+            // A started one-signature run stays on screen to say which were approved; its ink is already gone.
+            if !allowed {
+                checkpointID = nil; batchStrokes = []
+                if model.batch?.started != true { reviewing = false }
+                model.cancelApprovals()
+            }
         }
+        // The one signature is never kept past this screen: leaving it, a lock or a hand-back forgets it.
+        .onChange(of: reviewing) { _, open in if !open { forgetBatchSignature() } }
+        .onDisappear { if detailsID == nil && checkpointID == nil { forgetBatchSignature() } }
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
         .thorbisDestination(item: $detailsID) { id in
             if let record = model.records.first(where: { $0.id == id }) {
-                CustomerHandoffEstimateDetails(model: model, record: record)
-                    .id(record)
+                CustomerHandoffEstimateBrowser(model: model, initial: record)
+                    .id(record.id)
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             }
         }
     }
 
     private var overview: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(model.jobTitle).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : "Some estimates still need a refresh")
-                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+        // Paper 38C: cards 16 apart under the title. Eager, not lazy: at accessibility sizes the lazy
+        // stack never settled after Review was pressed (its estimated heights kept re-placing the
+        // rows) and the screen froze. A job's estimates come in pages, so the list stays short.
+        VStack(alignment: .leading, spacing: 16) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
+                Button("Fail sample refresh") {
+                    JobEstimateHandoffPreview.shared.rejectNextMembership()
+                    Task { await model.refresh() }
+                }
             }
+            #endif
+            // Paper 38C: "Approve estimates" in the largest Bold, one quiet line under it.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Approve estimates").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                    .accessibilityAddTraits(.isHeader)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(model.complete ? "Choose what you want done today" : model.loading ? "Loading estimates…" : model.canLoadMoreEstimates ? "More estimates are available for this job." : "Some estimates still need a refresh")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 4)
+            // The title sits 14 under the bar in Paper; the page's own top margin is 20.
+            .padding(.top, -6)
             if !model.approvalAuthority {
                 Text("You can review these estimates. Your current access doesn't allow approvals.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
             }
             if model.hasResults { results }
-            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.refresh() } }
+            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.retryEstimateLoading() } }
+            if let batchError { CustomerProblemBanner(message: batchError) }
             if model.loading {
                 if model.records.isEmpty { CustomerSkeleton(caption: "Opening current job estimates…", lines: 2) }
                 else { Text("Opening current job estimates…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
             }
-            ForEach(model.records) { record in estimateCard(record) }
+            // Paper 38C: the estimates are rows on one card, a hairline between them.
+            if !model.records.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.records.enumerated()), id: \.element.id) { index, record in
+                        if index > 0 { WellDivider() }
+                        estimateCard(record)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
+            }
+            overviewTotals
+            if model.canLoadMoreEstimates {
+                CustomerSecondaryButton(title: "Load more estimates", type: type) {
+                    Task { await model.loadMoreEstimates() }
+                }
+                .disabled(model.loading)
+                .accessibilityIdentifier("handoff-load-more-estimates")
+            }
             ForEach(model.unavailableIDs, id: \.self) { id in
                 VStack(alignment: .leading, spacing: 8) {
                     Text("EST-\(id.suffix(4).uppercased()) · Unavailable").font(Theme.customerFont(type.body, weight: .medium))
-                    Text("Refresh to see this estimate before deciding.").font(Theme.customerFont(type.body))
+                    Text("Refresh to see this estimate before deciding.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(PaperCardMetrics.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
             }
         }
     }
 
     private func estimateCard(_ record: EstimateRecord) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             if model.eligibleIDs.contains(record.id) {
                 let selected = model.selectedIDs.contains(record.id)
                 Button { model.setSelected(record.id, selected: !selected) } label: {
-                    HStack(alignment: .top, spacing: 14) {
-                        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 25)).foregroundStyle(selected ? Theme.brandText : Theme.muted)
-                            .frame(width: 30).frame(minHeight: 56)
-                        estimateSummary(record)
-                    }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
+                    HStack(alignment: .center, spacing: 12) {
+                        // Paper 38C: a brand disc with a white check when chosen, an empty ring when not.
+                        CustomerRadio(selected: selected)
+                        estimateSummary(record, dimmed: !selected)
+                    }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(selected ? "Deselect" : "Select") \(record.title), EST-\(record.id.suffix(4).uppercased())")
                 .accessibilityValue(selectionValue(record))
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
                 .accessibilityIdentifier("handoff-select-\(record.id)")
-            } else { estimateSummary(record) }
+            } else { estimateSummary(record, dimmed: false) }
             if model.detailsCurrent(record, authority: session.authorityRevision) {
+                // Paper 38C draws no link here; reading an estimate before choosing it stays, as quiet
+                // brand words under the row, lined up with its name.
                 Button { detailsID = record.id } label: {
-                    Label("View details", systemImage: "doc.text")
-                        .font(Theme.customerFont(type.body, weight: .medium))
-                        .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
+                    Text("View details")
+                        .font(Theme.font(14, weight: .semibold))
+                        .foregroundStyle(Theme.brandText)
+                        .padding(.leading, model.eligibleIDs.contains(record.id) ? 38 : 0)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Read this estimate before choosing work")
                 .accessibilityIdentifier("handoff-details-\(record.id)")
+            }
+            if model.overviewPriceFailures.contains(record.id) {
+                CustomerSecondaryButton(title: "Retry price", type: type) { Task { await model.retryOverviewPrice(record) } }
+                    .accessibilityIdentifier("handoff-retry-price-\(record.id)")
             }
             if record.status == "approved" {
                 Text("Already approved · no approval needed").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
@@ -246,9 +431,15 @@ struct JobEstimateHandoffView: View {
                             Button { model.chooseOption(estimateID: record.id, optionID: option.id) } label: {
                                 HStack(alignment: .top, spacing: 12) {
                                     Image(systemName: model.selection.optionIDs[record.id] == option.id ? "largecircle.fill.circle" : "circle")
+                                        .font(.system(size: 22))
+                                        .foregroundStyle(model.selection.optionIDs[record.id] == option.id ? Theme.brand : Theme.muted)
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
-                                        Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                                            Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        } else {
+                                            Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                                        }
                                     }
                                 }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
@@ -267,58 +458,136 @@ struct JobEstimateHandoffView: View {
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             }
         }
-        .padding(.vertical, 16)
+        // Paper 38C: a row on the shared card, 16 in, 12 above and below.
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("handoff-card-\(record.id)")
     }
 
     private func selectionValue(_ record: EstimateRecord) -> String {
         let state = model.selectedIDs.contains(record.id) ? "Selected" : "Not selected"
         let price: String
         if let option = model.options(for: record.id).first(where: { $0.id == model.selection.optionIDs[record.id] }) {
-            price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            } else {
+                price = "\(option.title), price needs current terms"
+            }
         } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
             price = money(revision.totalAmount, currency: revision.currency)
-        } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+        } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
         } else {
-            price = (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+            price = model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                ? "Refresh to check price" : (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
         }
         return "\(state), \(record.status.capitalized), \(price)"
     }
 
-    private func estimateSummary(_ record: EstimateRecord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+    /// Paper 38C's row: the estimate's name (16 Medium) over one quiet line (14), its price at the
+    /// trailing edge (16 Medium, muted until chosen). What can't be priced yet says so on the quiet line.
+    private func estimateSummary(_ record: EstimateRecord, dimmed: Bool) -> some View {
+        let facts = summaryFacts(record)
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let reference = "EST-\(record.id.suffix(4).uppercased())"
+        let words = ([record.status == "sent" ? reference : "\(reference) \u{00B7} \(record.status.statusLabel)"] + facts.notes)
+            .joined(separator: " \u{00B7} ")
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(record.title).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                CustomerStatusWord(status: record.status, type: type)
+                Text(words).font(type.regular ? Theme.customerFont(type.small) : Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if stacked, let amount = facts.amount {
+                    Text(amount).font(Theme.customerFont(type.body, weight: .medium))
+                }
             }
-            Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.customerMonoFont(type.small)).foregroundStyle(Theme.muted)
-            if let context = model.context(for: record.id), context.outcome?.isApproved == true,
-               let action = context.acceptedAction, let accepted = action.acceptance,
-               let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
-                Text(option.title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-                Text(money(amount, currency: option.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
-                Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
-                      let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
-                Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty {
-                Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-            } else if record.status == "approved" {
-                Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-            } else {
-                Text("Choose a package").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !stacked, let amount = facts.amount {
+                Text(amount).font(Theme.customerFont(type.body, weight: .medium))
+                    .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
+                    .lineLimit(1).fixedSize()
             }
-        }.frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Theme.foreground)
+        }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Theme.foreground)
+    }
+
+    /// The verified price of an estimate on the overview, or the words for why there is none yet.
+    private func summaryFacts(_ record: EstimateRecord) -> (amount: String?, notes: [String]) {
+        if let context = model.context(for: record.id), context.outcome?.isApproved == true,
+           let action = context.acceptedAction, let accepted = action.acceptance,
+           let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
+            return (money(amount, currency: option.currency), [option.title])
+        } else if let receipt = model.overviewReceipt(for: record) {
+            return (money(receipt.totalAmount, currency: receipt.currency), receipt.optionTitle.map { [$0] } ?? [])
+        } else if record.status == "sent", let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
+            return (money(revision.totalAmount, currency: revision.currency), [])
+        } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+                  let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
+            return (money(amounts.total, currency: currency), [])
+        } else if (record.options ?? []).isEmpty {
+            return (nil, [model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                          ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…"])
+        } else if record.status == "approved" {
+            return (nil, ["Accepted package needs verification"])
+        } else {
+            return (nil, ["Choose a package"])
+        }
+    }
+
+    /// The selected estimates' verified prices, per currency; nil while any chosen one has no verified price.
+    private var overviewSelectedTotals: [(currency: String, amount: Int)]? {
+        var values: [String: Int] = [:]
+        for id in model.selectedIDs {
+            guard let revision = model.revision(for: id) else { return nil }
+            let amount: Int, currency: String
+            if (revision.options ?? []).isEmpty { amount = revision.totalAmount; currency = revision.currency }
+            else if let option = revision.options?.first(where: { $0.id == model.selection.optionIDs[id] }) { amount = option.totalAmount; currency = option.currency }
+            else { return nil }
+            let sum = (values[currency] ?? 0).addingReportingOverflow(amount)
+            guard !sum.overflow else { return nil }
+            values[currency] = sum.partialValue
+        }
+        return values.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    }
+
+    /// Paper 38C's totals card under the list: how many are selected, then the total under a hairline.
+    @ViewBuilder private var overviewTotals: some View {
+        if !model.selectedIDs.isEmpty, let totals = overviewSelectedTotals, !totals.isEmpty {
+            VStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Selected").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Text("\(model.selectedIDs.count) estimate\(model.selectedIDs.count == 1 ? "" : "s")")
+                        .font(Theme.customerFont(type.small))
+                }
+                WellDivider(leading: 0)
+                ForEach(totals, id: \.currency) { value in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(totals.count == 1 ? "Total" : "Total \(value.currency)")
+                            .font(Theme.customerFont(type.body, weight: .semibold))
+                        Spacer(minLength: 8)
+                        Text(money(value.amount, currency: value.currency))
+                            .font(Theme.customerFont(type.regular ? type.heading : 22, weight: .bold)).tracking(-0.44)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(PaperCardMetrics.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
+            .accessibilityIdentifier("handoff-overview-totals")
+        }
     }
 
     private var selectedReview: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Review selected work").font(Theme.customerFont(type.heading, weight: .medium)).accessibilityAddTraits(.isHeader)
+            Text("Review selected work").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
             Text("\(model.reviewed.count) separate estimates. You'll approve and sign each one.")
                 .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             ForEach(Array(model.reviewed.enumerated()), id: \.element.id) { index, item in
@@ -337,11 +606,10 @@ struct JobEstimateHandoffView: View {
                     }
                 }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
-                if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
-                   let projected = customerEstimateProjection(lines, currency: currency) {
+                if let display = customerEstimateDisplay(lines, currency: currency) {
                     CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: projected, type: type,
-                                          rows: customerAmountRows(amounts, currency: currency, invoice: false),
+                    CustomerIncludedLines(lines: display.lines, type: type,
+                                          rows: customerAmountRows(display.amounts, currency: currency, invoice: false),
                                           readingAccess: descriptionAccess(for: item),
                                           descriptionContext: reference)
                 } else {
@@ -349,9 +617,31 @@ struct JobEstimateHandoffView: View {
                         .font(Theme.customerFont(type.body))
                 }
             }
-            ForEach(selectedTotals, id: \.currency) { value in
-                Text("Selected work · \(money(value.amount, currency: value.currency)) \(value.currency)")
-                    .font(Theme.customerFont(type.body, weight: .medium))
+            // Paper 38C's totals card: how many are selected, then the total in Bold under a hairline.
+            if !selectedTotals.isEmpty {
+                VStack(spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Selected").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 8)
+                        Text("\(model.reviewed.count) estimate\(model.reviewed.count == 1 ? "" : "s")")
+                            .font(Theme.customerFont(type.small)).monospacedDigit()
+                    }
+                    WellDivider(leading: 0)
+                    ForEach(selectedTotals, id: \.currency) { value in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(selectedTotals.count == 1 ? "Total" : "Total \(value.currency)")
+                                .font(Theme.customerFont(type.small, weight: .semibold))
+                            Spacer(minLength: 8)
+                            Text(money(value.amount, currency: value.currency))
+                                .font(Theme.customerFont(type.heading, weight: .bold)).monospacedDigit()
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(PaperCardMetrics.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
             }
             Text("These estimates stay separate and do not become one bill.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
         }
@@ -412,11 +702,22 @@ struct JobEstimateHandoffView: View {
                 CustomerSecondaryButton(title: "Continue selected approvals", type: type) { checkpointID = next }
             }
         }
+        // Words on the canvas line up with the cards' text, 20 from the edge.
+        .padding(.horizontal, 4)
     }
     @ViewBuilder private var footer: some View {
         if reviewing || !model.complete || !model.eligibleIDs.isEmpty {
         VStack(spacing: 8) {
-            if reviewing {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-paging-diagnostic") {
+                Text("Paging diagnostic").font(.system(size: 1))
+                    .accessibilityIdentifier("handoff-paging-diagnostic")
+                    .accessibilityValue("count=\(model.records.count); loading=\(model.loading); complete=\(model.complete); more=\(model.canLoadMoreEstimates); error=\(model.error ?? "none"); requests=\(JobEstimateHandoffPreview.shared.receipt)")
+            }
+            #endif
+            if signsTogether {
+                batchFooter
+            } else if reviewing {
                 if let next = nextPending(after: nil) {
                     CustomerPresentationCommit(title: "Continue to signatures", enabled: true, busy: false, type: type) { checkpointID = next }
                         .accessibilityIdentifier("handoff-continue-signatures")
@@ -427,15 +728,280 @@ struct JobEstimateHandoffView: View {
                 }
                 CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
             } else {
-                CustomerPresentationCommit(title: "Review selected (\(model.selectedIDs.count))", enabled: model.canReview, busy: model.loading, type: type) {
-                    Task { await model.reviewSelected(); if !model.reviewed.isEmpty { reviewing = true } }
+                // Paper 38C: the count and the total on the commit ("Approve 2 · $2,126.13"). Here it opens
+                // the review before any signature, so it says Review; its spoken name is unchanged.
+                // Where the full words would wrap (accessibility sizes), "Review (2)" keeps the pinned commit one
+                // line tall so the estimates keep their room.
+                CustomerPresentationCommit(title: reviewCommitTitle, compactTitle: "Review (\(model.selectedIDs.count))",
+                                           enabled: model.canReview && !preparingBatch, busy: model.loading || preparingBatch, type: type) {
+                    Task { await openSelectedReview() }
                 }
+                .accessibilityLabel("Review selected (\(model.selectedIDs.count))")
                 .accessibilityIdentifier("handoff-review-selected")
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12).background(Theme.canvas)
         }
     }
+    private var reviewCommitTitle: String {
+        let count = model.selectedIDs.count
+        guard count > 0, let totals = overviewSelectedTotals, totals.count == 1, let total = totals.first else {
+            return "Review selected (\(count))"
+        }
+        return "Review \(count) \u{00B7} \(money(total.amount, currency: total.currency))"
+    }
+    // MARK: One signature for several estimates (Paper 38C)
+
+    /// Reviewing several opens 38C's signing screen; one estimate keeps its own review and signature.
+    private func openSelectedReview() async {
+        batchError = nil
+        await model.reviewSelected()
+        guard !model.reviewed.isEmpty else { return }
+        if model.reviewed.count > 1 {
+            preparingBatch = true
+            defer { preparingBatch = false }
+            do {
+                // Package estimates get their customer links first, so their consent is read before signing.
+                batchConsent = try await model.prepareBatch()
+            } catch is CancellationError { return } catch {
+                batchError = error.customerSentence(.approve); return
+            }
+            batchStrokes = []
+            batchName = model.reviewed.first.flatMap { model.contexts[$0.key]?.initialSignerName } ?? model.customerName
+        }
+        reviewing = true
+    }
+
+    private func forgetBatchSignature() {
+        model.endBatch(); batchStrokes = []; batchConsent = nil
+    }
+
+    private var batch: JobEstimateBatchApproval? { model.batch }
+    private var batchLocked: Bool { batch != nil }
+
+    private var batchSign: some View {
+        // A plain VStack: a lazy one froze at the largest text size.
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Approve estimates").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                    .accessibilityAddTraits(.isHeader)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Sign once for the \(model.reviewed.count) estimates below")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, -6)
+            VStack(spacing: 0) {
+                ForEach(Array(model.reviewed.enumerated()), id: \.element.key) { index, item in
+                    if index > 0 { WellDivider() }
+                    batchRow(item)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
+            batchTotalsCard
+            if let summary = batchSummary {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(summary.title).font(Theme.customerFont(type.body, weight: .semibold))
+                    ForEach(summary.lines, id: \.self) { line in
+                        Text(line).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(PaperCardMetrics.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("handoff-batch-summary")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("By signing, I approve the \(model.reviewed.count) estimates above\(batchTotalText.map { " for \($0)" } ?? "") as shown. Each estimate stays separate.")
+                if let batchConsent { Text(batchConsent) }
+            }
+            .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+            signatureCard
+        }
+    }
+
+    /// Paper 38C's row: the check disc, the estimate's name over its number and chosen package,
+    /// the price at the trailing edge. "Approved" appears only once the server confirmed it.
+    private func batchRow(_ item: JobEstimateReviewedItem) -> some View {
+        let option = item.revision.options?.first(where: { $0.id == item.optionID })
+        let amount = money(option?.totalAmount ?? item.revision.totalAmount, currency: option?.currency ?? item.revision.currency)
+        let reference = "EST-\(item.id.suffix(4).uppercased())"
+        let status = batchStatus(item)
+        let detail = ([reference] + (option.map { [$0.title] } ?? []) + (status.map { [$0] } ?? [])).joined(separator: " \u{00B7} ")
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .center, spacing: 12) {
+            CustomerRadio(selected: true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(item.revision.title).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                Text(detail).font(type.regular ? Theme.customerFont(type.small) : Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if stacked { Text(amount).font(Theme.customerFont(type.body, weight: .medium)) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !stacked {
+                Text(amount).font(Theme.customerFont(type.body, weight: .medium)).lineLimit(1).fixedSize()
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("handoff-batch-row-\(item.id)")
+            // Reading the full terms before signing stays one tap away, as on the list.
+            if batch == nil, model.records.contains(where: { $0.id == item.id }) {
+                Button { detailsID = item.id } label: {
+                    Text("View details").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .padding(.leading, 36)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View details, \(reference)")
+                .accessibilityIdentifier("handoff-batch-details-\(item.id)")
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+    }
+
+    private func batchStatus(_ item: JobEstimateReviewedItem) -> String? {
+        if model.contexts[item.key]?.outcome?.isApproved == true { return "Approved" }
+        switch batch?.states[item.key] {
+        case .running?: return "Approving…"
+        case .stopped?: return model.contexts[item.key]?.outcome == .unknown ? "Needs checking" : "Not approved"
+        case .notAttempted?: return "Not approved yet"
+        default: return nil
+        }
+    }
+
+    private var batchTotalText: String? {
+        guard selectedTotals.count == 1, let total = selectedTotals.first else { return nil }
+        return money(total.amount, currency: total.currency)
+    }
+
+    private var batchTotalsCard: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Selected").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 8)
+                Text("\(model.reviewed.count) estimates").font(Theme.customerFont(type.small))
+            }
+            WellDivider(leading: 0)
+            ForEach(selectedTotals, id: \.currency) { value in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(selectedTotals.count == 1 ? "Total" : "Total \(value.currency)")
+                        .font(Theme.customerFont(type.body, weight: .semibold))
+                    Spacer(minLength: 8)
+                    Text(money(value.amount, currency: value.currency))
+                        .font(Theme.customerFont(type.regular ? type.heading : 22, weight: .bold)).tracking(-0.44)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(PaperCardMetrics.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground()
+        .accessibilityIdentifier("handoff-batch-totals")
+    }
+
+    /// Paper 38C's signature card: brand ink over a hairline, the signer's name under it and Clear.
+    private var signatureCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SignaturePad(strokes: $batchStrokes, ink: Theme.brand, surface: Theme.card)
+                .frame(height: type.regular ? 200 : 120)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Signature box. Sign with your finger.")
+                .accessibilityIdentifier("customer-estimate-signature-pad")
+                .accessibilityValue(SignatureInk.hasInk(batchStrokes) ? "Signature entered" : "Signature required")
+                .overlay {
+                    if !SignatureInk.hasInk(batchStrokes) {
+                        Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                            .allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+                .allowsHitTesting(!batchLocked)
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            HStack(spacing: 12) {
+                TextField("Your full name", text: $batchName, prompt: .placeholder("Your full name"))
+                    .textContentType(.name)
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .frame(minHeight: 44)
+                    .disabled(batchLocked)
+                if SignatureInk.hasInk(batchStrokes), !batchLocked {
+                    Button("Clear") { batchStrokes = [] }
+                        .font(Theme.customerFont(type.small, weight: .semibold))
+                        .foregroundStyle(Theme.brandText)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 12).padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground()
+    }
+
+    /// What happened, in words: which were approved and which were not, and why it stopped.
+    private var batchSummary: (title: String, lines: [String])? {
+        guard let batch, batch.started, !batch.running else { return nil }
+        let approved = model.reviewed.filter { model.contexts[$0.key]?.outcome?.isApproved == true }
+        if approved.count == model.reviewed.count { return ("All \(approved.count) estimates approved", []) }
+        var lines: [String] = []
+        for item in model.reviewed {
+            let reference = "EST-\(item.id.suffix(4).uppercased()) \(item.revision.title)"
+            if model.contexts[item.key]?.outcome?.isApproved == true { lines.append("\(reference): approved") }
+            else if case .stopped(let reason)? = batch.states[item.key] { lines.append("\(reference): not approved. \(reason)") }
+            else { lines.append("\(reference): not approved yet") }
+        }
+        let unconfirmed = model.reviewed.filter { model.contexts[$0.key]?.outcome == .unknown }.count
+        return ("\(approved.count) of \(model.reviewed.count) approved" + (unconfirmed > 0 ? " \u{00B7} \(unconfirmed) needs confirmation" : ""), lines)
+    }
+
+    private var batchCommitTitle: String {
+        let count = model.reviewed.count
+        guard let total = batchTotalText else { return "Approve \(count)" }
+        return "Approve \(count) \u{00B7} \(total)"
+    }
+
+    @ViewBuilder private var batchFooter: some View {
+        let name = batchName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let batch, batch.isComplete {
+            CustomerPresentationCommit(title: "Done", enabled: true, busy: false, type: type) { reviewing = false }
+                .accessibilityIdentifier("handoff-batch-done")
+        } else if let batch, batch.started {
+            if batch.canRetry {
+                CustomerPresentationCommit(title: "Approve remaining (\(batch.remainingKeys.count))", enabled: model.approvalAuthority, busy: false, type: type) {
+                    model.startBatchRun()
+                }
+                .accessibilityIdentifier("handoff-batch-retry")
+            } else if batch.running {
+                CustomerPresentationCommit(title: "Approving…", enabled: false, busy: true, type: type) {}
+            }
+            CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
+                .disabled(batch.running)
+        } else if batch != nil {
+            // From the first tap until the run reports: one disabled commit, so a second tap sends nothing.
+            CustomerPresentationCommit(title: "Approving…", enabled: false, busy: true, type: type) {}
+                .accessibilityIdentifier("handoff-approve-selected")
+        } else {
+            let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(batchStrokes))
+            CustomerPresentationCommit(title: batchCommitTitle, compactTitle: "Approve (\(model.reviewed.count))",
+                                       enabled: reason == nil && model.approvalAuthority, busy: false, type: type) {
+                guard model.batch == nil, let png = SignatureInk.png(batchStrokes),
+                      model.beginBatch(signerName: name, png: png) != nil else { return }
+                model.startBatchRun()
+            }
+            .accessibilityLabel(batchCommitTitle)
+            .accessibilityIdentifier("handoff-approve-selected")
+            if let reason { Text(reason).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
+            CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
+        }
+    }
+
     private func nextPending(after current: String?) -> String? {
         model.reviewed.first { item in
             item.key != current && model.contexts[item.key]?.outcome == nil && model.contexts[item.key]?.running != true && model.contexts[item.key]?.canApprove() == true
@@ -449,6 +1015,7 @@ struct JobEstimateHandoffView: View {
             let _ = { context.continueTitle = nextPending(after: id) == nil ? "See approvals" : "Next estimate" }()
             CustomerEstimatePresentation(estimate: item.estimate, jobID: model.scope.jobID, customerName: model.customerName,
                 preselectedOptionID: item.optionID, handoff: context,
+                currentAuthority: { context.current() && context.canApprove() },
                 onApproved: { _ in }, onDone: {
                     if let next = nextPending(after: id) { checkpointID = next }
                     else { checkpointID = nil; reviewing = false }
@@ -473,11 +1040,14 @@ struct JobEstimateProtectedOwner: View {
     @State private var reviewingDetails: CustomerViewExit?
     var body: some View {
         Group {
-            if let exit = reviewingDetails, let details = presenter.details {
+            if let exit = reviewingDetails, let details = presenter.details, model.isCurrentJob,
+               session.can("customer.edit", feature: "core_crm") {
                 // Staff side, after authentication: the existing review and audited save.
-                CustomerSelfEditReview(model: details) { presenter.authenticatedExit(exit) }
+                CustomerSelfEditReview(model: details, currentAuthority: {
+                    presenter.active === model && model.isCurrentJob && session.can("customer.edit", feature: "core_crm")
+                }) { presenter.authenticatedExit(from: model, exit) }
             } else {
-                CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
+                CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back to technician", authenticateOwner: authenticateOwner) { handBack in
                     JobCustomerDocumentsView(scope: model.scope, documents: model.documents, sourceGeneration: presenter.sourceGeneration,
                         jobTitle: model.jobTitle, customerName: model.customerName, handBack: handBack,
                         onUnlocked: { leave(.done) },
@@ -495,7 +1065,7 @@ struct JobEstimateProtectedOwner: View {
         if model.isCurrentJob, presenter.details?.hasChanges == true, session.can("customer.edit", feature: "core_crm") {
             reviewingDetails = exit
         } else {
-            presenter.authenticatedExit(exit)
+            presenter.authenticatedExit(from: model, exit)
         }
     }
     private func authenticateOwner() async -> Bool {

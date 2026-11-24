@@ -20,11 +20,29 @@ struct SavedWorkReviewView: View {
     @EnvironmentObject private var media: PendingMediaStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var path = NavigationPath()
-    @State private var discardID: String?
+    @State private var discardID: DiscardRequest?
     @State private var work: Task<Void, Never>?
     @State private var workID: UUID?
     @State private var detent: PresentationDetent = .large
+
+    /// The refused change a discard confirmation is about. Only its id is kept.
+    private struct DiscardRequest: Identifiable {
+        let id: String
+    }
+
+    /// Paper 73B pins the two answers under the list. Large type and landscape keep them in the
+    /// scrolling content so the list stays in reach.
+    private var pinsActions: Bool { !typeSize.isAccessibilitySize && verticalSizeClass != .compact }
+    /// A payment recorded on this phone and still waiting to reach the server.
+    private var hasQueuedPayment: Bool {
+        outbox.entries.contains { entry in
+            guard entry.actorId == scope.actorID, entry.organizationId == scope.organizationID else { return false }
+            if case .payment = entry.action { return true }
+            return false
+        }
+    }
 
     private var current: Bool { scope.isCurrent(session: session, api: api, media: media, outbox: outbox) }
     private var editable: Bool { scope.canEdit(session: session, api: api, media: media, outbox: outbox) }
@@ -32,7 +50,7 @@ struct SavedWorkReviewView: View {
     private var snapshot: SavedWorkSnapshot {
         .make(scope: scope, entries: outbox.entries, media: media.items, mediaErrors: media.errors,
               unverifiedMediaIDs: media.unverifiedIDs, uploadingMediaID: media.uploadingID,
-              commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning)
+              commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning ?? outbox.storageWarning)
     }
 
     var body: some View {
@@ -44,8 +62,15 @@ struct SavedWorkReviewView: View {
                         .navigationBarTitleDisplayMode(.inline)
                         .paperDestinations()
                         .toolbar {
-                            ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
-                                Button("Done") { close() }.accessibilityIdentifier("saved-work-done")
+                            // Paper 73A/73B: the 34 Bold heading sits in the content, so the bar
+                            // shows no words. The title stays set for VoiceOver and the tests.
+                            ThorbisToolbarItem(placement: .principal) {
+                                Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
+                            }
+                            // Paper 73A/73B: the back circle alone at the leading edge; "Keep working"
+                            // under the list is the other way out.
+                            ThorbisToolbarItem(placement: .topBarLeading) {
+                                ThorbisBackButton(action: { close() }).accessibilityIdentifier("saved-work-done")
                             }
                         }
                 }
@@ -64,75 +89,148 @@ struct SavedWorkReviewView: View {
             if !allowed { discardID = nil; cancelWork() }
         }
         .onDisappear { cancelWork() }
-        .alert("Discard saved change?", isPresented: Binding(get: { discardID != nil }, set: { if !$0 { discardID = nil } }), presenting: discardID) { id in
-            Button("Discard saved change", role: .destructive) {
-                _ = scope.discardCommand(id, session: session, api: api, media: media, outbox: outbox)
-                discardID = nil
-            }
-            Button("Cancel", role: .cancel) { discardID = nil }
-        } message: { _ in
-            Text("Only this phone's refused change is removed. The server stays unchanged; later eligible changes can retry.")
-        }
+        #if DEBUG
+        // `--paper-preview-saved-work-from-question` counts the sample access change from here. The
+        // confirm below watches the same id and presents its cover when it is set.
+        .onChange(of: discardID?.id) { _, id in if id != nil { PaperPreview.savedWorkDiscardQuestionOpened = true } }
+        #endif
+        // Paper P4 Confirm: the question, what happens, then Cancel beside the red "Discard".
+        .thorbisConfirm(item: $discardID,
+                        title: { _ in "Discard saved change?" },
+                        message: { _ in "Only this phone's refused change is removed. The server stays unchanged; later eligible changes can retry." },
+                        actions: { request in
+                            [ThorbisConfirmAction("Discard", role: .destructive) {
+                                _ = scope.discardCommand(request.id, session: session, api: api, media: media, outbox: outbox)
+                            }]
+                        })
     }
 
     private var review: some View {
         let state = snapshot
+        let refused = rejectedCount(state)
+        let total = state.totalCount
         return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Review saved changes, photos and scans by job.")
-                        .font(Theme.font(17)).foregroundStyle(Theme.muted)
-                    Button { startSync() } label: {
-                        ZStack {
-                            Text("Sync now")
-                            if busy { HStack { ProgressView().tint(Theme.onInk); Spacer() } }
-                        }
-                        .inkCommit(height: 44)
-                    }
-                    .buttonStyle(PressStyle())
-                    .disabled(!editable || session.isOffline || busy)
-                    .accessibilityIdentifier("saved-work-sync")
+            LazyVStack(alignment: .leading, spacing: 0) {
+                // Paper 73A / 73B: a 34 Bold heading and one 15 muted line that counts. Refused
+                // changes lead ("Needs your attention"); otherwise it is the outbox.
+                PaperPageTitle(title: refused > 0 ? "Needs your attention" : "Saved on this phone",
+                               subtitle: refused > 0 ? "\(refused) \(refused == 1 ? "change" : "changes") could not be saved"
+                                   : (total > 0 ? "\(total) \(total == 1 ? "thing" : "things") waiting to send"
+                                                : "Review saved changes, photos and scans by job."),
+                               columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 4)
+                if !pinsActions {
+                    actionButtons.padding(.top, 12)
+                }
+                Group {
                     if session.isOffline {
                         Label("Offline · work stays saved on this phone", systemImage: "wifi.slash")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .padding(.top, 12)
                     } else if busy {
                         Label("Syncing saved work", systemImage: "arrow.triangle.2.circlepath")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .padding(.top, 12)
                     } else if !editable {
                         Text("You can review saved work. Your current access doesn't allow retrying or discarding changes.")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .padding(.top, 12)
                     }
-                    if state.hasListingWarning {
+                    if let warning = outbox.storageWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                            .padding(.top, 12)
+                    } else if state.hasListingWarning {
                         Label("The list may be incomplete. Saved work has not been cleared.", systemImage: "exclamationmark.triangle")
-                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                            .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                            .padding(.top, 12)
                     }
                     #if DEBUG
-                    if PaperPreview.showSavedWorkControls { SavedWorkPreviewControls() }
+                    if PaperPreview.showSavedWorkControls { SavedWorkPreviewControls().padding(.top, 12) }
                     #endif
                 }
+                .padding(.horizontal, 4)
                 if state.groups.isEmpty {
                     Text(state.isSending ? "Waiting for the current sync to finish." : "No pending items listed for this workspace.")
-                        .font(Theme.font(17)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4).padding(.top, 12)
                         .accessibilityIdentifier("saved-work-empty")
                 }
+                // One card per job (radius 20, 12 apart), its name on top, the saved items under it.
                 ForEach(state.groups) { group in
-                    Section {
+                    VStack(alignment: .leading, spacing: 0) {
+                        groupHeader(group)
+                            .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 14).padding(.bottom, 4)
                         ForEach(group.rows) { row in
+                            WellDivider()
                             workRow(row)
+                                .padding(.horizontal, PaperCardMetrics.inset)
                         }
                         if group.rows.contains(where: \.isMedia) {
                             Text("For previews, tags and file retries, open this job's Photos tab.")
-                                .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.leading, 36)
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.bottom, 12)
                         }
-                    } header: { groupHeader(group).padding(.top, 16) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .panelBackground()
+                    .padding(.top, 12)
+                }
+                // Paper's footnote under the list. Left out while a payment recorded on this phone
+                // is still waiting here, so the line never contradicts the list above it.
+                if total > 0 && !hasQueuedPayment {
+                    Text(refused > 0 ? "Money never moves while you are offline." : "Payments are never taken while you are offline.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.top, 12)
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 20)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             .frame(maxWidth: 720, alignment: .leading).frame(maxWidth: .infinity)
         }
-        .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .accessibilityIdentifier("saved-work-review")
-        .accessibilityValue("\(state.totalCount) items listed")
+        .accessibilityValue("\(total) items listed")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if pinsActions {
+                actionButtons
+                    .paperActionBarGround(Theme.canvas, maxWidth: 720)
+            }
+        }
+        .background(Theme.canvas).foregroundStyle(Theme.foreground)
+    }
+
+    /// Paper 73B's two answers: "Send now" on the brand pill, "Keep working" on the fill pill under
+    /// it. Both 50 tall, 8 apart.
+    private var actionButtons: some View {
+        VStack(spacing: 8) {
+            Button { startSync() } label: {
+                ZStack {
+                    Text("Send now")
+                    if busy { HStack { ProgressView().tint(.white); Spacer() } }
+                }
+                .inkCommit()
+            }
+            .buttonStyle(PressStyle())
+            .disabled(!editable || session.isOffline || busy)
+            .accessibilityIdentifier("saved-work-sync")
+            Button { close() } label: {
+                Text("Keep working").paperButton(.commit, tone: .quiet, fills: true)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityIdentifier("saved-work-keep-working")
+        }
+    }
+
+    /// Changes the server refused: what "could not be saved" counts.
+    private func rejectedCount(_ state: SavedWorkSnapshot) -> Int {
+        var count = 0
+        for group in state.groups {
+            for row in group.rows {
+                if case .rejected = row.state { count += 1 }
+            }
+        }
+        return count
     }
 
     @ViewBuilder private func groupHeader(_ group: SavedWorkGroup) -> some View {
@@ -143,8 +241,8 @@ struct SavedWorkReviewView: View {
         }
     }
     private func jobTitle(_ group: SavedWorkGroup) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(group.title).font(Theme.font(17, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(group.title).font(Theme.font(16, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Text(group.shortReference).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
         }
@@ -155,54 +253,83 @@ struct SavedWorkReviewView: View {
     }
     private func openJobLink(_ group: SavedWorkGroup) -> some View {
         NavigationLink(value: PaperRoute.job(group.jobID)) {
-            HStack(spacing: 8) { Text("Open job"); Image(systemName: "chevron.right") }
-                .font(Theme.font(15, weight: .medium)).frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            HStack(spacing: 6) {
+                Text("Open job")
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+            }
+            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+            .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
         }
         .accessibilityLabel("Open job, \(group.title), \(group.shortReference)")
         .accessibilityIdentifier("saved-work-open-\(group.jobID)")
     }
     private func workRow(_ row: SavedWorkRow) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: row.symbol).font(.system(size: 18)).foregroundStyle(row.state.needsReview ? Theme.warning : Theme.muted)
-                .frame(width: 24, height: 24).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(row.title).font(Theme.font(17, weight: .medium))
-                    Text(row.state.title).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    if let reason = row.state.reason { Text(reason).font(Theme.font(15)).foregroundStyle(Theme.muted) }
+        let refused: Bool = {
+            if case .rejected = row.state { return true }
+            return false
+        }()
+        // Paper 73B: the words lead (no mark) and a waiting item's state trails as one 14 Medium
+        // word. An item that needs review keeps its state and reason under the title (Paper 73A).
+        let trailing = !row.state.needsReview && !typeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title).font(Theme.font(16, weight: .medium))
+                    if row.state.needsReview {
+                        Text(row.state.title).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    } else if !trailing {
+                        statusWord(row)
+                    }
+                    if let reason = row.state.reason {
+                        Text(reason).font(Theme.font(14)).foregroundStyle(refused ? Theme.destructive : Theme.muted)
+                    }
                     Text(row.date.stampLabel()).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityElement(children: .combine)
-                .accessibilityValue((row.isMedia ? "Captured " : "Saved ") + row.date.stampLabel())
-                if case .rejected = row.state {
-                    Group {
-                        if typeSize.isAccessibilitySize {
-                            VStack(alignment: .leading, spacing: 0) { recoveryButtons(row) }
-                        } else {
-                            HStack(spacing: 20) { recoveryButtons(row) }
-                        }
-                    }
-                    .font(Theme.font(15, weight: .medium))
-                    .disabled(!editable || busy)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if trailing { statusWord(row) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            .accessibilityValue((row.isMedia ? "Captured " : "Saved ") + row.date.stampLabel())
+            if refused {
+                Group {
+                    if typeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) { recoveryButtons(row) }
+                    } else {
+                        HStack(spacing: 8) { recoveryButtons(row) }
+                    }
+                }
+                .disabled(!editable || busy)
+            }
         }
-        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 11)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("saved-work-\(row.id)")
     }
 
+    /// A waiting item's state in Paper 73B's words: "Sending" in the brand's text colour while it
+    /// goes, "Waiting for signal" in the warning tone with no connection, otherwise its own state.
+    private func statusWord(_ row: SavedWorkRow) -> some View {
+        let sending = row.state == .uploading
+        let noSignal = session.isOffline && (row.state == .waitingToSync || row.state == .waitingToUpload)
+        let word = sending ? "Sending" : (noSignal ? "Waiting for signal" : row.state.title)
+        return Text(word).font(Theme.font(14, weight: .medium))
+            .foregroundStyle(sending ? Theme.brandText : (noSignal ? Theme.warning : Theme.muted))
+    }
+
+    /// Paper 73A: the two answers as pills, the quieter one on the field fill.
     @ViewBuilder private func recoveryButtons(_ row: SavedWorkRow) -> some View {
         Button { retryCommand(row.originalID) } label: {
-            Text("Retry").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            Text("Retry").paperButton(.secondary, tone: .tinted)
         }
+        .buttonStyle(PressStyle())
         .accessibilityLabel("Retry \(row.title)")
         .accessibilityIdentifier("saved-work-retry-\(row.originalID)")
-        Button(role: .destructive) { if editable { discardID = row.originalID } } label: {
-            Text("Dismiss").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+        Button(role: .destructive) { if editable { discardID = DiscardRequest(id: row.originalID) } } label: {
+            Text("Dismiss").paperButton(.secondary, tone: .quiet)
         }
+        .buttonStyle(PressStyle())
         .accessibilityLabel("Dismiss \(row.title)")
         .accessibilityIdentifier("saved-work-dismiss-\(row.originalID)")
     }

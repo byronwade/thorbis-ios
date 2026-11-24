@@ -12,7 +12,7 @@ final class JobCustomerLocationsUITests: XCTestCase {
         app.launch()
         let directions = app.buttons["job-directions"]
         XCTAssertTrue(directions.waitForExistence(timeout: 20))
-        let menu = app.otherElements["Directions to"]
+        let menu = app.scrollViews["Directions to"]
         XCTAssertFalse(menu.exists, "Nothing is chosen for the person before they tap Directions")
         directions.tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 5), "Directions opens the location chooser")

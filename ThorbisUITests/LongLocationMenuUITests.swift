@@ -18,6 +18,12 @@ final class LongLocationMenuUITests: XCTestCase {
         app.launch()
         let add = app.buttons["Add equipment"]
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        // Paper v2 (48N): equipment lives on the customer's Equipment page.
+        let equipmentPage = app.buttons["customer-hub-equipment"]
+        XCTAssertTrue(equipmentPage.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !equipmentPage.isHittable { app.swipeUp() }
+        equipmentPage.tap()
+        XCTAssertTrue(add.waitForExistence(timeout: 30), app.debugDescription)
         // The page pins New job at the bottom (#203). XCUITest calls a control under that bar (or just
         // past the screen edge) hittable, and the tap then lands on the bar, so scroll until the plus
         // sits clear above it.

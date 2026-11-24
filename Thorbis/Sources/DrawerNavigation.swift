@@ -4,9 +4,8 @@ import UIKit
 // MARK: - Phone drawer (simplified 2026-10-31, after owner feedback on build 125)
 //
 // The phone's navigation: a side drawer that slides in from the left and pushes the place showing to
-// the right, where it waits as a rounded card. Cream sheet (2026-11-01, C-Nav.dc.html): the business
-// name and Search, every place the role can reach grouped under Work, Money, Shop and On this phone,
-// a few recent records as plain words, then New job and the gear.
+// the right, where it waits as a rounded card. Paper v2 (Navigation 29N/57N/58N): the company and
+// the + circle, Search or ask, the role's places in Paper's order, and the person at the foot.
 // Every screen in a place offers the menu circle: roots in their header, pushed screens beside Back.
 // An edge swipe opens it on a root; on a pushed screen the edge swipe stays Back.
 // iPad at regular width keeps its sidebar (TabletRoot).
@@ -15,13 +14,27 @@ import UIKit
 /// only for unread Inbox notices or saved work that needs the person.
 struct DrawerMenuCircle: View {
     let control: PaperDrawerControl
-    var size: CGFloat = 40
+    var size: CGFloat = 44
 
     var body: some View {
+        if control.showsCircle { circle } else {
+            // The bottom bar's More opens the drawer; the row keeps the circle's height.
+            Color.clear.frame(width: 0, height: size).accessibilityHidden(true)
+        }
+    }
+
+    private var circle: some View {
         Button(action: control.open) {
-            CreamCircleLabel(symbol: "line.3.horizontal", size: size)
+            // Paper 18: two lines, the lower one short; the 9pt brand dot rides the circle's top
+            // right (1 in), ringed 2pt in the canvas so it reads as cut out of the circle.
+            CreamCircleLabel(symbol: "line.3.horizontal", size: size, glyph: .menu)
                 .overlay(alignment: .topTrailing) {
-                    if control.hasNews { DrawerDot().offset(x: -6, y: 6) }
+                    if control.hasNews {
+                        Circle().fill(Theme.brand).frame(width: 5, height: 5)
+                            .padding(2).background(Theme.background, in: Circle())
+                            .offset(x: -1, y: 1)
+                            .accessibilityHidden(true)
+                    }
                 }
         }
         .buttonStyle(PressStyle())
@@ -52,23 +65,15 @@ struct DrawerRecent: Identifiable {
 
 /// The drawer's words for a place.
 enum DrawerPlaces {
-    /// Use the web's words for the shared destinations; Home is the owner's Today view.
+    /// Paper v2's words: Dashboard, Messages, Team.
     static func title(_ item: MenuItem, role: WorkRole) -> String {
-        switch item {
-        case .home: "Today"
-        case .schedule: "Schedule"
-        case .team: "Team"
-        default: item.title
-        }
+        item.title
     }
 }
 
-/// The drawer itself (Cream sheet, C-Nav.dc.html): the business name and a search circle on top,
-/// then every place this role can reach grouped under Work, Money, Shop and On this phone (pinned
-/// places from Edit menu lead), recent records, and at the foot the ink New job commit and the
-/// Settings circle. The list fades at its bottom edge where it continues under the foot.
+/// The drawer itself (Paper v2, Navigation 29N/57N/58N). `recents` and `openRecent` are kept so
+/// callers compile; Paper's drawer lists no recent records.
 struct AppDrawer: View {
-    @AppStorage("thorbis.sidebar.recentCollapsed") private var recentCollapsed = false
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
     @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
@@ -77,17 +82,22 @@ struct AppDrawer: View {
     /// The place showing (a MenuItem id or "local-<section>").
     let current: String
     let sections: DrawerSections
+    /// This person can open Messages (it may be in the bottom bar rather than these rows).
+    var hasMessages = false
     let count: (MenuItem) -> PlaceCount?
     let recents: [DrawerRecent]
-    /// Saved work on this phone: its row under On this phone, its words on the gear, its dot when it needs the person.
+    /// Saved work on this phone: the gear says it and wears its dot when it needs the person; its
+    /// review is a row in Settings.
     var savedWork: AppBottomBar.Sync?
     var create: PaperCreateAction?
-    /// The gear circle's menu: businesses, saved work, Add a business, Settings, Edit menu.
-    let settingsItems: [ThorbisMenuItem]
+    /// Paper 29A, from the workspace name: every business (the open one checked) and Add a business.
+    let workspaceItems: [ThorbisMenuItem]
+    /// Paper 65: the gear opens Settings.
+    let openSettings: () -> Void
     /// At accessibility sizes the drawer is full width, so it carries its own close circle.
     let showsClose: Bool
     /// False while the drawer sits closed under the card (and from the moment it starts closing). The
-    /// commit's context menu and the gear's popover are UIKit-hosted and stay in the accessibility
+    /// commit's context menu and the workspace menu's popover are UIKit-hosted and stay in the accessibility
     /// tree even when the drawer is hidden, so they are only built while the drawer can be seen.
     var showsControls = true
     /// False once the drawer has slid shut: its scroll view (UIKit-hosted too) would otherwise sit
@@ -101,6 +111,9 @@ struct AppDrawer: View {
     let openRecent: (RecentItems.Item) -> Void
     let openFavorite: (ScopedRecordFavorites.Visible) -> Void
     var openSavedWork: () -> Void = {}
+    /// Paper 77: opens the Notifications screen. Nil when the person has no access to job notices;
+    /// the bell then opens Messages, as before.
+    var openNotifications: (() -> Void)? = nil
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -110,45 +123,44 @@ struct AppDrawer: View {
             // accessibility tree behind the card.
             if showsRows {
                 header
-                if showsControls, let create { newMenu(create) }
+                searchField
                 rows
             } else { Spacer(minLength: 0) }
-            if showsControls { bottomControls }
+            if showsControls { footer }
         }
-        .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(Theme.foreground)
-        // C-Nav: the drawer sits on the canvas; the place it pushed aside is the panel.
-        .background(Theme.background.ignoresSafeArea())
+        // Paper v2 (29N/57N/58N): the drawer is a panel floating over the place (`DrawerPanel`),
+        // which draws its ground; full width at accessibility sizes it is the sidebar surface.
+        .background { if showsClose { Theme.sidebar.ignoresSafeArea() } }
     }
 
     private var rows: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                // Notifications is a row like any other place, word and all, not a footer button.
+                if openNotifications != nil || hasMessages || sections.places.contains(.inbox) {
+                    PlaceRow(title: "Notifications", symbol: "bell", tint: Theme.subtle, here: current == "notifications",
+                             count: nil, id: "drawer-notifications", height: role != .technician ? 40 : 46) {
+                        if let openNotifications { openNotifications() } else { openPlace(.inbox) }
+                    }
+                }
                 PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: role) },
                            isCurrent: { current == $0.rawValue }, isCurrentLocal: { current == "local-\($0.rawValue)" },
-                           count: count, idPrefix: "drawer", savedWork: savedWork,
-                           openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork,
-                           openFavorite: openFavorite)
-                if !recents.isEmpty {
-                    Button { recentCollapsed.toggle() } label: {
-                        HStack { Text("Recent"); Spacer(); Image(systemName: recentCollapsed ? "chevron.right" : "chevron.down") }
-                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityValue(recentCollapsed ? "Collapsed" : "Expanded")
-                    .accessibilityIdentifier("drawer-recent-disclosure")
-                    if !recentCollapsed { ForEach(recents.prefix(5)) { recentRow($0) } }
-                }
+                           count: count, idPrefix: "drawer", compactRows: role != .technician, showsFavorites: false,
+                           openPlace: openPlace, openLocal: openLocal)
             }
-            .padding(.bottom, 24)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 20)
         }
         .scrollIndicators(.hidden)
-        // "Where a list continues, fade the edge": the last rows fade into the foot.
+        // "Where a list continues, fade the edge": only the last 20pt soften into the foot, so a
+        // row is never left looking half cut off.
         .mask {
-            LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9),
-                                   .init(color: .black.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: 20)
+            }
         }
         .accessibilityIdentifier("drawer-rows")
         #if DEBUG
@@ -158,140 +170,149 @@ struct AppDrawer: View {
 
     // MARK: Header
 
+    /// Paper v2: the company's initial on a brand square, its name at 17 Semibold (the workspace
+    /// menu), and the + circle (New) at the trailing edge.
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Workspace, \(title)") {
-                HStack(spacing: 6) {
-                    Text(title).font(Theme.font(18, weight: .medium)).tracking(-0.2)
-                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1).truncationMode(.tail)
-                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
+            ThorbisMenu(items: workspaceItems, title: "Switch workspace", accessibilityLabel: "Workspace, \(title)") {
+                HStack(spacing: 10) {
+                    Text(String(title.prefix(1)).uppercased())
+                        .font(Theme.font(14, weight: .bold)).foregroundStyle(.white)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
+                        .frame(width: 28, height: 28)
+                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .accessibilityHidden(true)
+                    // A long company name wraps to a second line rather than ending in "…".
+                    Text(title).font(Theme.font(17, weight: .semibold))
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2).multilineTextAlignment(.leading).truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("drawer-workspace-menu")
             .accessibilityFocused(titleFocus)
-            Button(action: search) { CreamCircleLabel(symbol: "magnifyingglass") }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Search")
-                .accessibilityIdentifier("drawer-search")
+            if showsControls, let create { newCircle(create) }
             if showsClose {
-                Button(action: close) { CreamCircleLabel(symbol: "xmark") }
+                Button(action: close) { CreamCircleLabel(symbol: "xmark", size: 44) }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Close menu")
                     .accessibilityIdentifier("drawer-close")
             }
         }
-        .padding(.leading, 12).padding(.trailing, 2)
-        .padding(.top, 6).padding(.bottom, 4)
+        .padding(.horizontal, 14)
+        .padding(.top, 16).padding(.bottom, 10)
     }
 
-    /// Web's New menu sits under the workspace; the existing direct New job shortcut remains below.
-    @ViewBuilder private func newMenu(_ create: PaperCreateAction) -> some View {
+    /// Paper v2: "Search or ask" in a 42pt field on the card, under the header.
+    private var searchField: some View {
+        Button(action: search) {
+            HStack(spacing: 8) {
+                PaperIcon(.searchSmall, size: 16, color: Theme.muted)
+                Text("Search or ask").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Search")
+        .accessibilityIdentifier("drawer-search")
+        .padding(.horizontal, 12).padding(.bottom, 8)
+    }
+
+    /// The + circle: New's choices in a menu, or New job straight away when there is only one.
+    @ViewBuilder private func newCircle(_ create: PaperCreateAction) -> some View {
+        let circle = PaperIcon(.plusLight, size: 18)
+            .frame(width: 44, height: 44)
+            .background(Theme.card, in: Circle())
         if !create.choices.isEmpty {
             ThorbisMenu(items: create.choices.map { choice in
                 ThorbisMenuItem(choice.title, icon: choice.symbol, isDisabled: !choice.enabled, action: choice.run)
-            }, title: "New", accessibilityLabel: "New") {
-                Label("New", systemImage: "plus")
-                    .font(Theme.font(15, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .padding(.horizontal, 12).contentShape(Rectangle())
-            }
+            }, title: "New", accessibilityLabel: "New") { circle }
             .accessibilityIdentifier("drawer-new-menu")
         } else {
-            Button(action: create.run) {
-                Label("New", systemImage: "plus")
-                    .font(Theme.font(15, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .padding(.horizontal, 12).contentShape(Rectangle())
-            }
-            .buttonStyle(RowPressStyle())
-            .accessibilityIdentifier("drawer-new-menu")
+            Button(action: create.run) { circle }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("New")
+                .accessibilityIdentifier("drawer-new-menu")
         }
     }
 
-    /// A recent record as plain words, like ChatGPT's recents. A job under way wears its status word.
-    private func recentRow(_ recent: DrawerRecent) -> some View {
-        Button { openRecent(recent.item) } label: {
-            HStack(alignment: .center, spacing: 10) {
-                Text(recent.item.title)
-                    .font(Theme.font(15))
-                    .foregroundStyle(Theme.subtle)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                    .fixedSize(horizontal: false, vertical: typeSize.isAccessibilitySize)
-                Spacer(minLength: 8)
-                if recent.inProgress, let status = recent.status { StatusLabel(jobStatus: status, emphasis: .quiet).fixedSize() }
+
+    // MARK: Bottom
+
+    private var personName: String { session.user?.name ?? session.user?.email ?? "You" }
+    private var personInitials: String {
+        let words = personName.split(separator: " ").prefix(2)
+        return words.map { String($0.prefix(1)) }.joined().uppercased()
+    }
+    private var roleWord: String {
+        switch role {
+        case .technician: "Technician"
+        case .office: "Office"
+        case .owner: "Owner"
+        }
+    }
+
+    /// The foot is one row: the person (initials, name, role) with a gear at the trailing edge.
+    /// The whole row opens Settings and wears saved work's dot when it needs the person.
+    /// Notifications is a row in the list above (owner, 2026-11-19: "clean up the user profile side").
+    private var footer: some View {
+        Button(action: openSettings) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(personInitials)
+                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .dynamicTypeSize(...DynamicTypeSize.large)
+                    .frame(width: 38, height: 38)
+                    .background(Theme.brandSurface, in: Circle())
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(personName).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if savedWork?.needsPerson == true { DrawerDot() }
+                PaperIcon(.gear, size: 18, color: Theme.muted)
             }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Theme.hairline).frame(height: 1).padding(.horizontal, 16).accessibilityHidden(true)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([recent.item.title, recent.inProgress ? recent.status?.statusLabel : nil].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityHint(recent.item.kind == .job ? "Opens the job" : "Opens the customer")
+        .accessibilityLabel("Settings")
         .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("drawer-recent-\(recent.item.id)")
-        .contextMenu {
-            let kind: ScopedRecordFavorites.Kind = recent.item.kind == .job ? .job : .customer
-            let selected = recordFavorites.isBound(to: ScopedRecordFavorites.currentScope(session: session, api: api)) &&
-                recordFavorites.entries.contains { $0.kind == kind && $0.id == recent.item.id.lowercased() }
-            Button(selected ? "Remove from favorites" : "Add to favorites", systemImage: selected ? "star.slash" : "star") {
-                let scope = ScopedRecordFavorites.currentScope(session: session, api: api)
-                let allowed = kind == .job ? session.can("job.view", feature: "jobs") : session.can("customer.view", feature: "core_crm")
-                guard recordFavorites.isBound(to: scope), allowed else { return }
-                recordFavorites.toggle(kind, id: recent.item.id)
-            }
-        }
+        .accessibilityValue([personName, roleWord, savedWork?.words].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityIdentifier("drawer-settings")
     }
+}
 
-    // MARK: Bottom
-
-    /// Screenshot only: `--paper-preview-gear-open` (with `--paper-preview-drawer-open`) opens the gear's menu.
-    private var gearOpensForPreview: Bool {
-        #if DEBUG
-        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-gear-open")
-        #else
-        false
-        #endif
+/// Paper 29N / 57N / 58N: the drawer is a panel floating over the dimmed place, 8 from the left
+/// and bottom edges and under the status bar: radius 30, a step lighter than the sidebar ground
+/// (#1B1B1B), a 1pt border and a deep soft shadow (0 20 50, black 50%).
+enum DrawerPanel {
+    static let radius: CGFloat = 30
+    static let inset: CGFloat = 8
+    static let fill = Theme.drawerPanel
+    static var shape: RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
+    /// The panel's bottom corners sit 8 from the screen's own rounded corners, so they follow that
+    /// curve (the screen's radius less the gap) instead of being cut by it; never tighter than 30.
+    static func bottomRadius(topInset: CGFloat) -> CGFloat {
+        max(radius, DrawerMotion.cornerRadius(topInset: topInset) - inset)
     }
-
-    /// The ink New job commit and the Settings circle, pinned under the list. The gear wears saved
-    /// work's dot when it needs the person, and says what is still on the phone.
-    private var bottomControls: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if let create { createCommit(create) } else { Spacer(minLength: 0) }
-            // The gear sits at the bottom edge: its menu grows up so every row (saved work, Settings,
-            // Edit menu) stays on screen and clear of the home indicator.
-            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses",
-                        opensOnAppear: gearOpensForPreview, arrowEdge: .bottom) {
-                CreamCircleLabel(symbol: "gearshape", size: 44)
-                    .overlay(alignment: .topTrailing) {
-                        if savedWork?.needsPerson == true { DrawerDot().offset(x: -3, y: 3) }
-                    }
-            }
-            .accessibilityValue(savedWork?.words ?? "")
-            .accessibilityIdentifier("drawer-settings")
-        }
-        .padding(.horizontal, 4)
-        .padding(.top, 10).padding(.bottom, 8)
+    static func shape(topInset: CGFloat) -> UnevenRoundedRectangle {
+        let bottom = bottomRadius(topInset: topInset)
+        return UnevenRoundedRectangle(topLeadingRadius: radius, bottomLeadingRadius: bottom,
+                                      bottomTrailingRadius: bottom, topTrailingRadius: radius, style: .continuous)
     }
-
-    private func createCommit(_ create: PaperCreateAction) -> some View {
-        Button(action: create.run) {
-            HStack(spacing: 6) {
-                Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
-                    .accessibilityHidden(true)
-                Text(create.label).lineLimit(1).minimumScaleFactor(0.8)
-            }
-            .inkCommit(height: 44)
-        }
-        .buttonStyle(PressStyle())
-        .contextMenu {
-            ForEach(create.choices) { choice in
-                Button(action: choice.run) { Label(choice.title, systemImage: choice.symbol) }
-            }
-        }
-        .accessibilityIdentifier("drawer-new")
-    }
+    /// How dark the place behind goes once the panel is fully open.
+    static func scrim(dark: Bool) -> Double { dark ? 0.5 : 0.28 }
 }
 
 /// The card's outline: a rounded rectangle grown past the view's frame by the safe areas, so the
@@ -326,6 +347,11 @@ struct DrawerMotion {
     /// at accessibility sizes, where the words need it.
     static func width(screen: CGFloat, accessibilitySize: Bool) -> CGFloat {
         accessibilitySize ? screen : (screen * 0.8).rounded()
+    }
+
+    /// Paper 29N: the floating panel is 306 on a 390 screen (84 short of it), never wider than 340.
+    static func panelWidth(screen: CGFloat, accessibilitySize: Bool) -> CGFloat {
+        accessibilitySize ? screen : min(340, max(260, screen - 84))
     }
 
     /// The card's corner once open, close to the screen's own corner: Dynamic Island phones (top

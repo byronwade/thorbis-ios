@@ -37,6 +37,13 @@ struct OrganizationRoleDetail: Decodable {
     let revision: Revision
 }
 
+/// What creating or saving a role answers: the role at its new version, without its name or
+/// grants. Those are read with `organizationRole(_:)`.
+struct OrganizationRoleIdentity: Decodable {
+    let id: String
+    let currentRevision: Int
+}
+
 extension APIClient {
     func roleBuilderCatalog() async throws -> RoleBuilderCatalog {
         try await send("GET", "/v1/organization/role-presets")
@@ -47,7 +54,7 @@ extension APIClient {
         return try await send("GET", "/v1/organization/roles/\(id)")
     }
 
-    func createOrganizationRole(name: String, description: String, idempotencyKey: String) async throws -> OrganizationRoleDetail {
+    func createOrganizationRole(name: String, description: String, idempotencyKey: String) async throws -> OrganizationRoleIdentity {
         struct Body: Encodable { let idempotencyKey: String; let name: String; let description: String; let grants: [RoleGrant]; let reason: String }
         return try await send("POST", "/v1/organization/roles",
                               body: Body(idempotencyKey: idempotencyKey, name: name, description: description, grants: [],
@@ -56,7 +63,7 @@ extension APIClient {
 
     /// The role id comes from the route only.
     func reviseOrganizationRole(_ id: String, expectedRevision: Int, name: String, description: String,
-                                grants: [RoleGrant]) async throws -> OrganizationRoleDetail {
+                                grants: [RoleGrant]) async throws -> OrganizationRoleIdentity {
         struct Body: Encodable { let expectedRevision: Int; let name: String; let description: String; let grants: [RoleGrant]; let reason: String }
         guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid role ID", status: nil, detail: id) }
         return try await send("POST", "/v1/organization/roles/\(id)/revise",
@@ -69,6 +76,8 @@ extension APIClient {
 /// permission on; "Whose" picks how far it reaches (their own jobs, their team, everything).
 struct RoleEditorView: View {
     let roleID: String
+    /// How many people hold this role, for Paper 63's "Role · 2 members"; nil leaves it out.
+    var memberCount: Int? = nil
     let onSaved: () async -> Void
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
@@ -81,59 +90,105 @@ struct RoleEditorView: View {
     @State private var denies: [RoleGrant] = []
     @State private var busy = false
     @State private var error: String?
-    @State private var search = ""
+    /// Paper 63's •••: Rename role, which holds the name and what the role is for.
+    @State private var renaming = false
     /// Said under the name when Save is pressed without one; clears as they type.
     @State private var nameProblem: String?
-    @FocusState private var nameFocused: Bool
 
     private var groups: [(String, [RoleBuilderCatalog.Capability])] {
-        let visible = (catalog?.capabilities ?? []).filter {
-            search.isEmpty || $0.label.localizedCaseInsensitiveContains(search) || $0.description.localizedCaseInsensitiveContains(search)
-        }
+        let visible = catalog?.capabilities ?? []
         return Dictionary(grouping: visible, by: \.resource)
             .map { ($0.key, $0.value.sorted { $0.label < $1.label }) }
             .sorted { $0.0 < $1.0 }
     }
 
     var body: some View {
-        List {
-            Section {
-                TextField("Role name", text: $name, prompt: .placeholder("Role name"))
-                    .focused($nameFocused)
-                    .onChange(of: name) { _, _ in nameProblem = nil }
-                if let nameProblem { FieldProblem(message: nameProblem) }
-                TextField("What this role is for", text: $summary, prompt: .placeholder("What this role is for"), axis: .vertical).lineLimit(1...3)
-            }
-            ForEach(groups, id: \.0) { resource, capabilities in
-                Section(resource.replacingOccurrences(of: "_", with: " ").capitalized) {
-                    ForEach(capabilities) { capability in capabilityRow(capability) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Paper 63: "Role · 2 members" small above the role's name in 34 Bold.
+                PaperPageTitle(eyebrow: roleLine, title: name.isEmpty ? "Role" : name)
+                if let nameProblem { FieldProblem(message: nameProblem).padding(.horizontal, Theme.gutter).padding(.top, 2) }
+
+                if catalog == nil && error == nil {
+                    SkeletonRows(count: 6, leading: false).padding(.top, 16)
+                }
+                // One card per thing a permission touches, a switch on each row.
+                ForEach(groups, id: \.0) { resource, capabilities in
+                    PaperSection(Self.groupTitle(resource), count: nil) {
+                        ForEach(capabilities) { capability in
+                            if capability.id != capabilities.first?.id { WellDivider() }
+                            capabilityRow(capability)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                                .frame(minHeight: 56)
+                        }
+                    }
+                    .paperCardMargin().padding(.top, 16)
+                }
+                if let error { ErrorBanner(message: error).padding(.top, 12) }
+                // Paper 63: the one rule no role changes, centred under the last card.
+                if catalog != nil {
+                    Text("Owner always has full access and cannot be restricted")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                    // Paper 63 ends on one quiet full-width pill on the card tone. Paper's reads
+                    // "Reset to default"; a custom role has no default to go back to, so the pill
+                    // is the screen's one action: saving what the switches say.
+                    Button { attemptSave() } label: {
+                        HStack(spacing: 8) {
+                            if busy { ProgressView().tint(Theme.foreground) }
+                            Text("Save changes")
+                        }
+                        .paperButton(.commit, tone: .quiet, fills: true)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy || detail == nil)
+                    .paperCardMargin().padding(.top, 14)
+                    .accessibilityIdentifier("role-save")
                 }
             }
-            if let error { Section { ListErrorRow(message: error) } }
+            .padding(.bottom, 32)
         }
-        .searchable(text: $search, prompt: "Find a permission")
-        .scrollContentBackground(.hidden)
+        .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
-        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.canvas) } }
-        .navigationTitle(name.isEmpty ? "Role" : name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ThorbisToolbarItem(placement: .topBarTrailing) {
-                // Not pre-disabled for a blank name: pressing says what's missing under it. It stays
-                // off only while the role is loading or saving.
-                Button("Save") {
-                    if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        nameProblem = "Name the role, like \u{201C}Lead technician.\u{201D}"
-                        nameFocused = true
-                    } else {
-                        Task { await save() }
-                    }
+                // Paper 63: the ••• circle. The name and what the role is for live behind it.
+                ThorbisMenu(items: [ThorbisMenuItem("Rename role", icon: "pencil") { renaming = true }],
+                            title: name.isEmpty ? "Role" : name, accessibilityLabel: "Role actions") {
+                    CreamCircleLabel(symbol: "ellipsis", glyph: .more)
                 }
-                .disabled(busy || detail == nil)
             }
         }
+        .thorbisConfirm("Rename role", message: "Save changes to keep the new name.", isPresented: $renaming,
+                        fields: [ThorbisConfirmField(label: "Role name", text: $name),
+                                 ThorbisConfirmField(label: "What this role is for", text: $summary)]) { nameProblem = nil }
         .task { await load() }
+    }
+
+    /// "team_and_company" → "Team and company" (Paper 63's group labels are sentence case).
+    private static func groupTitle(_ resource: String) -> String {
+        let words = resource.replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+
+    private var roleLine: String {
+        guard let memberCount else { return "Role" }
+        return "Role \u{00B7} \(memberCount) member\(memberCount == 1 ? "" : "s")"
+    }
+
+    /// Pressing Save with a blank name says what's missing under the title and opens Rename.
+    private func attemptSave() {
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            nameProblem = "Name the role, like \u{201C}Lead technician.\u{201D}"
+            renaming = true
+        } else {
+            Task { await save() }
+        }
     }
 
     @ViewBuilder private func capabilityRow(_ capability: RoleBuilderCatalog.Capability) -> some View {
@@ -143,11 +198,12 @@ struct RoleEditorView: View {
                 if on { grants[capability.id] = RoleGrant(capability: capability.id, scope: capability.allowedScopes.first?.id ?? "organization") }
                 else { grants[capability.id] = nil }
             })) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(capability.label).font(Theme.font(15, weight: .medium))
-                    Text(capability.description).font(Theme.font(12)).foregroundStyle(Theme.muted)
-                }
+                // Paper 63: one line per permission in 16 Medium; what it means is read to VoiceOver.
+                Text(capability.label).font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .tint(Theme.brand)
+            .accessibilityHint(capability.description)
             if enabled, capability.allowedScopes.count > 1 {
                 ThorbisSelect(options: capability.allowedScopes.map { ($0.id, $0.label) },
                               selection: Binding(get: { grants[capability.id]?.scope ?? "" },

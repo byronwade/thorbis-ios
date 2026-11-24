@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Customer intake as on the web: a name is all that's required, the rest helps the
 /// technician call, text and find the place.
@@ -9,6 +10,9 @@ struct NewCustomerSheet: View {
     var initialPhone: String = ""
     var initialAddress: String = ""
     var onCreated: (Customer) -> Void = { _ in }
+    /// Paper 47A's "Save and book a job" under the cards. Off where the sheet is already part of a
+    /// booking (New job's own "new customer").
+    var offersBooking = false
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
@@ -17,11 +21,20 @@ struct NewCustomerSheet: View {
     @State private var phone = ""
     @State private var email = ""
     @State private var address = ""
+    /// "How they found us": free words, up to 120 characters (customers.create referralSource).
+    @State private var referral = ""
+    @State private var editingReferral = false
+    /// The saved customer whose new job is open ("Save and book a job").
+    @State private var bookFor: Customer?
+    /// Set once the customer is saved while their address is not a property yet: Save then tries
+    /// only the property again and never makes a second customer.
+    @State private var owed: NewCustomerSave.Owed?
     @State private var busy = false
     @State private var error: String?
     @State private var lookup: CustomerPhoneLookup = .notApplicable
     @FocusState private var focused: Field?
     @State private var commitPressed = false
+    @State private var keyboardShown = false
     /// The email is checked once they leave the field or press Save.
     @State private var emailChecked = false
 
@@ -36,55 +49,100 @@ struct NewCustomerSheet: View {
 
     var body: some View {
         let canCreate = session.can("customer.create", feature: "core_crm")
-        // The shared modal (Add equipment, Add discount): the title row with Cancel, the form, and one
-        // ink commit that is never pre-disabled unless the role can't add customers (and says so).
-        ThorbisModalSheet(title: "New customer", closeLabel: "Cancel", onClose: busy ? nil : { dismiss() },
-                          detents: [.large], commitTitle: "Save customer", commitSymbol: "person.badge.plus", busy: busy,
-                          commitDisabledReason: canCreate ? nil : "Your role can't add customers. Ask your office.",
-                          commit: { Task { await commit() } },
-                          onKeyboardDone: { focused = nil }) {
-                // v2 form: the label stays above, examples as placeholders, help under the field and
-                // the error in its place, related fields clustered by space, optional fields marked.
-                VStack(alignment: .leading, spacing: 32) {
-                    FormCluster(title: "Who") {
-                        FormField(label: "Name", help: "As it goes on the invoice.", error: nameProblem) {
-                            input($request.name, prompt: "Danielle Marlowe", focus: .name, label: "Name")
+        // Paper 47A: Cancel and Save customer in the title row, then the form as grouped cards on
+        // the canvas. Save is never pre-disabled unless the role can't add customers (and says so).
+        VStack(spacing: 0) {
+            header(canCreate: canCreate)
+            ScrollView {
+                VStack(spacing: 12) {
+                    if !canCreate {
+                        Text("Your role can't add customers. Ask your office.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let error { ErrorBanner(message: error, tint: Theme.destructive, outer: 0) }
+                    Group {
+                        card {
+                            field("Name", text: $request.name, prompt: "Danielle Marlowe", focus: .name, error: nameProblem)
                                 .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
-                        }
-                        FormField(label: "Phone", optional: true, help: "Used to call and text about visits.", error: phoneProblem) {
-                            input($phone, prompt: "(916) 555-0142", focus: .phone, label: "Phone")
+                            WellDivider(leading: 16)
+                            field("Mobile", text: $phone, prompt: "(916) 555-0142", focus: .phone, error: phoneProblem)
                                 .textContentType(.telephoneNumber).keyboardType(.phonePad)
-                        }
-                        if case .found(let existing) = lookup { existingCustomerCard(existing) }
-                        FormField(label: "Email", optional: true, help: "Receipts and estimates go here.",
-                                  error: emailChecked && !emailValid ? "Check the email address, like danielle@example.com." : nil) {
-                            input($email, prompt: "danielle@example.com", focus: .email, label: "Email")
+                            WellDivider(leading: 16)
+                            field("Email", text: $email, prompt: "danielle@example.com", focus: .email,
+                                  error: emailChecked && !emailValid ? "Check the email address, like danielle@example.com." : nil)
                                 .textContentType(.emailAddress).keyboardType(.emailAddress)
                                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                                 .submitLabel(.next).onSubmit { focused = .address }
                         }
-                    }
-                    FormCluster(title: "Where") {
-                        FormField(label: "Service address", optional: true, help: "Where the truck goes. You can add more places later.", error: addressProblem) {
-                            input($address, prompt: "412 Birchwood Ln, Sacramento", focus: .address, label: "Service address")
-                                .textContentType(.fullStreetAddress).submitLabel(.done)
-                                .onSubmit { Task { await commit() } }
+                        if case .found(let existing) = lookup { existingCustomerCard(existing) }
+                        card {
+                            HStack(alignment: .center, spacing: 12) {
+                                field("Service address", text: $address, prompt: "412 Birchwood Ln, Sacramento", focus: .address,
+                                      error: addressProblem, padded: false)
+                                    .textContentType(.fullStreetAddress).submitLabel(.done)
+                                    .onSubmit { Task { await commit() } }
+                                PaperIcon(.formPin, size: 20, color: Theme.muted)
+                                    .frame(width: 20, height: 20).accessibilityHidden(true)
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 12)
+                            WellDivider(leading: 16)
+                            choice("Account type") {
+                                ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Commercial")],
+                                                 selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 }))
+                            }
+                        }
+                        // Paper 47A: how they found us, then how they like to be reached, on one card.
+                        card {
+                            referralRow
+                            WellDivider(leading: 16)
+                            VStack(alignment: .leading, spacing: 8) {
+                                PreferredContactLabel(isSet: request.preferredContact != nil) { request.preferredContact = nil }
+                                ThorbisSegmented(options: [("sms", "Text"), ("phone", "Call"), ("email", "Email")],
+                                                 selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 }))
+                            }
+                            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    FormCluster(title: "Account") {
-                        FormField(label: "Type") {
-                            ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Commercial")],
-                                             selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 }))
-                        }
-                        FormField(label: "Prefers", optional: true) {
-                            ThorbisSegmented(options: [("", "None"), ("phone", "Call"), ("sms", "Text"), ("email", "Email")],
-                                             selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 }))
-                        }
-                    }
-                    if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                    // Saved: what they typed is on the record now; only the property is left to add.
+                    .disabled(owed != nil)
+                    if offersBooking && canCreate && session.can("job.create", feature: "jobs") { bookingAction }
                 }
+                .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 32)
+                .frame(maxWidth: .infinity)
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // MA-16: number pads and accessibility sizes have no Return; Done puts the keyboard away.
+            if keyboardShown {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("Done") {
+                        focused = nil
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                    .buttonStyle(ThorbisBarButtonStyle(prominent: true))
+                    .accessibilityIdentifier("keyboard-done")
+                }
+                .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
+                .background(Theme.background)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardShown = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.background.ignoresSafeArea())
+        .thorbisSheetPresentation([.large])
             .foregroundStyle(Theme.foreground)
+            .sheet(isPresented: $editingReferral) { ReferralSourceSheet(value: $referral) }
+            // "Save and book a job": the new job opens over this sheet; closing it closes both.
+            .sheet(item: $bookFor, onDismiss: { dismiss() }) { customer in
+                SheetSurface { NewJobSheet(preselected: customer, justCreated: true, owedProperty: owed) }
+            }
             .onAppear {
                 if request.name.isEmpty { request.name = initialName.trimmingCharacters(in: .whitespacesAndNewlines) }
                 if phone.isEmpty { phone = initialPhone.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -110,13 +168,104 @@ struct NewCustomerSheet: View {
             .interactiveDismissDisabled(busy || !trimmedName.isEmpty || !phone.isEmpty || !email.isEmpty || !address.isEmpty)
     }
 
-    /// A text input in the sunk well (design.thorbis.com Depth: the field sinks).
-    private func input(_ text: Binding<String>, prompt: String, focus: Field, label: String) -> some View {
-        TextField("", text: text, prompt: .placeholder(prompt))
-            .font(Theme.font(16))
-            .focused($focused, equals: focus)
-            .accessibilityLabel(label)
-            .fieldWell()
+    /// Paper's title row: Cancel on a card pill, the title, Save customer on the brand pill.
+    private func header(canCreate: Bool) -> some View {
+        // Once the customer is saved without their property, the way out keeps them ("Close") and
+        // the commit tries only the property again, or is gone when trying again can't help.
+        PaperTaskBar(title: "New customer", cancelTitle: owed == nil ? "Cancel" : "Close", cancelDisabled: busy,
+                     commit: owed?.retryable == false ? nil : commitAction(canCreate: canCreate),
+                     onCancel: { dismiss() })
+        // A title row is a bar: it stops growing at xLarge so the pills never break mid-word and
+        // the title keeps its room. The form under it follows the reader's text size in full.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+    }
+
+    /// Save customer, or Try again (the property only) once the customer is saved without it. The
+    /// spoken name is the visible words, so Voice Control's "Tap Try again" finds it.
+    private func commitAction(canCreate: Bool) -> ThorbisSheetHeaderAction {
+        if owed != nil {
+            return ThorbisSheetHeaderAction(title: "Try again", busy: busy, identifier: "sheet-commit",
+                                            hint: "Adds their address as a property", action: { Task { await commit() } })
+        }
+        return ThorbisSheetHeaderAction(title: "Save customer", busy: busy, enabled: canCreate, identifier: "sheet-commit",
+                                        hint: canCreate ? nil : "Your role can't add customers. Ask your office.",
+                                        action: { Task { await commit() } })
+    }
+
+    /// "How they found us" with the answer trailing in the muted ink and a quiet chevron, 56 tall.
+    private var referralRow: some View {
+        let source = referral.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Button { editingReferral = true } label: {
+            HStack(spacing: 8) {
+                Text("How they found us").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text(source.isEmpty ? "Add" : source).font(Theme.font(16)).foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                PaperChevron()
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16).frame(minHeight: 56).contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityLabel("How they found us")
+        .accessibilityValue(source.isEmpty ? "Not set" : source)
+        .accessibilityIdentifier("new-customer-referral")
+    }
+
+    /// Paper 47A: an outlined "Save and book a job" (50 tall, 16 Semibold) over one line saying
+    /// what it does.
+    private var bookingAction: some View {
+        let first = trimmedName.split(separator: " ").first.map(String.init)
+        return VStack(spacing: 6) {
+            Button { Task { await commit(thenBook: true) } } label: {
+                Text("Save and book a job").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .overlay(Capsule().strokeBorder(Theme.muted, lineWidth: 1))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+            .disabled(busy)
+            .accessibilityIdentifier("new-customer-save-and-book")
+            Text("Saves \(first ?? "the customer"), then opens a new job for them.")
+                .font(Theme.font(13)).foregroundStyle(Theme.subtle)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 4)
+    }
+
+    /// One Paper card: the card tone, radius 20, rows separated by an inset hairline.
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    /// A label above its answer (13 muted over 17 Medium), typed in place; the problem under it.
+    private func field(_ label: String, text: Binding<String>, prompt: String, focus: Field,
+                       error: String? = nil, padded: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+            TextField("", text: text, prompt: .placeholder(prompt))
+                .font(Theme.font(17, weight: .medium))
+                .focused($focused, equals: focus)
+                .accessibilityLabel(label)
+            if let error { FieldProblem(message: error) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, padded ? 16 : 0).padding(.vertical, padded ? 12 : 0)
+    }
+
+    /// A small label over a segmented choice, inside a card.
+    private func choice<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            content()
+        }
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The name's problem, shown once they've pressed Save (validate on commit, not on every key).
@@ -131,14 +280,19 @@ struct NewCustomerSheet: View {
     private var phoneProblem: String? { commitPressed && phone.count > 30 ? "Keep the phone number to 30 characters." : nil }
     private var addressProblem: String? { commitPressed && address.count > 500 ? "Keep the address to 500 characters." : nil }
 
-    private func commit() async {
+    private func commit(thenBook: Bool = false) async {
+        // Saved, with a property that trying again can't add: nothing is sent again.
+        if let owed, !owed.retryable {
+            if thenBook { focused = nil; bookFor = owed.customer } else { dismiss() }
+            return
+        }
         commitPressed = true
         emailChecked = true
         guard valid else {
             focused = nameProblem != nil ? .name : (!emailValid ? .email : nil)
             return
         }
-        await save()
+        await save(thenBook: thenBook)
     }
 
     /// Paper's quiet notice: this number already belongs to someone, so offer them instead.
@@ -178,7 +332,7 @@ struct NewCustomerSheet: View {
         lookup = result
     }
 
-    private func save() async {
+    private func save(thenBook: Bool = false) async {
         guard valid, !busy else { return }
         busy = true
         defer { busy = false }
@@ -191,11 +345,215 @@ struct NewCustomerSheet: View {
         body.phone = clean(phone)
         body.email = clean(email)
         body.address = clean(address)
+        let session = self.session
+        let access = NewCustomerSave.Access(session: session)
+        let generation = session.generation
+        let organizationID = session.activeOrganization?.id
+        let current: @MainActor () -> Bool = {
+            session.generation == generation && session.activeOrganization?.id == organizationID
+        }
         do {
-            let customer = try await api.createCustomer(body)
-            await store.refresh(api)
-            onCreated(customer)
-            dismiss()
+            let outcome: NewCustomerSave.Outcome
+            if let owed {
+                // The customer is saved; only their address is left to add as a property.
+                outcome = try await NewCustomerSave.add(owed, api: api, access: access, currentAuthority: current)
+            } else {
+                outcome = try await NewCustomerSave.run(body, referralSource: clean(String(referral.prefix(120))), api: api,
+                                                        access: access, currentAuthority: current)
+                await store.refresh(api)
+                onCreated(outcome.customer)
+            }
+            owed = outcome.owed
+            // The customer is kept either way; a property that didn't save is said in the error line.
+            error = outcome.owed?.notice
+            if thenBook {
+                // The booking still opens: Book job tries an owed property again and says how it went.
+                focused = nil
+                bookFor = outcome.customer
+            } else if outcome.owed == nil {
+                dismiss()
+            }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Saving a customer typed on the phone (New customer, Book a job's new caller): the customer,
+/// then, when they gave an address, that address as their first property (a service location),
+/// as the web intake and the server import do. `customers.create` keeps the address on the account
+/// only, so the property is a second call. The customer is kept when only that call fails, and a
+/// retry adds only the property, so it never makes a second customer.
+enum NewCustomerSave {
+    /// What the role may do with the property: `customers.addLocation` needs customer.edit, and the
+    /// look for one already there (after a try that got no answer) needs customer.view.
+    struct Access: Equatable {
+        var canAdd: Bool
+        var canCheck: Bool
+
+        init(canAdd: Bool, canCheck: Bool) {
+            self.canAdd = canAdd
+            self.canCheck = canCheck
+        }
+
+        @MainActor init(session: SessionController) {
+            self.init(canAdd: session.can("customer.edit", feature: "core_crm"),
+                      canCheck: session.can("customer.view", feature: "core_crm"))
+        }
+    }
+
+    /// A customer saved without their property yet: what the next press tries again.
+    struct Owed {
+        enum Reason: Equatable {
+            /// It didn't save; trying again may.
+            case failed
+            /// The role can't add a property: trying again won't help.
+            case refused
+            /// A try got no answer and the role can't look whether it made one: trying again could
+            /// add a second copy.
+            case unchecked
+        }
+
+        let customer: Customer
+        let property: FieldLocationCreate
+        /// The last try got no answer, so the property may already be there.
+        let uncertain: Bool
+        var reason: Reason = .failed
+
+        /// Whether Try again can still help. A refused or unchecked property is never sent again.
+        var retryable: Bool { reason == .failed }
+
+        /// What the sheet says, in its own error line.
+        var notice: String {
+            switch reason {
+            case .failed:
+                "\(customer.name) is saved, but their address wasn\u{2019}t added as a property. Tap Try again, or add it on their record."
+            case .refused:
+                "\(customer.name) is saved, but your role can\u{2019}t add their address as a property. Ask your office to add it."
+            case .unchecked:
+                "\(customer.name) is saved, but their address may not have been added as a property. Ask your office to check their record."
+            }
+        }
+
+        func because(_ reason: Reason) -> Owed {
+            Owed(customer: customer, property: property, uncertain: uncertain, reason: reason)
+        }
+    }
+
+    struct Outcome {
+        let customer: Customer
+        /// Set while the customer is saved but their address is not a property yet.
+        let owed: Owed?
+    }
+
+    /// `customers.addLocation`'s body for the typed address: "Home" for a residential account and
+    /// "Site" for a commercial one, as the web intake names them. Nil without an address.
+    static func property(address: String?, accountType: String?) -> FieldLocationCreate? {
+        guard let address = address?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty else { return nil }
+        return FieldLocationCreate(label: accountType == "commercial" ? "Site" : "Home", kind: "service", address: address)
+    }
+
+    /// `POST /v1/customers`, then `POST /v1/customers/{id}/locations` when the request carries an
+    /// address. Throws only while the customer is not saved, or when the work was cancelled.
+    /// - Parameter currentAuthority: still the same session and workspace that started the save.
+    @MainActor
+    static func run(_ request: NewCustomerRequest, referralSource: String? = nil, api: APIClient, access: Access,
+                    currentAuthority: @escaping @MainActor () -> Bool) async throws -> Outcome {
+        let customer: Customer
+        if let referralSource {
+            // The same create, with "How they found us" beside the request's own fields.
+            customer = try await api.send("POST", "/v1/customers", body: NewCustomerIntake(request: request, referralSource: referralSource))
+        } else {
+            customer = try await api.createCustomer(request)
+        }
+        guard let property = property(address: request.address, accountType: request.accountType) else {
+            return Outcome(customer: customer, owed: nil)
+        }
+        return try await add(Owed(customer: customer, property: property, uncertain: false), api: api, access: access,
+                             currentAuthority: currentAuthority)
+    }
+
+    /// Adds an owed property. After a try that got no answer it reads the customer's locations
+    /// first, from the server only, and keeps the one already there: the route takes no idempotency
+    /// key, so this is what stops a lost answer from leaving two copies. A property that can't be
+    /// helped by trying again comes back as it was, with nothing sent. Throws only when the work was
+    /// cancelled.
+    @MainActor
+    static func add(_ owed: Owed, api: APIClient, access: Access,
+                    currentAuthority: @escaping @MainActor () -> Bool) async throws -> Outcome {
+        guard owed.retryable else { return Outcome(customer: owed.customer, owed: owed) }
+        // Not sent when the role is known not to be allowed; the server would refuse it.
+        guard access.canAdd else { return Outcome(customer: owed.customer, owed: owed.because(.refused)) }
+        let customerID = owed.customer.id
+        if owed.uncertain {
+            guard access.canCheck else { return Outcome(customer: owed.customer, owed: owed.because(.unchecked)) }
+            do {
+                // Never a copy saved on this phone: it may predate the try that got no answer.
+                let places = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await api.allLocationsForRecovery(customerID, currentAuthority: currentAuthority)
+                }
+                guard currentAuthority() else { throw CancellationError() }
+                if places.contains(where: { $0.customerId == customerID && $0.kind == owed.property.kind
+                                            && JobFallbackAddress.sameAddress($0.address, owed.property.address) }) {
+                    return Outcome(customer: owed.customer, owed: nil)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Not known whether it is there, so nothing is sent; a refused look can't be tried again.
+                return Outcome(customer: owed.customer, owed: (error as? Problem)?.status == 403 ? owed.because(.unchecked) : owed)
+            }
+        }
+        do {
+            _ = try await api.createFieldLocation(customerID, request: owed.property)
+            return Outcome(customer: owed.customer, owed: nil)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // A refusal, or a request that never left the phone, made nothing; anything else may have.
+            let madeNothing = RetryKey<String>.isDefinite(error) || (error as? Problem)?.neverSent == true
+            return Outcome(customer: owed.customer,
+                           owed: Owed(customer: owed.customer, property: owed.property, uncertain: owed.uncertain || !madeNothing,
+                                      reason: (error as? Problem)?.status == 403 ? .refused : .failed))
+        }
+    }
+}
+
+/// `customers.create` with "How they found us": the request's own fields, then `referralSource`
+/// (createCustomerInputSchema accepts it; up to 120 characters).
+struct NewCustomerIntake: Encodable {
+    let request: NewCustomerRequest
+    let referralSource: String
+
+    private enum CodingKeys: String, CodingKey { case referralSource }
+
+    func encode(to encoder: Encoder) throws {
+        try request.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(referralSource, forKey: .referralSource)
+    }
+}
+
+/// "Preferred contact" over its segments. Nothing is chosen until the person picks; once they
+/// have, a quiet "No preference" beside the label takes the choice back (the server keeps it
+/// optional), so a mis-tap never becomes a fact.
+struct PreferredContactLabel: View {
+    let isSet: Bool
+    let clear: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text("Preferred contact").font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 8)
+            if isSet {
+                Button(action: clear) {
+                    Text("No preference").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                // The label row stays one line tall; the tap target still reaches 44.
+                .padding(.vertical, -13)
+                .accessibilityLabel("No contact preference")
+                .accessibilityIdentifier("preferred-contact-clear")
+            }
+        }
     }
 }

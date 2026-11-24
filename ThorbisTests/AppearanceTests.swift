@@ -13,7 +13,8 @@ final class AppearanceTests: XCTestCase {
         }
     }
 
-    // design.thorbis.com MA-08: the ink commit's inverse type stays readable in every appearance.
+    // Inverse type on ink (a step badge, today's date, the listening mic) stays readable in every
+    // appearance. The commit itself is the blue pill; testBrandCommitTypeIsReadable covers it.
     func testInkCommitTypeIsReadable() {
         for style: UIUserInterfaceStyle in [.light, .dark] {
             for contrast: UIAccessibilityContrast in [.normal, .high] {
@@ -25,28 +26,61 @@ final class AppearanceTests: XCTestCase {
         }
     }
 
-    // v2 (design.thorbis.com): weights 400 and 500 only; anything heavier is 500; nothing under 12.
-    func testTypeRampKeepsTwoWeightsAndAFloor() {
-        for heavy: Font.Weight in [.semibold, .bold, .heavy, .black] {
-            XCTAssertEqual(Theme.allowed(heavy), .medium)
+    // Paper v2: the commit and every blue or red pill set white type on `brand` or
+    // `destructiveFill`; it holds 4.5:1 in every appearance, Increase Contrast included.
+    func testBrandCommitTypeIsReadable() {
+        let white = luminance(UIColor(red: 1, green: 1, blue: 1, alpha: 1))
+        for style: UIUserInterfaceStyle in [.light, .dark] {
+            for contrast: UIAccessibilityContrast in [.normal, .high] {
+                for fill in [Theme.brand, Theme.destructiveFill] {
+                    let ground = luminance(resolve(fill, style: style, contrast: contrast))
+                    XCTAssertGreaterThanOrEqual((max(white, ground) + 0.05) / (min(white, ground) + 0.05), 4.5,
+                        "White on a commit fill unreadable in style \(style.rawValue), contrast \(contrast.rawValue)")
+                }
+            }
         }
-        XCTAssertEqual(Theme.allowed(.regular), .regular)
-        XCTAssertEqual(Theme.allowed(.medium), .medium)
+    }
+
+    // Paper v2 (2026-11-16): Inter 400 to 700; heavier is bold, lighter is regular; nothing under 12.
+    func testTypeRampKeepsPaperWeightsAndAFloor() {
+        for weight: Font.Weight in [.regular, .medium, .semibold, .bold] {
+            XCTAssertEqual(Theme.allowed(weight), weight)
+        }
+        for heavy: Font.Weight in [.heavy, .black] {
+            XCTAssertEqual(Theme.allowed(heavy), .bold)
+        }
+        for light: Font.Weight in [.ultraLight, .thin, .light] {
+            XCTAssertEqual(Theme.allowed(light), .regular)
+        }
         XCTAssertEqual(Theme.minimumSize, 12)
     }
 
-    // v2 (owner: "the font size is too big"): staff screens use the compact ramp; customer-facing
-    // presentation keeps the older ramp so its 17pt floor holds.
+    // Paper's electric blue (#2F6BFF, drawn one step darker as #2F6AFF, green 6B to 6A, so white
+    // type holds 4.5:1).
+    // The web keeps its own accent (#3A6AE0); neither client is repainted to the other's blue.
+    func testBrandIsPaperBlue() {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        XCTAssertTrue(UIColor(Theme.brand).getRed(&r, green: &g, blue: &b, alpha: &a))
+        XCTAssertEqual(Int((r * 255).rounded()), 0x2F)
+        XCTAssertEqual(Int((g * 255).rounded()), 0x6A)
+        XCTAssertEqual(Int((b * 255).rounded()), 0xFF)
+    }
+
+    // Paper v2: Paper's own sizes (rows 16, subtitles 14, labels 13, sheet titles 17/22) and a
+    // 34pt bold title on every screen; customer-facing presentation keeps its 17pt floor.
     func testEverySizeLandsOnTheRamp() {
-        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 24, 26]
+        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 22, 24, 28, 30, 34]
         for size in stride(from: CGFloat(8), through: 40, by: 1) {
             XCTAssertTrue(ramp.contains(Theme.onRamp(size)), "\(size) snapped to \(Theme.onRamp(size))")
         }
-        XCTAssertEqual(Theme.onRamp(15), 14)
-        XCTAssertEqual(Theme.onRamp(16), 15)
-        XCTAssertEqual(Theme.onRamp(17), 15)
-        XCTAssertEqual(Theme.onRamp(30), 24)
-        XCTAssertEqual(Theme.onRamp(34), 26)
+        XCTAssertEqual(Theme.onRamp(14), 14)
+        XCTAssertEqual(Theme.onRamp(15), 15)
+        XCTAssertEqual(Theme.onRamp(16), 16)
+        XCTAssertEqual(Theme.onRamp(17), 17)
+        XCTAssertEqual(Theme.onRamp(22), 22)
+        XCTAssertEqual(Theme.onRamp(30), 30, "Paper draws record titles at 30")
+        XCTAssertEqual(Theme.onRamp(28), 28)
+        XCTAssertEqual(Theme.onRamp(34), 34)
         XCTAssertEqual(Theme.customerRamp(17), 17)
         XCTAssertEqual(Theme.customerRamp(34), 34)
     }

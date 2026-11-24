@@ -18,6 +18,10 @@ enum JobMenuAction: Hashable {
     case customerView
     case email
     case copyID
+    /// Paper 21R: text the customer a new arrival time from the tech's own phone.
+    case runningLate
+    /// Paper F3A: arrived but can't start — tell the office why, as a follow-up on the job.
+    case cantStart
 }
 
 /// JS-02/JS-03: the job's menu, grouped visit, money, finish, record. Only what this person can do
@@ -40,13 +44,20 @@ enum JobMenu {
         var canAddToCalendar = false
         /// A verified customer or contact email is loaded.
         var canEmail = false
+        /// Booked and not there yet (scheduled, dispatched or on the way).
+        var canSendRunningLate = false
+        /// Arrived, and this person may edit the job.
+        var canReportCantStart = false
     }
 
     static func groups(_ inputs: Inputs) -> [[JobMenuAction]] {
         // Pause reads last in the visit group: forward moves first, the stop after them.
         let moves = inputs.transitions.filter { $0 != "paused" }.map(JobMenuAction.transition)
             + (inputs.transitions.contains("paused") ? [.transition("paused")] : [])
-        var visit = moves
+        var visit: [JobMenuAction] = []
+        if inputs.canReportCantStart { visit.append(.cantStart) }
+        if inputs.canSendRunningLate { visit.append(.runningLate) }
+        visit += moves
         if inputs.canSchedule { visit.append(.schedule) }
         if inputs.canAddToCalendar { visit.append(.addToCalendar) }
         if inputs.canAssign { visit.append(.assign) }
@@ -118,6 +129,8 @@ enum JobContacts {
         let detail: String?
         let phone: String?
         let email: String?
+        /// The account's primary contact: its initials wear the brand tone (Paper 21).
+        var primary = false
         var reach: JobReach { JobReach(phone: phone, email: email) }
     }
 
@@ -129,7 +142,7 @@ enum JobContacts {
         var people = sorted.map { contact in
             let detail = [contact.role, contact.primary ? "Primary" : nil].compactMap { $0 }.joined(separator: " · ")
             return Person(id: contact.id, name: contact.name, detail: detail.isEmpty ? nil : detail,
-                          phone: contact.phone, email: contact.email)
+                          phone: contact.phone, email: contact.email, primary: contact.primary)
         }
         // The account's own number is the fallback, never a second copy of a contact's.
         if let customer, people.allSatisfy({ $0.reach.isEmpty }),
@@ -138,6 +151,16 @@ enum JobContacts {
                                  phone: customer.phone, email: customer.email), at: 0)
         }
         return people
+    }
+
+    /// True when both are the same phone number, however each was typed.
+    static func sameNumber(_ lhs: String?, _ rhs: String?) -> Bool {
+        func digits(_ raw: String?) -> String {
+            let all = (raw ?? "").prefix { !"xX,;".contains($0) }.filter(\.isNumber)
+            return all.count == 11 && all.hasPrefix("1") ? String(all.dropFirst()) : String(all)
+        }
+        let left = digits(lhs)
+        return left.count >= 7 && left == digits(rhs)
     }
 
     /// "Prefers text" from the account's preferred channel.
@@ -159,23 +182,27 @@ struct JobContactsSection: View {
     let failed: Bool
     /// When known, each real contact opens its own record; the account fallback never does.
     var customerID: String? = nil
+    let jobID: String
     /// The account's name as the job already shows it: a contact with the same name leads with
     /// its role instead of repeating the name (each fact once).
     var customerName: String? = nil
+    /// Owner 2026-11-21 (one fact, one place): the number the job's bottom bar already calls and
+    /// texts. A person reached on that same number shows no Call or Text of their own here.
+    var barPhone: String? = nil
+    /// Paper 21 / 26A: the plus beside the label adds a contact. Nil when this person can't.
+    var onAdd: (() -> Void)? = nil
     let retry: () async -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            JobPanelLabel(title: "Contacts", count: people.isEmpty ? nil : "\(people.count)")
+        // Paper 21: 8 between the label and its card.
+        VStack(alignment: .leading, spacing: 8) {
+            // Owner 2026-11-21: the count shows only when there is more than one person to count.
+            JobPanelLabel(title: "Contacts", count: people.count > 1 ? "\(people.count)" : nil,
+                          actionTitle: onAdd == nil ? nil : "Add contact", actionSymbol: "plus",
+                          actionIdentifier: "job-contacts-add", action: onAdd)
             if failed && people.isEmpty {
                 // JS-11: the section says what didn't load and offers one Try again; the job still shows.
-                HStack(spacing: 8) {
-                    ListErrorRow(message: "Contacts didn't load.")
-                    Spacer(minLength: 8)
-                    Button("Try again") { Task { await retry() } }
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(minHeight: 44)
-                }
+                ErrorBanner(message: "Contacts didn’t load.", retry: { await retry() }).flush()
             } else if !loaded {
                 SkeletonRows(count: 1, leading: false, inset: 0)
             } else if people.isEmpty {
@@ -184,20 +211,20 @@ struct JobContactsSection: View {
                     .padding(.horizontal, 4)
             }
             if !people.isEmpty {
-                JobPanel {
+                // Paper 21: one card, a 64pt row per person, the hairline between rows starting at the words.
+                JobPanel(dividers: false) {
                     if let preference {
                         Text(preference).font(Theme.font(13)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 16).padding(.top, 10)
-                            .jobPanelJoinsNext()
                     }
                     ForEach(people) { person in
-                        JobContactRow(person: person,
-                                      hidesName: customerName.map { $0.localizedCaseInsensitiveCompare(person.name) == .orderedSame } ?? false,
+                        JobContactRow(person: person, emailContext: "job:\(jobID):contact:\(person.id)",
+                                      divided: person.id != people.first?.id,
+                                      reachedFromBar: JobContacts.sameNumber(person.phone, barPhone),
                                       route: customerID.flatMap { id in
                                           person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)
                                       })
-                            .padding(.horizontal, 16)
                     }
                 }
             }
@@ -205,58 +232,65 @@ struct JobContactsSection: View {
     }
 }
 
+/// Paper 21 / 26: a person on the job. Initials on a 36pt circle (the primary contact's in the
+/// brand tone), the name at 16 Medium over the role at 14, then Call and Text as 44pt circles.
 private struct JobContactRow: View {
     let person: JobContacts.Person
-    /// The customer row above already says this name; lead with the role ("Homeowner · Primary").
-    var hidesName = false
+    let emailContext: String
+    /// A hairline above the row's words (every row but the first).
+    var divided = false
+    /// The job's bar calls and texts this same number, so the row does not repeat the circles.
+    var reachedFromBar = false
     var route: PaperRoute? = nil
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
 
     var body: some View {
         let reach = person.reach
-        HStack(spacing: 8) {
-            // Only the words open the contact; Call, Text and Email stay their own buttons.
-            if let route {
-                NavigationLink(value: route) {
-                    HStack(spacing: 6) {
+        HStack(spacing: 12) {
+            Text(initials(person.name))
+                .font(Theme.font(13, weight: .semibold))
+                .foregroundStyle(person.primary ? Theme.brandText : Theme.subtle)
+                .frame(width: 36, height: 36)
+                .background(person.primary ? Theme.brandSurface : Theme.fill, in: Circle())
+                .dynamicTypeSize(...DynamicTypeSize.large)
+                .accessibilityHidden(true)
+            HStack(spacing: 8) {
+                // Only the words open the contact; Call and Text stay their own buttons.
+                if let route {
+                    NavigationLink(value: route) {
                         info
-                        Spacer(minLength: 4)
-                        PaperDisclosure()
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens the contact")
+                } else {
+                    info.frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(RowPressStyle())
-                .accessibilityHint("Opens the contact")
-            } else {
-                info
-                Spacer(minLength: 8)
+                if !reachedFromBar {
+                    if let call = reach.call { glyph("phone", label: "Call \(person.name)") { openURL(call) } }
+                    if let text = reach.text { glyph("message", label: "Text \(person.name)") { inboxText(text, name: person.name, openURL: openURL) } }
+                }
+                // Paper draws Call and Text; Email takes their place for a contact with no number.
+                if reach.call == nil, let email = reach.email { glyph("envelope", label: "Email \(person.name)") { inboxEmail(email, context: emailContext) } }
             }
-            if let call = reach.call { glyph("phone", label: "Call \(person.name)") { openURL(call) } }
-            if let text = reach.text { glyph("message", label: "Text \(person.name)") { inboxText(text, name: person.name, openURL: openURL) } }
-            if let email = reach.email { glyph("envelope", label: "Email \(person.name)") { openURL(email) } }
+            .padding(.trailing, 12).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .overlay(alignment: .top) {
+                if divided { Rectangle().fill(Theme.hairline).frame(height: 1).accessibilityHidden(true) }
+            }
         }
-        .padding(.vertical, 6)
-        .frame(minHeight: 56)
+        .padding(.leading, 16)
     }
 
     private var info: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if hidesName, let detail = person.detail {
-                Text(detail).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text(person.name).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let detail = person.detail {
-                    Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            if let phone = person.phone, !phone.isEmpty {
-                Text(phone).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
-            } else if let email = person.email, !email.isEmpty {
-                Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(person.name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail = person.detail {
+                Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
         .accessibilityElement(children: .combine)
@@ -267,7 +301,8 @@ private struct JobContactRow: View {
 
     private func glyph(_ symbol: String, label: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            Image(systemName: symbol).font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.foreground)
+            // Paper: an 18pt line glyph on a 44pt fill circle.
+            Image(systemName: symbol).font(.system(size: 17, weight: .regular)).foregroundStyle(Theme.foreground)
                 .frame(width: 44, height: 44)
                 .background(Theme.fill, in: Circle())
         }

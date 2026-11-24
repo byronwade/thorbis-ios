@@ -45,12 +45,14 @@ extension APIClient {
     func billingSchedules() async throws -> [BillingSchedule] {
         var items: [BillingSchedule] = []
         var cursor: String?
+        var seen: Set<String> = []
         repeat {
             let page: Items<BillingSchedule> = try await send("GET", "/v1/billing-schedules", cursor: cursor)
             items += page.items
-            guard page.nextCursor != cursor else { break }
-            cursor = page.nextCursor
-        } while cursor != nil && items.count < 2_000
+            // A cursor the server already handed out means it is going in circles; stop with what we have.
+            guard let next = page.nextCursor, seen.insert(next).inserted else { break }
+            cursor = next
+        } while items.count < 2_000 && seen.count < 200
         return items
     }
 
@@ -109,7 +111,7 @@ struct BillingSchedulesView: View {
                     }
                 }
                 if !loading && schedules.isEmpty && error == nil {
-                    ListRoomEmpty(title: "No billing schedules.",
+                    ListRoomEmpty(glyph: .money, title: "No billing schedules",
                                   message: "A schedule starts when a job is billed in stages or takes a deposit.")
                 }
             }
@@ -148,8 +150,6 @@ struct BillingScheduleDetailView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirm: String?
-    /// One key per intended command, kept until the server answers, so a retry never bills twice.
-    @State private var pendingKeys: [String: String] = [:]
     @State private var createdInvoiceID: String?
 
     var body: some View {
@@ -159,20 +159,31 @@ struct BillingScheduleDetailView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let progress {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("SOV-\(progress.schedule.id.suffix(4).uppercased()) · \(store.customerName(progress.schedule.customerId))")
-                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        Text("Billing schedule").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
-                        StatusWord(text: progress.schedule.status == "open" ? "Open" : "Closed",
-                                   tint: progress.schedule.status == "open" ? Theme.warning : nil)
+                    // Paper 89A: "Billing schedule" at 34 Bold, the job and its total in 15 muted under
+                    // it, the progress card, then the stages on one card. The schedule's number and
+                    // whether it is open stay as one quiet word under the subtitle.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Billing schedule").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                        // The schedule's number and whether it is open ride the same quiet line.
+                        Text("\(scheduleName(progress.schedule)) \u{00B7} \(money(progress.schedule.total, currency: "USD")) \u{00B7} SOV-\(progress.schedule.id.suffix(4).uppercased())\(progress.schedule.status == "open" ? "" : " \u{00B7} Closed")")
+                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.bottom, 14)
-                    // design 2026-10-30: figures on one panel, every group on its own panel, no rules.
-                    VStack(alignment: .leading, spacing: 22) {
-                        PaperStatRow(stats: [
-                            .init(label: "Billed", value: money(progress.billedToDate, currency: "USD")),
-                            .init(label: "Remaining", value: money(progress.remaining, currency: "USD")),
-                        ])
+                    .padding(.bottom, 20)
+                    VStack(alignment: .leading, spacing: 20) {
+                        billedCard(progress)
+                        PaperSection("Stages") {
+                            VStack(spacing: 0) {
+                                let lines = progress.schedule.lines.sorted { $0.position < $1.position }
+                                ForEach(lines) { line in
+                                    stageRow(line, progress: progress, divider: line.id != lines.first?.id)
+                                }
+                            }
+                        }
+                        // Paper 89A shows the progress and the stages; what was taken up front or held back
+                        // follows them.
                         if progress.depositsBilled > 0 || progress.retainedToDate > 0 {
                             PaperSection("Deposits and retainage") {
                                 VStack(spacing: 0) {
@@ -187,29 +198,6 @@ struct BillingScheduleDetailView: View {
                                 }
                                 .padding(.vertical, PaperCardMetrics.edge)
                             }
-                        }
-                        PaperSection("Schedule of values", count: progress.schedule.lines.count) {
-                            VStack(spacing: 0) {
-                                ForEach(progress.schedule.lines.sorted { $0.position < $1.position }) { line in
-                                    let lineProgress = progress.lines.first { $0.lineId == line.id }
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack(alignment: .firstTextBaseline) {
-                                            Text(line.description).font(Theme.font(16, weight: .medium))
-                                            Spacer(minLength: 8)
-                                            Text(money(line.scheduledAmount.amount, currency: "USD")).moneyStyle(.row)
-                                        }
-                                        if let lineProgress {
-                                            ProgressView(value: Double(lineProgress.billedToDate), total: Double(max(line.scheduledAmount.amount, 1)))
-                                                .tint(Theme.foreground)
-                                            Text("\(money(lineProgress.billedToDate, currency: "USD"))\u{00A0}billed · \(money(lineProgress.remaining, currency: "USD"))\u{00A0}left")
-                                                .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
-                                        }
-                                    }
-                                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
-                                    .accessibilityElement(children: .combine)
-                                }
-                            }
-                            .padding(.vertical, PaperCardMetrics.edge)
                         }
                     }
                     .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
@@ -229,14 +217,14 @@ struct BillingScheduleDetailView: View {
                 }
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter).padding(.top, 8) }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, Theme.gutter).padding(.top, PaperHeaderMetrics.titleTopUnderBar).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if let progress, progress.schedule.status == "open", progress.remaining > 0, canBill {
-                PaperActionBar(title: "Bill the remainder · \(money(progress.remaining, currency: "USD"))", symbol: "doc.badge.plus", busy: busy) {
+                PaperActionBar(title: "Bill \(money(progress.remaining, currency: "USD")) now", busy: busy) {
                     confirm = "bill-remainder"
                 }
             }
@@ -251,6 +239,85 @@ struct BillingScheduleDetailView: View {
     }
 
     private var canBill: Bool { session.can("invoice.create", feature: "progress_billing") }
+
+    /// The job's title when this phone has the job; otherwise who the schedule is for.
+    private func scheduleName(_ schedule: BillingSchedule) -> String {
+        store.jobs.first { $0.id == schedule.jobId }?.title ?? store.customerName(schedule.customerId)
+    }
+
+    /// A Paper 89A stage: the name and its share of the total in 16 Medium over the amount in 14
+    /// muted, and where it stands as a word at the trailing edge. A hairline above every row but the first.
+    private func stageRow(_ line: BillingSchedule.Line, progress: BillingScheduleProgress, divider: Bool) -> some View {
+        let lineProgress = progress.lines.first { $0.lineId == line.id }
+        let amount = line.scheduledAmount.amount
+        let total = progress.schedule.total
+        let share = total > 0 ? " \u{00B7} \(Int((Double(amount) / Double(total) * 100).rounded()))%" : ""
+        let billed = lineProgress?.billedToDate ?? 0
+        let remaining = lineProgress?.remaining ?? amount
+        let partly = billed > 0 && remaining > 0
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(line.description)\(share)")
+                    .font(Theme.font(16, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(partly ? "\(money(amount, currency: "USD")) \u{00B7} \(money(billed, currency: "USD"))\u{00A0}billed"
+                            : money(amount, currency: "USD"))
+                    .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            stageWord(billed: billed, remaining: remaining, known: lineProgress != nil)
+        }
+        .padding(.vertical, 14)
+        .padding(.trailing, PaperCardMetrics.inset)
+        .overlay(alignment: .top) {
+            if divider { WellDivider(leading: 0) }
+        }
+        .padding(.leading, PaperCardMetrics.inset)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Billed in the success colour, what's left of a part-billed stage, or "Not yet": 15 at the
+    /// row's trailing edge. The server says what was billed, not what was paid, so the word is Billed.
+    @ViewBuilder private func stageWord(billed: Int, remaining: Int, known: Bool) -> some View {
+        if !known {
+            EmptyView()
+        } else if remaining <= 0 {
+            Text("Billed").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.success)
+        } else if billed > 0 {
+            Text("\(money(remaining, currency: "USD"))\u{00A0}left")
+                .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+        } else {
+            Text("Not yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+        }
+    }
+
+    /// Paper 89A's progress card: "$1,455.00 of $4,850.00 billed", the percent, and a brand bar.
+    private func billedCard(_ progress: BillingScheduleProgress) -> some View {
+        let total = progress.billedToDate + progress.remaining
+        let fraction = total > 0 ? min(1, max(0, Double(progress.billedToDate) / Double(total))) : 0
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(money(progress.billedToDate, currency: "USD")) of \(money(total, currency: "USD")) billed")
+                    .font(Theme.font(16, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text("\(Int((fraction * 100).rounded()))%").font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.fill)
+                    Capsule().fill(Theme.brand).frame(width: proxy.size.width * fraction)
+                }
+            }
+            .frame(height: 6)
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 16)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(money(progress.billedToDate, currency: "USD")) billed, \(money(progress.remaining, currency: "USD")) remaining")
+    }
 
     private func load() async {
         let generation = session.generation
@@ -269,11 +336,19 @@ struct BillingScheduleDetailView: View {
         guard !busy else { return }
         busy = true
         defer { busy = false }
-        let key = pendingKeys[command] ?? UUID().uuidString
-        pendingKeys[command] = key
+        // One key per command, kept on the phone until the server answers with success, so a retry
+        // after leaving the screen gets the invoice already issued instead of a second one.
+        let intents = BillingMoneyIntents()
+        let request = BillingMoneyIntents.Request.scheduleCommand(scheduleID: scheduleID, command: command)
+        let actorID = session.user?.id
+        let organizationID = session.activeOrganization?.id
+        guard let key = intents.key(for: request, actorID: actorID, organizationID: organizationID) else {
+            self.error = "Could not save this request for a safe retry. Please try again."
+            return
+        }
         do {
             let result = try await api.billingScheduleCommand(scheduleID, command, idempotencyKey: key)
-            pendingKeys[command] = nil
+            intents.complete(request, key: key, actorID: actorID, organizationID: organizationID)
             createdInvoiceID = result.invoice.id
             await load()
         } catch is CancellationError {} catch {
@@ -286,60 +361,189 @@ struct BillingScheduleDetailView: View {
 /// Paper 22 style deposit sheet on a job that came from an approved estimate.
 struct JobDepositSheet: View {
     let jobID: String
+    /// The approved estimate's total in cents (USD), when the job screen has it loaded. With it the
+    /// sheet offers Paper 89's 25% and 50% chips and the balance left on completion; without it the
+    /// amount is typed, as before.
+    var estimateTotalCents: Int? = nil
+    /// Paper 89's second line ("EST-1042 · Danielle Marlowe"); the job's number when not given.
+    var subtitle: String? = nil
     var onCreated: (InvoiceRecord) -> Void = { _ in }
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var amount = ""
-    @State private var key = UUID().uuidString
     @State private var busy = false
     @State private var error: String?
     /// What's missing in the amount, under the field (design.thorbis.com "Help under the field").
     @State private var amountError: String?
+    @FocusState private var amountFocused: Bool
 
     private var cents: Int? { MoneyInput.cents(amount).flatMap { $0 > 0 ? $0 : nil } }
 
+    /// The estimate's total, only when a share of it is a real amount.
+    private var estimateTotal: Int? { estimateTotalCents.flatMap { $0 > 0 ? $0 : nil } }
+
+    /// A share of the estimate, rounded to the cent.
+    private func share(_ percent: Int) -> Int? {
+        guard let total = estimateTotal else { return nil }
+        let (product, overflow) = total.multipliedReportingOverflow(by: percent)
+        guard !overflow else { return nil }
+        let part = (product + 50) / 100
+        return part > 0 ? part : nil
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Request a deposit").font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                Text("Creates a deposit invoice from the job's approved estimate. It's credited against later bills.")
-                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                VStack(alignment: .leading, spacing: 6) {
-                    // The affix lives inside the well (design.thorbis.com "Affixes in the well").
-                    HStack(spacing: 8) {
-                        Text("$").font(Theme.monoFont(28)).foregroundStyle(Theme.muted)
-                        TextField("150.00", text: $amount, prompt: .placeholder("150.00")).keyboardType(.decimalPad).font(Theme.monoFont(28))
-                            .onChange(of: amount) { _, _ in key = UUID().uuidString; amountError = nil }
-                            .accessibilityLabel("Deposit amount")
+            // Paper 89: "Request a deposit" at 34 Bold with what it is for under it, the amount at
+            // 52 Bold centred on the canvas over the 25%, 50% and Custom chips, the estimate's
+            // arithmetic in one card, then what happens to it in 13 muted above the commit.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    PaperPageTitle(title: "Request a deposit", subtitle: subtitle ?? "JOB-\(jobID.suffix(4).uppercased())")
+                    VStack(spacing: 16) {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text("$").font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
+                                .foregroundStyle(Theme.muted)
+                                .accessibilityHidden(true)
+                            TextField("150.00", text: $amount, prompt: .placeholder("150.00")).keyboardType(.decimalPad)
+                                .font(Theme.paymentAmountFont())
+                                .fixedSize()
+                                .focused($amountFocused)
+                                .onChange(of: amount) { _, _ in amountError = nil }
+                                .accessibilityLabel("Deposit amount")
+                        }
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                        if estimateTotal != nil { shareChips }
+                        if let amountError { FieldProblem(message: amountError) }
                     }
-                    .fieldWell()
-                    if let amountError { FieldProblem(message: amountError) }
+                    .padding(.horizontal, Theme.gutter).padding(.top, 32)
+                    if let total = estimateTotal { arithmeticCard(total).padding(.horizontal, 16).padding(.top, 28) }
+                    if let error { ErrorBanner(message: error).padding(.top, 12) }
                 }
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                Spacer()
+                .padding(.bottom, 16)
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 8)
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
             .foregroundStyle(Theme.foreground)
             .background(Theme.canvas)
+            .paperPageGround()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            // Paper 89: the 44 back circle on the card tone at top left closes the sheet.
+            .toolbar {
+                ThorbisToolbarItem(placement: .topBarLeading) {
+                    PaperCircleButton(symbol: "xmark", label: "Cancel", size: 44, fill: Theme.card) { dismiss() }
+                        .disabled(busy)
+                }
+            }
             .safeAreaInset(edge: .bottom) {
-                // Never pre-disabled: pressing it with no amount says what's missing under the field.
-                PaperActionBar(title: cents.map { "Create \(money($0, currency: "USD")) deposit invoice" } ?? "Create deposit invoice",
-                               symbol: "banknote", busy: busy) { Task { await create() } }
+                VStack(spacing: 2) {
+                    Text("The deposit is taken off the final invoice.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Theme.gutter)
+                    // Never pre-disabled: pressing it with no amount says what's missing under the field.
+                    PaperActionBar(title: cents.map { "Request \(money($0, currency: "USD")) deposit" } ?? "Request deposit",
+                                   busy: busy) { Task { await create() } }
+                }
+                .background(Theme.canvas)
             }
             .interactiveDismissDisabled(busy)
         }
-        .presentationDetents([.medium])
+        .presentationDetents(estimateTotal == nil ? [.medium] : [.large])
+    }
+
+    /// Paper 89: 25%, 50% and Custom as 40pt pills (44pt targets). The one in use sits on the
+    /// brand surface in brand text; a share fills the amount, Custom puts the cursor in it.
+    private var shareChips: some View {
+        let quarter = share(25)
+        let half = share(50)
+        let custom = cents == nil || (cents != quarter && cents != half)
+        return HStack(spacing: 8) {
+            if let quarter { shareChip("25%", spoken: "25 percent of the estimate", isOn: cents == quarter) { choose(quarter) } }
+            if let half { shareChip("50%", spoken: "50 percent of the estimate", isOn: cents == half) { choose(half) } }
+            shareChip("Custom", spoken: "Custom amount", isOn: custom) { amountFocused = true }
+        }
+    }
+
+    private func choose(_ cents: Int) {
+        amountFocused = false
+        amount = paymentAmountText(cents)
+    }
+
+    private func shareChip(_ title: String, spoken: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(isOn ? Theme.brandText : Theme.foreground)
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 14)
+                .frame(minHeight: PaperControl.chipHeight)
+                .background(isOn ? Theme.brandTint : Theme.quietFill, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(busy)
+        .accessibilityLabel(spoken)
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("deposit-share-\(title.lowercased().replacingOccurrences(of: "%", with: ""))")
+    }
+
+    /// Paper 89's card: the estimate's total, the deposit, a hairline, then what is left on
+    /// completion at 22 Bold. The last two rows wait for an amount that fits inside the total.
+    private func arithmeticCard(_ total: Int) -> some View {
+        let deposit = cents.flatMap { $0 <= total ? $0 : nil }
+        return VStack(alignment: .leading, spacing: 8) {
+            arithmeticRow("Estimate total", money(total, currency: "USD"))
+            arithmeticRow("Deposit", deposit.map { money($0, currency: "USD") } ?? "\u{2014}")
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Balance on completion").font(Theme.font(16, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text(deposit.map { money(total - $0, currency: "USD") } ?? "\u{2014}")
+                    .font(Theme.font(22, weight: .bold)).tracking(-0.44).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .padding(.top, 8)
+            .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+            .accessibilityElement(children: .combine)
+        }
+        .foregroundStyle(Theme.foreground)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    private func arithmeticRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 8)
+            Text(value).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.foreground)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func create() async {
         guard !busy else { return }
         guard let cents else { amountError = "Add the deposit amount, like 150.00."; return }
+        // The key is saved on the phone before sending and kept until the server answers with
+        // success, so the same amount sent again after the sheet was closed cannot issue a second deposit.
+        let intents = BillingMoneyIntents()
+        let request = BillingMoneyIntents.Request.deposit(jobID: jobID, amountCents: cents)
+        let actorID = session.user?.id
+        let organizationID = session.activeOrganization?.id
+        guard let key = intents.key(for: request, actorID: actorID, organizationID: organizationID) else {
+            self.error = "Could not save this deposit for a safe retry. Please try again."
+            return
+        }
         busy = true
         defer { busy = false }
         do {
             let result = try await api.requestJobDeposit(jobID: jobID, amountCents: cents, idempotencyKey: key)
+            intents.complete(request, key: key, actorID: actorID, organizationID: organizationID)
             onCreated(result.invoice)
             dismiss()
         } catch is CancellationError {} catch { self.error = error.localizedDescription }

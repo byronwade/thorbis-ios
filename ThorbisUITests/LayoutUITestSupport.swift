@@ -24,8 +24,24 @@ extension XCUIApplication {
     /// Whether a keyboard is on screen. On iPad a put-away keyboard can stay in the tree as a
     /// zero-height element at the screen's foot, so existence alone is not enough.
     var keyboardShowing: Bool {
-        let keyboard = keyboards.firstMatch
-        return keyboard.exists && keyboard.frame.height > 1 && keyboard.frame.minY < frame.maxY - 1
+        // No keyboard: hidden, at once. `snapshot()` of an element that is not there retries for
+        // several seconds before it throws, so asking it first made every wait for a hidden
+        // keyboard about 12 s slower (two reads per wait).
+        if keyboards.count == 0 { return false }
+        // One snapshot, read once. Asking `exists` and then `frame` raced the keyboard going away
+        // (a Done tap is exactly that): the frame read of a keyboard that had just gone failed the
+        // test with "No matches found".
+        let keyboard: XCUIElementSnapshot
+        do {
+            keyboard = try keyboards.firstMatch.snapshot()
+        } catch {
+            // Gone between reads: hidden. `count` records any other query error (a timeout, a lost
+            // connection) as `exists` used to, and a keyboard that is still there is not read as hidden.
+            if keyboards.count == 0 { return false }
+            XCTFail("Could not read the keyboard: \(error)")
+            return false
+        }
+        return keyboard.frame.height > 1 && keyboard.frame.minY < frame.maxY - 1
     }
 
     /// Waits for the keyboard to be put away (gone, or zero-height at the foot on iPad).
@@ -68,8 +84,17 @@ extension XCUIApplication {
 
     /// Shows the iPad sidebar when it is hidden (portrait, or folded in landscape).
     func showSidebar(file: StaticString = #filePath, line: UInt = #line) {
-        if buttons["sidebar-search"].waitForExistence(timeout: 2), buttons["sidebar-search"].isHittable { return }
+        // The shell first: docked beside the columns (landscape from 1100pt) the layout draws no
+        // Show button, so a sidebar that is merely slow to become hittable (a sheet still leaving)
+        // must be waited for, not taken for a hidden one.
+        waitForShell(file: file, line: line)
         let show = buttons["sidebar-show"]
+        if !show.exists {
+            let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: buttons["sidebar-search"])
+            XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 30), .completed, "The docked sidebar is not reachable", file: file, line: line)
+            return
+        }
+        if buttons["sidebar-search"].waitForExistence(timeout: 2), buttons["sidebar-search"].isHittable { return }
         XCTAssertTrue(show.waitForExistence(timeout: 30), "No Show sidebar button", file: file, line: line)
         show.tap()
         XCTAssertTrue(buttons["sidebar-search"].waitForExistence(timeout: 5), "The sidebar did not show", file: file, line: line)
@@ -78,6 +103,10 @@ extension XCUIApplication {
     /// Opens a place (`jobs`, `inbox`, `priceBook`…) from the phone drawer or the iPad sidebar.
     func openPlace(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
         guard usesTabletLayout else { return openFromDrawer(id, file: file, line: line) }
+        // The shell first: the sidebar's own Search (docked beside the columns, or showing) or the
+        // top bar's Show sidebar (hidden). Read before either is drawn, a docked sidebar looks
+        // hidden, and `showSidebar` then waits for a Show button the docked layout never draws.
+        waitForShell(file: file, line: line)
         let row = buttons["sidebar-\(id)"]
         if !(row.exists && row.isHittable) { showSidebar(file: file, line: line) }
         XCTAssertTrue(row.waitForExistence(timeout: 5), "No sidebar row \(id)", file: file, line: line)
@@ -104,10 +133,14 @@ extension XCUIApplication {
     }
 
     /// Presses a hardware-keyboard shortcut and waits for `expected`, pressing once more if nothing
-    /// answered. The retry covers XCUITest's simulated keyboard, not the app. After each launch the
-    /// first chord's modifier never reaches the app. backboardd (BackBoard EventDelivery log) posts
-    /// the first ⌘ key-down only to SpringBoard's `systemKeyCommandOverlay`, so the letter lands
-    /// without ⌘. From the second chord on, ⌘ goes to the app too. The checks behind this (#139):
+    /// answered. The retry covers XCUITest's simulated keyboard, not the app. XCTest attaches a
+    /// virtual keyboard for each press and removes it about 0.2 s later. backboardd (BackBoard
+    /// EventDelivery log) hands a ⌘ chord to the app as a command only once the app has registered
+    /// its key commands ("new key command registrations for pid:N"); before that the letter lands
+    /// without ⌘, or SpringBoard takes the chord. The app registers at launch or after the first
+    /// keyboard comes (on the iPad 0.2-0.7 s later), and now and then only after a later one: then
+    /// both presses miss (CI runs 45133610900 and 45148171838, BYR-1843; scripts/ci_cancelled_taps.py
+    /// tells that case apart in CI). The checks behind this (#139):
     /// - Stock Safari's first ⌘T routes the same way.
     /// - UIKit's own ⌘A (select all) in the search field fails on the first chord in 3 of 3 runs
     ///   ("Kitchen" + ⌘A + x gives "Kitchenx") and works on the second.
@@ -142,11 +175,14 @@ extension XCUIApplication {
     func thorbisFrontButton(matching predicate: NSPredicate) -> XCUIElement {
         let query = buttons.matching(predicate)
         _ = query.firstMatch.waitForExistence(timeout: 5)
-        let matches = query.allElementsBoundByIndex
-        if let usable = matches.reversed().first(where: { thorbisUsableFrame(of: $0) != nil }) {
-            return usable
+        // Bind by index: an element taken from `allElementsBoundByIndex` re-resolves by its label,
+        // which is ambiguous when a page button behind the menu has the same name.
+        let count = query.count
+        for index in stride(from: count - 1, through: 0, by: -1) {
+            let candidate = query.element(boundBy: index)
+            if thorbisUsableFrame(of: candidate) != nil { return candidate }
         }
-        return matches.last ?? query.firstMatch
+        return count > 0 ? query.element(boundBy: count - 1) : query.firstMatch
     }
 
     func thorbisFrameDump(_ element: XCUIElement, name: String) -> String {

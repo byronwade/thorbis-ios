@@ -10,6 +10,6 @@ final class CustomerListVisualUITests: XCTestCase {
         let customer = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Danielle Marlowe", "Dispatched")).firstMatch
         XCTAssertTrue(customer.waitForExistence(timeout: 20))
         customer.tap()
-        XCTAssertTrue(app.buttons["customer-next-visit"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["customer-hub-jobs"].waitForExistence(timeout: 10))
     }
 }

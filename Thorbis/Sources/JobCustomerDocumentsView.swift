@@ -1,8 +1,33 @@
 import SwiftUI
 
-private enum CustomerJobPaper: Hashable {
+enum CustomerJobPaper: Hashable {
     case estimate(EstimateRecord)
     case invoice(InvoiceRecord, signing: Bool)
+}
+
+/// Stable navigation owner for async rechecks and destination callbacks.
+@MainActor final class CustomerJobPaperNavigation: ObservableObject {
+    @Published var paper: CustomerJobPaper?
+    @Published var generation = UUID()
+    @Published var book: CustomerJobDocumentID?
+    @Published var openingID: String?
+    var selectionRevision = UUID()
+    private(set) var requestRevision = UUID()
+
+    func beginOpen(_ id: String) -> UUID? {
+        guard openingID == nil else { return nil }
+        let request = UUID()
+        requestRevision = request
+        openingID = id
+        return request
+    }
+    func finishOpen(_ request: UUID) {
+        if requestRevision == request { openingID = nil }
+    }
+    func invalidatePendingOpen() {
+        requestRevision = UUID()
+        openingID = nil
+    }
 }
 
 /// Customer view's home. Lives inside one CustomerModeContainer: the job's estimates (select and
@@ -29,11 +54,36 @@ struct JobCustomerDocumentsView: View {
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @Environment(\.dynamicTypeSize) private var typeSize
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
-    @State private var paper: CustomerJobPaper?
-    @State private var book: CustomerJobDocumentID?
-    @State private var openingID: String?
+    @StateObject private var paperNavigation = CustomerJobPaperNavigation()
+    private var paper: CustomerJobPaper? {
+        get { paperNavigation.paper }
+        nonmutating set { paperNavigation.paper = newValue }
+    }
+    private var paperGeneration: UUID {
+        get { paperNavigation.generation }
+        nonmutating set { paperNavigation.generation = newValue }
+    }
+    private var book: CustomerJobDocumentID? {
+        get { paperNavigation.book }
+        nonmutating set {
+            if paperNavigation.book != newValue { paperNavigation.invalidatePendingOpen() }
+            paperNavigation.book = newValue
+        }
+    }
+    private var openingID: String? {
+        get { paperNavigation.openingID }
+        nonmutating set { paperNavigation.openingID = newValue }
+    }
+    private var documentSelectionRevision: UUID {
+        get { paperNavigation.selectionRevision }
+        nonmutating set {
+            paperNavigation.invalidatePendingOpen()
+            paperNavigation.selectionRevision = newValue
+        }
+    }
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var error: String?
     @State private var unlocking = false
@@ -50,14 +100,22 @@ struct JobCustomerDocumentsView: View {
         Group {
             if currentWorkspace {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Your job documents").font(Theme.customerFont(28, weight: .medium))
+                    // Paper "Customer view": the greeting, then Estimates, Invoices and Your details as
+                    // grouped cards 16 from the edge, 22 apart, with the commit after the last card.
+                    VStack(alignment: .leading, spacing: 22) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(eyebrow).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(greeting).font(Theme.font(34)).tracking(-0.85)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 6)
                                 .accessibilityAddTraits(.isHeader)
-                            Text(jobTitle).font(Theme.customerFont(20)).fixedSize(horizontal: false, vertical: true)
-                            Text("JOB-\(scope.jobID.suffix(4).uppercased()) · \(customerName)")
-                                .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                                .accessibilityIdentifier("customer-view-title")
+                            Text("Here is everything for your visit today")
+                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        .padding(.horizontal, 4)
                         if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await refresh() } }
                         else if estimates?.isComplete == false || invoices?.isComplete == false {
                             CustomerProblemBanner(message: "Some documents couldn't be refreshed. Try again to see everything.",
@@ -66,8 +124,10 @@ struct JobCustomerDocumentsView: View {
                         if canViewEstimates { estimateRows }
                         if canViewInvoices { invoiceRows }
                         if canEditDetails { detailsRow }
+                        if canViewEstimates { approveEstimates }
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.vertical, 16)
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
+                    // Paper 38B: the commit sits 10 above the hand-back pill, which is pinned below.
                     .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("customer-job-documents-list")
@@ -78,10 +138,23 @@ struct JobCustomerDocumentsView: View {
         }
         .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
-            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: handBack)
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
+            VStack(spacing: 10) {
+                CustomerHandBackPill(busy: openingID != nil, action: beginHandBack)
+                // At accessibility sizes the pinned foot is the pill alone, so the list keeps its room.
+                if !typeSize.isAccessibilitySize {
+                    Text("Your technician's screens stay locked.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 12).background(Theme.canvas)
         }
-        .thorbisDestination(item: $book) { initial in
+        // Paper 38B draws no bar over the customer's home: the greeting starts the page and handing
+        // back is the pill at its foot. Pushed pages keep their bar, back circle and owner exit.
+        .toolbar(.hidden, for: .navigationBar)
+        .thorbisDestination(item: Binding(get: { book }, set: { book = $0 })) { initial in
             if currentWorkspace {
                 CustomerJobDocumentBook(scope: scope, sourceGeneration: sourceGeneration,
                     estimates: canViewEstimates && estimates?.scope == scope ? estimates?.records ?? [] : [],
@@ -92,12 +165,30 @@ struct JobCustomerDocumentsView: View {
                     initial: initial, actionError: error, refresh: refresh,
                     reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
                     signInvoice: { id in Task { await openInvoice(id, decision: true, sign: true) } },
-                    payInvoice: { id in Task { await openInvoice(id, payment: true) } },
+                    payInvoice: { id in
+                        #if DEBUG
+                        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-recheck-fails") {
+                            PaperPreviewProtocol.failDocumentPaymentRecheck()
+                        }
+                        #endif
+                        Task { await openInvoice(id, payment: true) }
+                    },
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
-                    canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
+                    canPayInvoice: session.can("invoice.payment.create", feature: "payments"),
+                    onSelectionChanged: { documentSelectionRevision = UUID(); error = nil })
                     .disabled(unlocking || openingID != nil)
-                    .thorbisDestination(item: $paper) { destination in
-                        destinationView(destination)
+                    .onDisappear { paperNavigation.invalidatePendingOpen() }
+                    .thorbisDestination(item: Binding(get: { paper }, set: { next in
+                        if paper != next { paperGeneration = UUID() }
+                        paper = next
+                    })) { destination in
+                        VStack(spacing: 0) {
+                            if case .invoice = destination, let error {
+                                CustomerProblemBanner(message: error)
+                                    .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                            }
+                            destinationView(destination)
+                        }
                             .disabled(unlocking)
                             .navigationTitle(reference(destination))
                             .toolbar {
@@ -135,15 +226,17 @@ struct JobCustomerDocumentsView: View {
         }
         .thorbisDestination(isPresented: $editingDetails) {
             if currentWorkspace, canEditDetails, let details {
-                CustomerSelfEditForm(model: details) { editingDetails = false }
-                    .navigationTitle("Your details")
+                CustomerSelfEditForm(model: details, currentAuthority: {
+                    currentWorkspace && handoff?.isCurrentJob == true && session.can("customer.edit", feature: "core_crm")
+                }) { editingDetails = false }
+                    .navigationTitle("My details")
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             } else {
                 customerHandBackState(withAction: true)
             }
         }
         .task(id: session.generation) {
-            paper = nil
+            paperGeneration = UUID(); paper = nil
             book = nil
             editingDetails = false
             paymentModel = nil
@@ -174,60 +267,86 @@ struct JobCustomerDocumentsView: View {
         }
     }
 
+    /// Paper: "Wade's Plumbing · Customer view" above the greeting.
+    private var eyebrow: String {
+        guard let workspace = session.activeOrganization?.name, !workspace.isEmpty else { return "Customer view" }
+        return "\(workspace) \u{00B7} Customer view"
+    }
+
+    /// Paper: "Hi Danielle", the customer's first name.
+    private var greeting: String {
+        guard let first = customerName.split(separator: " ").first else { return "Hi" }
+        return "Hi \(first)"
+    }
+
     private var estimateRows: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            customerSectionLabel("Estimates", count: (estimates?.records.count ?? 0) + (estimates?.unavailableIDs.count ?? 0))
-            approveEstimates
-            if let estimates {
-                if estimates.records.isEmpty && estimates.isComplete { empty("No estimates for this job yet.") }
-                ForEach(estimates.records) { estimate in
-                    Button { Task { await openEstimate(estimate.id) } } label: {
-                        JobDocumentRow(estimate: estimate, fresh: estimates.freshIDs.contains(estimate.id), customerFacing: true)
+        VStack(alignment: .leading, spacing: 8) {
+            customerSectionLabel("Estimates")
+            VStack(spacing: 0) {
+                if let estimates {
+                    if estimates.records.isEmpty && estimates.unavailableIDs.isEmpty && estimates.isComplete {
+                        empty("No estimates for this job yet.")
                     }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("customer-estimate-\(estimate.id)")
-                    .disabled(openingID != nil || !estimates.freshIDs.contains(estimate.id))
-                }
-                ForEach(estimates.unavailableIDs, id: \.self) { id in
-                    JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
-                                   status: "unavailable", amount: nil, fresh: false, customerFacing: true)
-                        .accessibilityIdentifier("customer-estimate-unavailable-\(id)")
-                }
-            } else { SkeletonRows(count: 2, leading: false, inset: 0) }
+                    ForEach(Array(estimates.records.enumerated()), id: \.element.id) { index, estimate in
+                        if index > 0 { WellDivider() }
+                        Button { Task { await openEstimate(estimate.id) } } label: {
+                            estimateRow(estimate, fresh: estimates.freshIDs.contains(estimate.id))
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("customer-estimate-\(estimate.id)")
+                        .disabled(openingID != nil || !estimates.freshIDs.contains(estimate.id))
+                    }
+                    ForEach(Array(estimates.unavailableIDs.enumerated()), id: \.element) { index, id in
+                        if index > 0 || !estimates.records.isEmpty { WellDivider() }
+                        CustomerHomeDocumentRow(title: "Estimate unavailable", reference: "EST-\(id.suffix(4).uppercased())",
+                                                word: "Needs refresh", chevron: false)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("customer-estimate-unavailable-\(id)")
+                    }
+                } else { SkeletonRows(count: 2, leading: false, inset: PaperCardMetrics.inset) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
         }
+    }
+
+    /// Paper's estimate row: the name over "EST-1042 · Waiting for you", the amount, a chevron.
+    private func estimateRow(_ estimate: EstimateRecord, fresh: Bool) -> CustomerHomeDocumentRow {
+        let facts = JobDocumentRow(estimate: estimate, fresh: fresh, customerFacing: true)
+        let word = estimate.status == "sent" ? "Waiting for you" : estimate.status.statusLabel
+        return CustomerHomeDocumentRow(title: facts.title, reference: facts.reference,
+                                       word: fresh ? word : "Needs refresh",
+                                       tint: fresh ? StatusWord.documentTint(estimate.status) : nil,
+                                       detail: facts.detail, amount: facts.amount)
+    }
+
+    /// Paper's invoice row: the job's name over "INV-2209 · $340.00 due", the total, a chevron.
+    private func invoiceRow(_ invoice: InvoiceRecord, fresh: Bool) -> CustomerHomeDocumentRow {
+        let facts = JobDocumentRow(invoice: invoice, fresh: fresh, customerFacing: true)
+        let word = invoice.status == "issued" ? (facts.detail ?? "Unpaid") : invoice.status.statusLabel
+        return CustomerHomeDocumentRow(title: invoice.isDeposit || jobTitle.isEmpty ? facts.title : jobTitle,
+                                       reference: facts.reference,
+                                       word: fresh ? word : "Needs refresh",
+                                       tint: fresh ? StatusWord.documentTint(invoice.status) : nil,
+                                       amount: facts.amount)
     }
 
     /// Approving goes through the job's one multi-estimate review: select one or several, review,
     /// then sign each. Already approved estimates stay listed without approving again.
+    /// Paper: the brand commit "Review estimates" under the last card.
     @ViewBuilder private var approveEstimates: some View {
         if handoff != nil, let estimates, estimates.records.contains(where: { $0.status == "sent" }) {
-            CustomerSecondaryButton(title: "Choose estimates to approve", type: CustomerType(nil)) { approving = true }
+            CustomerPresentationCommit(title: "Review estimates", enabled: openingID == nil, busy: false,
+                                       type: CustomerType(nil)) { approving = true }
                 .accessibilityIdentifier("customer-view-approve-estimates")
-                .disabled(openingID != nil)
         }
     }
 
     private var detailsRow: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             customerSectionLabel("Your details")
             Button { editingDetails = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "person.crop.circle").font(.system(size: 22)).foregroundStyle(Theme.brandText)
-                        .frame(width: 30).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Check your details").font(Theme.customerFont(18, weight: .medium))
-                        Text("Name, phone, email, addresses and how to reach you")
-                            .font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
-                .panelBackground(cornerRadius: 14)
-                .contentShape(Rectangle())
+                if let details { CustomerHomeDetailsCard(model: details) }
             }
             .buttonStyle(PressStyle())
             .accessibilityLabel("Your details")
@@ -238,23 +357,29 @@ struct JobCustomerDocumentsView: View {
     }
 
     private var invoiceRows: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            customerSectionLabel("Invoices", count: invoices?.records.count ?? 0)
-            if let invoices {
-                if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
-                ForEach(invoices.records) { invoice in
-                    Button { Task { await openInvoice(invoice.id) } } label: {
-                        JobDocumentRow(invoice: invoice, fresh: invoices.freshIDs.contains(invoice.id), customerFacing: true)
+        VStack(alignment: .leading, spacing: 8) {
+            customerSectionLabel("Invoices")
+            VStack(spacing: 0) {
+                if let invoices {
+                    if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
+                    ForEach(Array(invoices.records.enumerated()), id: \.element.id) { index, invoice in
+                        if index > 0 { WellDivider() }
+                        Button { Task { await openInvoice(invoice.id) } } label: {
+                            invoiceRow(invoice, fresh: invoices.freshIDs.contains(invoice.id))
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("customer-invoice-\(invoice.id)")
+                        .disabled(openingID != nil || !invoices.freshIDs.contains(invoice.id))
                     }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("customer-invoice-\(invoice.id)")
-                    .disabled(openingID != nil || !invoices.freshIDs.contains(invoice.id))
-                }
-            } else { SkeletonRows(count: 2, leading: false, inset: 0) }
+                } else { SkeletonRows(count: 2, leading: false, inset: PaperCardMetrics.inset) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
         }
     }
 
     @ViewBuilder private func destinationView(_ destination: CustomerJobPaper) -> some View {
+        let presentation = paperGeneration
         switch destination {
         case .estimate(let estimate):
             if estimate.status == "sent", TechJobFlow.canShow(estimate, can: .init(
@@ -264,7 +389,9 @@ struct JobCustomerDocumentsView: View {
                     returnToDocuments: {
                         returnToJobDocuments()
                     },
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewEstimates && session.can("estimate.approve", feature: "estimates") },
                     onApproved: { approved in
+                        guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true, canViewEstimates else { return }
                         documents.markEstimatesStale(scope: scope, updated: approved, requestedID: estimate.id)
                         refreshEstimatesInBackground()
                     }, onDone: beginHandBack)
@@ -277,11 +404,14 @@ struct JobCustomerDocumentsView: View {
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
                         ? { Task { await pay(invoice.id) } } : nil, initiallySigning: signing,
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && (!signing || session.can("invoice.edit", feature: "invoicing")) && scope.contains(invoice) },
                     onSigned: { updated in
-                        guard scope.contains(updated), updated.id == invoice.id else { return }
+                        guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true,
+                              canViewInvoices, session.can("invoice.edit", feature: "invoicing"),
+                              scope.contains(updated), updated.id == invoice.id else { return }
                         documents.replaceInvoice(updated)
                         paymentModel?.acceptInvoiceMutationResponse(updated)
-                        paper = .invoice(updated, signing: false)
+                        paperGeneration = UUID(); paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
                     }, onDone: beginHandBack)
             } else {
@@ -298,7 +428,8 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func beginHandBack() {
-        paper = nil
+        paperNavigation.invalidatePendingOpen()
+        paperGeneration = UUID(); paper = nil
         book = nil
         approving = false
         editingDetails = false
@@ -306,19 +437,22 @@ struct JobCustomerDocumentsView: View {
     }
 
     /// The session or workspace changed under the customer: only the technician can reopen it.
-    /// On the home the pinned "Hand back to the technician" is the one action, so the state is
+    /// On the home the pinned "Hand back to technician" is the one action, so the state is
     /// words only; pushed pages have no pinned bar and carry it themselves.
     private func customerHandBackState(withAction: Bool) -> some View {
         let handBack: (() -> Void)? = withAction ? { beginHandBack() } : nil
         return CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
                              message: "Your technician needs to reload this job.",
-                             actionTitle: withAction ? "Hand back to the technician" : nil,
+                             actionTitle: withAction ? "Hand back to technician" : nil,
                              action: handBack)
             .padding(.horizontal, Theme.gutter)
     }
 
     private func empty(_ text: String) -> some View {
-        Text(text).font(Theme.customerFont(18)).foregroundStyle(Theme.muted).padding(.vertical, 8)
+        Text(text).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
     }
 
     private func refresh() async {
@@ -341,7 +475,7 @@ struct JobCustomerDocumentsView: View {
         guard currentWorkspace, canViewEstimates,
               let presented = paper, case .estimate = presented else { return }
         documents.markEstimatesStale(scope: scope)
-        paper = nil
+        paperGeneration = UUID(); paper = nil
         refreshEstimatesInBackground()
     }
 
@@ -355,36 +489,64 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func openEstimate(_ id: String, decision: Bool = false) async {
-        guard openingID == nil, currentWorkspace, canViewEstimates else { return }
-        openingID = id
-        defer { openingID = nil }
+        guard currentWorkspace, canViewEstimates, let request = paperNavigation.beginOpen(id) else { return }
+        defer { paperNavigation.finishOpen(request) }
         let generation = session.generation
         let published = await documents.loadEstimates(scope: scope, api: api) {
-            session.generation == generation && currentWorkspace && canViewEstimates
+            paperNavigation.requestRevision == request && session.generation == generation && currentWorkspace && canViewEstimates
         }
-        guard session.generation == generation, currentWorkspace, published, let read = estimates else { return }
+        guard paperNavigation.requestRevision == request, session.generation == generation,
+              currentWorkspace, published, let read = estimates else { return }
         guard read.freshIDs.contains(id), let estimate = read.records.first(where: { $0.id == id }) else {
             error = "This estimate couldn't be refreshed. Try again in a moment."
             return
         }
-        if decision { paper = .estimate(estimate) }
+        if decision { paperGeneration = UUID(); paper = .estimate(estimate) }
         else { book = .estimate(id) }
     }
 
     private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
-        guard openingID == nil, currentWorkspace, canViewInvoices else { return }
-        openingID = id
-        defer { openingID = nil }
+        guard currentWorkspace, canViewInvoices,
+              !sign || session.can("invoice.edit", feature: "invoicing"),
+              !decision || book != nil,
+              let request = paperNavigation.beginOpen(id) else { return }
+        error = nil
+        defer { paperNavigation.finishOpen(request) }
         let generation = session.generation
+        let authority = session.authorityRevision
+        let apiGeneration = api.requestGeneration
+        let originatingBook = book
+        let selection = documentSelectionRevision
+        let presentation = paperGeneration
+        let originalPaper = paper
+        func isCurrentOpen() -> Bool {
+            !Task.isCancelled && paperNavigation.requestRevision == request &&
+            session.generation == generation && session.authorityRevision == authority &&
+            api.requestGeneration == apiGeneration && currentWorkspace && canViewInvoices &&
+            (!sign || session.can("invoice.edit", feature: "invoicing")) &&
+            (!(decision || payment) || handoff?.isCurrentJob == true) &&
+            book == originatingBook && documentSelectionRevision == selection &&
+            paperGeneration == presentation && paper == originalPaper
+        }
         do {
+            #if DEBUG
+            if sign && PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-revoke-invoice-edit-on-sign") {
+                PaperPreviewProtocol.revokeInvoiceEditForSigning()
+                await session.revalidate()
+            }
+            if sign && PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-delay-invoice-signing") {
+                try await Task.sleep(for: .seconds(15))
+            }
+            #endif
+            guard isCurrentOpen() else { return }
             let invoice = try await api.liveFieldInvoice(id)
-            guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
+            guard isCurrentOpen() else { return }
             guard invoice.id == id, scope.contains(invoice) else {
                 throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
             }
             let model = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: scope)
             await model.load()
-            guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
+            guard isCurrentOpen() else { return }
             if let latest = model.invoice {
                 guard latest.id == id, scope.contains(latest) else {
                     throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
@@ -396,32 +558,57 @@ struct JobCustomerDocumentsView: View {
                     guard CustomerDocumentAmounts(lines: latest.lines, currency: latest.currency, amountPaid: latest.amountPaid) != nil else {
                         throw Problem(title: "These invoice amounts couldn't be verified. Refresh before continuing.", status: nil, detail: nil)
                     }
-                    paper = .invoice(latest, signing: sign)
+                    paperGeneration = UUID(); paper = .invoice(latest, signing: sign)
                 } else { book = .invoice(id) }
             } else {
                 paymentModel = nil
                 throw Problem(title: model.loadError ?? "This invoice couldn't be refreshed", status: nil, detail: nil)
             }
-        } catch is CancellationError { } catch { self.error = error.customerSentence(.openInvoice) }
+        } catch is CancellationError {
+        } catch {
+            guard isCurrentOpen() else { return }
+            self.error = error.customerSentence(.openInvoice)
+        }
     }
 
     private func pay(_ invoiceID: String) async {
-        let generation = session.generation
-        guard !unlocking, currentWorkspace, paymentModel?.invoice?.id == invoiceID,
-              paymentModel?.canRecordPayment == true,
-              session.can("invoice.payment.create", feature: "payments") else { return }
+        guard !unlocking, currentWorkspace else { return }
+        guard paymentModel?.invoice?.id == invoiceID, paymentModel?.canRecordPayment == true,
+              canViewInvoices, handoff?.isCurrentJob == true,
+              session.can("invoice.payment.create", feature: "payments"),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            error = "Payment isn't ready. Ask your technician to check this invoice."
+            return
+        }
+        error = nil
+        let selectionRevision = documentSelectionRevision
+        let presentationRevision = paperGeneration
+        let originalPaper = paper
+        let originalBook = book
         unlocking = true
         defer { unlocking = false }
         let unlocked = await authenticateOwner("Unlock to take payment")
-        if unlocked, session.generation == generation, currentWorkspace {
+        #if DEBUG
+        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-retire-on-unlock") {
+            api.invalidateRequests()
+        }
+        #endif
+        let current = currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices &&
+            session.can("invoice.payment.create", feature: "payments") && authority.isCurrent(api: api, session: session) &&
+            documentSelectionRevision == selectionRevision && paperGeneration == presentationRevision &&
+            paper == originalPaper && book == originalBook && paymentModel?.invoice?.id == invoiceID &&
+            paymentModel?.canRecordPayment == true
+        guard current else { return }
+        if unlocked {
             requestPayment(invoiceID)
-        } else if session.generation == generation, currentWorkspace {
+        } else {
             error = "Your technician needs to unlock before taking payment."
         }
     }
 
     private func unlock() async {
         guard !unlocking else { return }
+        paperNavigation.invalidatePendingOpen()
         unlocking = true
         defer { unlocking = false }
         if await authenticateOwner("Unlock to leave customer mode") { onUnlocked() }
@@ -456,10 +643,11 @@ private struct CustomerJobReadOnlyPaper: View {
                         lines(invoice.lines, currency: invoice.currency, type: type)
                     }
                 }
-                .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+                .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
-            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: false, action: handBack)
-                .padding(Theme.gutter)
+            CustomerCommitButton(title: "Hand back to technician", icon: "lock", busy: false, action: handBack)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
         }
     }
 
@@ -469,13 +657,12 @@ private struct CustomerJobReadOnlyPaper: View {
     }
 
     @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, type: CustomerType, expectedTotal: Int? = nil) -> some View {
-        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
-           expectedTotal.map({ $0 == amounts.total }) != false,
-           let projected = customerEstimateProjection(lines, currency: currency) {
+        if let display = customerEstimateDisplay(lines, currency: currency),
+           expectedTotal.map({ $0 == display.amounts.total }) != false {
             CustomerIncludedLabel(type: type)
-            CustomerIncludedLines(lines: projected, type: type, rows: expectedTotal.map {
-                [CustomerAmountRow(label: "Option total", amount: money($0, currency: currency), emphasis: true)]
-            } ?? customerAmountRows(amounts, currency: currency, invoice: false))
+            CustomerIncludedLines(lines: display.lines, type: type,
+                                  rows: customerAmountRows(display.amounts, currency: currency, invoice: false,
+                                                           totalLabel: expectedTotal == nil ? "Total" : "Option total"))
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                 .font(Theme.customerFont(type.body))
@@ -483,10 +670,157 @@ private struct CustomerJobReadOnlyPaper: View {
     }
 }
 
-/// A section label at customer size (17pt): the customer reads this screen, not the tech.
-private func customerSectionLabel(_ title: String, count: Int? = nil) -> some View {
-    Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
-        .font(Theme.customerFont(17, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+/// Paper 38B's section label: 13 Semibold, muted, 4 in from the card's edge.
+private func customerSectionLabel(_ title: String) -> some View {
+    Text(title)
+        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
         .accessibilityAddTraits(.isHeader)
-        .frame(minHeight: 32, alignment: .leading)
+        .padding(.horizontal, 4)
+}
+
+/// One document on Customer view's home (Paper "Customer view"): the name over
+/// "EST-1042 · Waiting for you", the amount at the trailing edge, then a chevron. The card it sits
+/// on draws the surface and the hairlines. At accessibility sizes the amount drops under the name.
+private struct CustomerHomeDocumentRow: View {
+    let title: String
+    let reference: String
+    /// The document's state as a word; `tint` colours it (Paper draws "Waiting for you" in the warning word colour).
+    let word: String
+    var tint: Color? = nil
+    var detail: String? = nil
+    var amount: String? = nil
+    var chevron = true
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                subtitle.fixedSize(horizontal: false, vertical: true)
+                if stacked, let amount { amountText(amount) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !stacked, let amount { amountText(amount).fixedSize() }
+            if chevron {
+                PaperChevron()
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            }
+        }
+        .multilineTextAlignment(.leading)
+        .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private var subtitle: Text {
+        let quiet = Theme.font(14)
+        var line = Text("\(reference) \u{00B7} ").font(quiet).foregroundStyle(Theme.muted)
+            + Text(word).font(Theme.font(14, weight: tint == nil ? .regular : .medium))
+                .foregroundStyle(tint ?? Theme.muted)
+        if let detail, !detail.isEmpty {
+            line = line + Text(" \u{00B7} \(detail)").font(quiet).foregroundStyle(Theme.muted)
+        }
+        return line
+    }
+
+    private func amountText(_ amount: String) -> some View {
+        Text(amount).font(Theme.font(16, weight: .medium))
+            .foregroundStyle(Theme.foreground).lineLimit(1).minimumScaleFactor(0.7)
+    }
+}
+
+/// "Your details" on Customer view's home (Paper): Phone, Email and Address, each with Edit.
+/// Until the customer's record has loaded it is one row; either way the whole card opens the form.
+private struct CustomerHomeDetailsCard: View {
+    @ObservedObject var model: CustomerSelfEditModel
+    @EnvironmentObject private var api: APIClient
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let draft = model.draft {
+                fact("Phone", draft.phone)
+                WellDivider()
+                fact("Email", draft.email)
+                WellDivider()
+                fact("Address", draft.address)
+            } else {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Check your details").font(Theme.font(16, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Text("Name, phone, email, addresses and how to reach you")
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    PaperChevron()
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
+                .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
+            }
+        }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground()
+        .contentShape(Rectangle())
+        // The same read the form makes; it keeps the draft, so opening the form does not load twice.
+        .task { await model.load(api: api) }
+    }
+
+    private func fact(_ label: String, _ value: String) -> some View {
+        let stacked = typeSize.isAccessibilitySize
+        let shown = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .frame(width: stacked ? nil : 64, alignment: .leading)
+            Text(shown.isEmpty ? "Not added" : shown).font(Theme.font(16, weight: .medium))
+                .foregroundStyle(shown.isEmpty ? Theme.muted : Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(shown.isEmpty ? "Add" : "Edit").font(Theme.font(15, weight: .semibold))
+                .foregroundStyle(Theme.brandText)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
+    }
+}
+
+/// Paper "Customer view": handing back is the quiet pill (a lock and the words) under the commit.
+/// The words wrap at large text so the pill grows instead of clipping.
+private struct CustomerHandBackPill: View {
+    let busy: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if busy { ProgressView() }
+                else { PaperIcon(.customerLock, size: 18, color: Theme.foreground).accessibilityHidden(true) }
+                // Paper 38B's words. The spoken name stays the full sentence the other customer
+                // screens use, which is also what the UI tests look for.
+                Text("Hand back to technician").font(Theme.font(16, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(Theme.quietFill, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Hand back to technician")
+        .disabled(busy)
+    }
+}
+
+extension PaperGlyph {
+    /// Paper 38B's lock on "Hand back to technician" (18 box, 1.6 stroke).
+    static let customerLock = PaperGlyph(box: 18, [.rect(3.5, 8, 11, 7.5, rx: 2, 1.6), .stroke("M6 8V5.8a3 3 0 0 1 6 0V8", 1.6)])
 }

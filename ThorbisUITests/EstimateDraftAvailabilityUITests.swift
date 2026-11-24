@@ -2,41 +2,45 @@ import XCTest
 
 @MainActor
 final class EstimateDraftAvailabilityUITests: XCTestCase {
-    func testDraftInputIsRetainedAndUnavailableSaveIsExplained() {
+    private let oldLimit = "Draft changes can't be saved yet."
+
+    /// A draft can be edited and saved: the edit stays in the field, nothing says saving is
+    /// unavailable, and Save draft turns on once something changed.
+    func testDraftInputIsRetainedAndSaveIsOffered() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-draft"]
         app.launch()
         let title = app.textFields["Estimate title"]
         XCTAssertTrue(title.waitForExistence(timeout: 30), app.debugDescription)
-        title.tap()
-        title.typeText(" updated")
-        XCTAssertTrue((title.value as? String)?.contains(" updated") == true)
-        XCTAssertTrue(app.staticTexts["Draft changes can't be saved yet."].exists)
         let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save draft")).firstMatch
         XCTAssertTrue(save.exists)
-        XCTAssertFalse(save.isEnabled)
+        XCTAssertFalse(save.isEnabled, "Nothing to save before an edit")
+        title.tap()
+        title.typeText(" updated")
+        // The field's value and Save draft catch up a beat after the last key on a slow runner.
+        let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (title.value as? String)?.contains(" updated") == true
+        }, object: title)
+        XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 10), .completed, "The edit stays in the field")
+        XCTAssertFalse(app.staticTexts[oldLimit].exists)
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "An edited draft can be saved")
     }
 
-    func testDraftWarningRemainsVisibleWhileSearchingCatalog() {
+    /// The catalog sheet no longer repeats a limit that is gone.
+    func testCatalogSearchShowsNoDraftLimit() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-draft"]
         app.launch()
-        let warning = app.staticTexts["Draft changes can't be saved yet."]
-        XCTAssertTrue(warning.waitForExistence(timeout: 30))
-        // Since #183 the catalog is a sheet over the builder (behind "Add item"); it repeats the limit.
-        let add = app.buttons.matching(identifier: "estimate-add-item").firstMatch
-        XCTAssertTrue(add.waitForExistence(timeout: 10))
-        for _ in 0..<8 where !add.isHittable { app.swipeUp() }
-        add.tap()
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 30))
+        // Since #183 the catalog is a sheet over the builder (behind "Add item").
+        app.openPriceBook(from: app.buttons.matching(identifier: "estimate-add-item").firstMatch)
         let search = app.textFields["price-book-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        let shown = app.staticTexts.matching(NSPredicate(format: "label == %@", "Draft changes can't be saved yet."))
-            .allElementsBoundByIndex.first { $0.isHittable }
-        XCTAssertNotNil(shown, "The limitation must remain visible while adding catalog items")
-        if let shown { XCTAssertTrue(app.frame.contains(CGPoint(x: shown.frame.midX, y: shown.frame.midY))) }
+        XCTAssertFalse(app.staticTexts[oldLimit].exists)
     }
 }

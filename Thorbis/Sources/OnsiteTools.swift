@@ -40,19 +40,24 @@ enum JobNotePoster {
         guard !trimmed.isEmpty else { return .failed("There’s nothing to add yet.") }
         guard trimmed.utf16.count <= maxLength else { return .failed("This note is too long for one job note.") }
         guard canPost(session) else { return .failed("Your role can’t add notes to this job.") }
-        func queue() -> JobNotePostResult {
-            outbox.enqueue(.note(.init(jobId: jobID, body: trimmed)), policyVersion: session.policyVersion ?? 0) == nil
+        func queue(attemptedSince: Date?) -> JobNotePostResult {
+            outbox.enqueue(.note(.init(jobId: jobID, body: trimmed)), policyVersion: session.policyVersion ?? 0,
+                           attemptedSince: attemptedSince) == nil
                 ? .failed("This phone couldn’t keep the note. Try again.")
                 : .queued
         }
-        if session.isOffline { return queue() }
+        if session.isOffline { return queue(attemptedSince: nil) }
+        let started = Date()
         do {
             _ = try await api.addFieldNote(jobID, body: trimmed)
             return .saved
         } catch is CancellationError {
             return .failed("The note wasn’t sent. Try again.")
         } catch {
-            return error.isConnectivityFailure ? queue() : .failed(error.localizedDescription)
+            // A timeout or a dropped connection may have reached the server, so the replay looks for
+            // the note from `started` on first. A send that never left the phone is just resent.
+            guard error.isConnectivityFailure else { return .failed(error.localizedDescription) }
+            return queue(attemptedSince: error.neverReachedServer ? nil : started)
         }
     }
 }
@@ -137,7 +142,8 @@ struct OfficeContact: Equatable {
 /// Two quiet circles, Call office and Text office, shown only when the workspace has a business
 /// phone this person can read. Drop it in a header or a toolkit row.
 struct OfficeContactActions: View {
-    var size: CGFloat = 36
+    /// Paper v2: header circles are 44.
+    var size: CGFloat = 44
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.openURL) private var openURL
@@ -179,11 +185,22 @@ struct OnsiteToolsPreview: View {
                 JobChecklistSheet(jobID: PaperPreview.jobID,
                                   previewRun: ChecklistRun(templateID: "hvac-service", done: ["thermostat", "filter", "pressure-suction", "amps"],
                                                            readings: ["pressure-suction": "118", "amps": "14.6"], photos: ["filter": 1])) {}
+            case "tool-checklist-server":
+                ServerChecklistPreviewHost()
             default:
                 JobChecklistSheet(jobID: PaperPreview.jobID) {}
             }
         }
         .task { if session.phase != .ready { await session.restore() } }
+    }
+}
+
+/// The server-kept checklist sheet on sample data (`--paper-preview-screen tool-checklist-server`).
+private struct ServerChecklistPreviewHost: View {
+    @State private var sample = ChecklistPreviewData.model()
+
+    var body: some View {
+        JobServerChecklistSheet(jobID: PaperPreview.jobID, model: sample.0, opening: sample.1, startsOnList: sample.1 == nil) {}
     }
 }
 #endif

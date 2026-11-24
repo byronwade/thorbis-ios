@@ -17,4 +17,4 @@ This is an incremental staff beta, not full Paper/TanStack parity. See `beta-cov
 
 ## Distribution
 
-`xcodebuild -exportArchive` reported **Upload succeeded** and **Uploaded package is processing** at 3:10 AM EDT on 2026-10-27. App Store Connect processing and build assignment have not been rechecked because the Chrome session is signed out. Hayley Wade (`hayleywoods15@gmail.com`) is already listed in the external `External Testers` group, but Build 11 has not been assigned and no invitation is confirmed. External beta review still needs the App Review contact and demo-login details documented in `apple-record.md`.
+`xcodebuild -exportArchive` reported **Upload succeeded** and **Uploaded package is processing** at 3:10 AM EDT on 2026-10-27. App Store Connect processing and build assignment have not been rechecked because the Chrome session is signed out. An external tester is already listed in the external `External Testers` group, but Build 11 has not been assigned and no invitation is confirmed. External beta review still needs the App Review contact and demo-login details documented in `apple-record.md`.

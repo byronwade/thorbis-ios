@@ -97,6 +97,21 @@ final class DeviceIntegrationsTests: XCTestCase {
         XCTAssertNil(MailDraft(recipient: nil))
     }
 
+    func testMailHandoffPreservesAllComposerFields() throws {
+        let draft = try XCTUnwrap(MailDraft(recipients: ["one@example.com", "two@example.com"],
+            cc: ["copy@example.com"], bcc: ["private@example.com"], subject: "Visit & estimate", body: "First line\nSecond & final"))
+        let url = try XCTUnwrap(draft.mailtoURL)
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.path, "one@example.com,two@example.com")
+        let fields = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(fields["cc"], "copy@example.com")
+        XCTAssertEqual(fields["bcc"], "private@example.com")
+        XCTAssertEqual(fields["subject"], "Visit & estimate")
+        XCTAssertEqual(fields["body"], "First line\nSecond & final")
+        XCTAssertNil(MailDraft(recipients: ["invalid"], cc: [], bcc: [], subject: nil, body: nil))
+        XCTAssertNil(MailDraft(recipients: ["ok@example.com"], cc: ["invalid"], bcc: [], subject: nil, body: nil))
+    }
+
     func testCalendarAndEmailJoinTheJobMenuOnlyWhenAvailable() {
         XCTAssertEqual(JobMenu.groups(.init(canSchedule: true, canAddToCalendar: true, canEmail: true)),
                        [[.schedule, .addToCalendar], [.wrapUp, .followUps], [.email, .copyID]])

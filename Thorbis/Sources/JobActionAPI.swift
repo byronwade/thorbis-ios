@@ -45,6 +45,10 @@ struct FieldCloseoutRequirement: Codable, Hashable {
     let detail: String
     let nextAction: String?
     let commercialSource: String?
+
+    /// False for a rule the workspace's policy does not ask for ("company policy does not require
+    /// a job note"): it is nothing to do and nothing to show.
+    var applies: Bool { outcome != "not_required" }
 }
 
 struct FieldCloseout: Codable, Hashable {
@@ -293,6 +297,8 @@ extension APIClient {
         try await send("POST", jobActionPath(jobID, "/schedule"), body: request)
     }
 
+    /// The server refuses this while `job_schedule_cycle_undo` is off: check
+    /// `session.isOn(.rescheduleUndo)` before offering or calling it.
     func undoFieldReschedule(_ jobID: String, sourceAuditId: String) async throws -> JobRecord {
         struct Body: Encodable { let sourceAuditId: String }
         return try await send("POST", jobActionPath(jobID, "/reschedule/undo"), body: Body(sourceAuditId: sourceAuditId))

@@ -31,11 +31,17 @@ struct RootView: View {
     /// True while the drawer slides shut (or springs back from a short edge drag). The state says
     /// closed the moment that motion starts, so the drawer's contents stay built until it lands.
     @State private var drawerSettling = false
+    /// Place roots on screen now (a pushed page, even one not in the path, takes its root off).
+    @State private var rootsShowing: Set<String> = []
+    /// The bottom bar's measured height, for the room place roots leave under their content.
+    @State private var tabBarHeight: CGFloat = 64
+    /// The software keyboard is up: the bar steps aside.
+    @State private var keyboardShown = false
     @AccessibilityFocusState private var drawerTitleFocus: Bool
-    /// The drawer's Edit menu: the pinned places and their order.
-    @State private var editingMenu = false
     /// Whether Inbox holds unread notices, as the server last said. Unknown shows no dot.
     @State private var inboxUnread = false
+    /// How many notices are unread, when one page holds them all; nil when only "some" is known.
+    @State private var inboxUnreadCount: Int?
     /// iPhone search: a field floats low on the screen and results rise in a card above it.
     /// True while the Search route is the screen showing (v2: Search is a pushed route).
     @State private var barSearching = false
@@ -60,6 +66,7 @@ struct RootView: View {
     @State private var workspace = false
     @State private var createJob = false
     #if DEBUG
+    @ObservedObject private var mediaDetailRetryProbe = MediaDetailRetryProbe.shared
     @State private var previewInvoiceEditor = false
     @State private var previewInvoiceDetail = false
     @State private var previewEstimateRevision = false
@@ -78,6 +85,11 @@ struct RootView: View {
         #if DEBUG
         .modifier(PreviewLandscape())
         .modifier(PreviewWindowWidth())
+        .overlay(alignment: .bottom) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave") {
+                Text(mediaDetailRetryProbe.status).accessibilityIdentifier("media-detail-retry-probe")
+            }
+        }
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
@@ -175,34 +187,38 @@ struct RootView: View {
 
     // MARK: - The drawer shell
 
-    /// The phone's navigation: the drawer underneath, and the place showing as a card on top. Opening
-    /// the drawer slides the card right, where it waits with rounded corners and a soft shadow; a tap
-    /// or a drag on the card closes it. Reduce Motion keeps the card still and fades the drawer in.
+    /// The phone's navigation (Paper 29N / 57N / 58N): the place stays where it is and the drawer
+    /// floats over it as a rounded panel, 8 from the left and bottom edges, sliding in from the
+    /// left while the place dims. A tap or a drag on the dimmed place closes it. Reduce Motion
+    /// fades the panel in. At accessibility sizes the drawer is the whole screen.
     private func phoneShell() -> some View {
         GeometryReader { geometry in
-            let width = DrawerMotion.width(screen: geometry.size.width, accessibilitySize: typeSize.isAccessibilitySize)
-            let progress = DrawerMotion.progress(open: drawerOpen, drag: drawerDrag, width: width)
-            let insets = geometry.safeAreaInsets
+            let full = typeSize.isAccessibilitySize
+            let width = DrawerMotion.panelWidth(screen: geometry.size.width, accessibilitySize: full)
+            // How far the panel travels: its width and its 8pt gap from the edge.
+            let travel = full ? width : width + DrawerPanel.inset
+            let progress = DrawerMotion.progress(open: drawerOpen, drag: drawerDrag, width: travel)
             ZStack(alignment: .leading) {
-                // The drawer's frame stays under the card so opening (from a root or a pushed
-                // screen) only slides; its contents are built only while it can be seen — open, under
-                // a finger, or sliding shut — so a closed drawer leaves nothing in the accessibility
-                // tree (not even its empty scroll view). The edge swipe lives on the card, so it
-                // still opens a drawer whose contents are not built yet.
+                card(progress: progress, width: travel)
+                // The panel's contents are built only while it can be seen — open, under a finger,
+                // or sliding shut — so a closed drawer leaves nothing in the accessibility tree (not
+                // even its empty scroll view). The edge swipe lives on the place, so it still opens
+                // a drawer whose contents are not built yet.
                 if !reduceMotion {
-                    drawer(width: width, full: typeSize.isAccessibilitySize,
-                           rowsBuilt: drawerOpen || drawerDrag != 0 || drawerSettling,
-                           visible: drawerOpen || drawerDrag != 0)
-                        .frame(width: width)
-                        .simultaneousGesture(closeDrag(width: width))
-                        .opacity(progress > 0 ? 1 : 0)
+                    drawerPanel(drawer(width: width, full: full,
+                                       rowsBuilt: drawerOpen || drawerDrag != 0 || drawerSettling,
+                                       visible: drawerOpen || drawerDrag != 0),
+                                width: width, full: full)
+                        // It comes in from the left edge growing the last few percent and
+                        // clearing as it lands, so it reads as arriving rather than being shoved.
+                        .scaleEffect(0.96 + 0.04 * progress, anchor: .leading)
+                        .offset(x: -travel * (1 - progress))
+                        .simultaneousGesture(closeDrag(width: travel))
+                        .opacity(Double(min(1, progress * 3)))
                         .accessibilityHidden(!drawerOpen)
                         .allowsHitTesting(drawerOpen)
-                }
-                card(progress: progress, width: width, insets: insets)
-                if reduceMotion, drawerOpen {
-                    drawer(width: width, full: typeSize.isAccessibilitySize)
-                        .frame(width: width)
+                } else if drawerOpen {
+                    drawerPanel(drawer(width: width, full: full), width: width, full: full)
                         .transition(.opacity)
                 }
             }
@@ -214,12 +230,11 @@ struct RootView: View {
             pendingCreate = nil
             run?()
         }) { SheetSurface { createMenu } }
-        .sheet(isPresented: $editingMenu) {
-            AppMenuEditor { editingMenu = false }
-                .padding(.top, 8)
-                .presentationDetents([.large])
-                .thorbisSheetSurface()
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+            let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+            keyboardShown = frame.height > 80
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
         // Hardware keyboard (Slide Over, a narrow Split View, an iPhone with one): the scene's
         // ⌘F / ⌘K search, ⌘N new job and ⇧⌘N create (`KeyboardCommands`).
         .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
@@ -232,34 +247,60 @@ struct RootView: View {
         }
     }
 
-    private var drawerAnimation: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.9)
+    /// Opening lands with a small settle; closing is quicker and has none, so the place is back
+    /// under the thumb at once. A release mid-drag carries the finger's speed into the spring.
+    private var drawerAnimation: Animation { drawerSpring(opening: true) }
+
+    private func drawerSpring(opening: Bool, velocity: CGFloat = 0) -> Animation {
+        if reduceMotion { return .easeInOut(duration: 0.2) }
+        if velocity != 0 {
+            return .interpolatingSpring(mass: 1, stiffness: opening ? 260 : 320, damping: opening ? 27 : 34,
+                                        initialVelocity: Double(max(-12, min(12, velocity))))
+        }
+        return opening ? .spring(duration: 0.36, bounce: 0.14) : .spring(duration: 0.26, bounce: 0)
     }
 
-    /// The place showing, as the drawer's card.
-    private func card(progress: CGFloat, width: CGFloat, insets: EdgeInsets) -> some View {
-        let shape = DrawerCardShape(radius: DrawerMotion.cornerRadius(topInset: insets.top) * progress,
-                                    top: insets.top, bottom: insets.bottom)
-        return phonePlaces()
+    /// The finger's speed at release as the spring wants it: points a second over the distance
+    /// still to travel. `predictedEndTranslation` is roughly a quarter second ahead.
+    private func releaseVelocity(translation: CGFloat, predicted: CGFloat, remaining: CGFloat) -> CGFloat {
+        guard remaining > 1 else { return 0 }
+        return abs((predicted - translation) * 4) / remaining
+    }
+
+    /// The drawer as Paper's panel: radius 30 on its own fill, a 1pt border and a deep shadow,
+    /// under the status bar and 8 from the left and bottom edges of the screen.
+    @ViewBuilder private func drawerPanel(_ content: some View, width: CGFloat, full: Bool) -> some View {
+        if full {
+            content.frame(width: width)
+        } else {
+            content
+                .frame(width: width)
+                .background(DrawerPanel.fill)
+                .clipShape(DrawerPanel.shape(topInset: windowSafeTop))
+                .overlay { DrawerPanel.shape(topInset: windowSafeTop).strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.14), radius: 25, y: 20)
+                .padding(.leading, DrawerPanel.inset).padding(.bottom, DrawerPanel.inset)
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
+    }
+
+    /// The place showing, under the drawer's panel: it stays put and dims as the panel comes in.
+    private func card(progress: CGFloat, width: CGFloat) -> some View {
+        phonePlaces()
+            // Paper 18A: the bottom bar floats over the place, dims with it under the drawer.
+            .overlay(alignment: .bottom) { tabBarOverlay }
+            // The place gives a little as the menu arrives: depth, without leaving its spot.
+            .offset(x: reduceMotion ? 0 : 14 * progress)
             .accessibilityHidden(drawerOpen)
-            // C-Nav: the pushed place reads as the panel beside the drawer's canvas, a step lighter
-            // in both themes, so the drawer is the thing being used.
             .overlay {
-                Color.white.opacity((colorScheme == .dark ? 0.05 : 0.45) * progress)
+                Color.black.opacity(DrawerPanel.scrim(dark: colorScheme == .dark) * progress)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }
-            .clipShape(shape)
-            // A hairline edge keeps the card's outline in dark mode, where the shadow vanishes.
-            .overlay { shape.strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.10 * progress : 0), lineWidth: 1).allowsHitTesting(false) }
-            .background {
-                shape.fill(Theme.background)
-                    .shadow(color: .black.opacity(0.18 * progress), radius: 30, x: -8)
-            }
             .overlay {
-                // While open the card only closes the drawer: a tap, or a drag back to the left.
+                // While open the place only closes the drawer: a tap, or a drag back to the left.
                 if drawerOpen {
-                    Color.black.opacity(reduceMotion ? 0.18 : 0.001)
+                    Color.black.opacity(0.001)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture { closeDrawer() }
@@ -278,7 +319,6 @@ struct RootView: View {
                         .accessibilityHidden(true)
                 }
             }
-            .offset(x: reduceMotion ? 0 : width * progress)
     }
 
     /// `rowsBuilt`: the rows stay through the slide shut so nothing pops. `visible`: the UIKit-hosted
@@ -290,11 +330,13 @@ struct RootView: View {
             role: WorkRole(session),
             current: selectedTab,
             sections: drawerSections,
+            hasMessages: placeOpens(.inbox),
             count: drawerCount,
             recents: drawerRecents,
             savedWork: barSync,
             create: drawerCreate,
-            settingsItems: settingsItems,
+            workspaceItems: workspaceItems,
+            openSettings: { closeDrawer(thenRun: { showSettings = true }) },
             showsClose: full,
             showsControls: visible,
             showsRows: rowsBuilt,
@@ -314,7 +356,11 @@ struct RootView: View {
                 case .customer: store.requestedRecord = .customer(item.entry.id)
                 }
             },
-            openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }
+            openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) },
+            // Paper 77: the bell opens Notifications over the place showing. Without access to job
+            // notices there is nothing to show there, so the bell keeps opening Messages.
+            openNotifications: CommsInboxAccess(session).notices
+                ? { closeDrawer(thenRun: nil); openNotifications() } : nil
         )
         // VoiceOver: the drawer is a modal group while open; the escape gesture closes it. Closed, it
         // stays built under the card but is out of the accessibility tree: no modal trait to trap
@@ -336,16 +382,19 @@ struct RootView: View {
             .onEnded { value in
                 let open = DrawerMotion.settlesOpen(wasOpen: false, translation: value.translation.width,
                                                     predicted: value.predictedEndTranslation.width, width: width)
-                if open { openDrawer() } else { settleShut { drawerDrag = 0 } }
+                let moved = min(width, max(0, value.translation.width))
+                let speed = releaseVelocity(translation: value.translation.width, predicted: value.predictedEndTranslation.width,
+                                            remaining: open ? width - moved : moved)
+                if open { openDrawer(velocity: speed) } else { settleShut(velocity: speed) { drawerDrag = 0 } }
             }
     }
 
     /// Runs the closing change on the drawer's spring and keeps the contents built until it lands.
     /// `.removed` never fires: rows stay in the tree while `drawerSettling` is true, so the
     /// completion that clears that flag would wait on a removal that cannot happen.
-    private func settleShut(_ change: () -> Void) {
+    private func settleShut(velocity: CGFloat = 0, _ change: () -> Void) {
         drawerSettling = true
-        withAnimation(drawerAnimation, completionCriteria: .logicallyComplete) {
+        withAnimation(drawerSpring(opening: false, velocity: velocity), completionCriteria: .logicallyComplete) {
             change()
         } completion: {
             if !drawerOpen && drawerDrag == 0 { drawerSettling = false }
@@ -362,14 +411,17 @@ struct RootView: View {
                 guard drawerOpen else { return }
                 let open = DrawerMotion.settlesOpen(wasOpen: true, translation: drawerDrag,
                                                     predicted: drawerDrag == 0 ? 0 : value.predictedEndTranslation.width, width: width)
-                if open { withAnimation(drawerAnimation) { drawerDrag = 0 } } else { closeDrawer() }
+                let speed = releaseVelocity(translation: value.translation.width, predicted: value.predictedEndTranslation.width,
+                                            remaining: open ? abs(drawerDrag) : width - abs(drawerDrag))
+                if open { withAnimation(drawerSpring(opening: true, velocity: speed)) { drawerDrag = 0 } }
+                else { closeDrawer(velocity: speed) }
             }
     }
 
-    private func openDrawer() {
+    private func openDrawer(velocity: CGFloat = 0) {
         if barSearching { closeBarSearch() }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(drawerAnimation) {
+        withAnimation(drawerSpring(opening: true, velocity: velocity)) {
             drawerOpen = true
             drawerDrag = 0
         }
@@ -383,9 +435,9 @@ struct RootView: View {
     }
 
     /// Closes the drawer, then runs `thenRun` (a sheet or search) once the card is back.
-    private func closeDrawer(thenRun: (() -> Void)? = nil) {
+    private func closeDrawer(velocity: CGFloat = 0, thenRun: (() -> Void)? = nil) {
         guard drawerOpen else { thenRun?(); return }
-        settleShut {
+        settleShut(velocity: velocity) {
             drawerOpen = false
             drawerDrag = 0
         }
@@ -400,34 +452,128 @@ struct RootView: View {
     /// The menu circle: opens the drawer and wears its dot only for unread Inbox notices or saved
     /// work that needs the person.
     private var drawerControl: PaperDrawerControl {
-        PaperDrawerControl(open: { Task { @MainActor in openDrawer() } },
-                           hasNews: showsInboxDot || (barSync?.needsPerson ?? false),
-                           status: barSync?.words)
+        // One saved-work snapshot per read (it walks the outbox and the jobs).
+        let sync = barSync
+        return PaperDrawerControl(open: { Task { @MainActor in openDrawer() } },
+                           hasNews: showsInboxDot || (sync?.needsPerson ?? false),
+                           status: sync?.words,
+                           showsCircle: !layout.usesBottomBar)
+    }
+
+    // MARK: - The bottom bar (Paper 18A)
+
+    /// The bar's places for this person: the role's set, each only when the drawer would open it.
+    private var phoneTabs: [MenuItem] {
+        PhoneTabs.tabs(role: WorkRole(session), opens: { placeOpens($0) && !menuHidden.contains($0) })
+    }
+
+    /// A sheet the shell itself presents is up.
+    private var shellSheetUp: Bool {
+        showSettings || search || newCustomer || newEstimate || reviewScope != nil || workspace || createJob
+            || createMenuOpen || whatsNew.showing != nil
+    }
+
+    /// The bar shows on a place's root only: never over a pushed page, Search, a shell sheet, or
+    /// the keyboard. Covers (field hand-off, cameras) and other sheets sit above it anyway.
+    private var tabBarShown: Bool {
+        layout.usesBottomBar && atTabRoot && rootsShowing.contains(selectedTab) && !barSearching
+            && !keyboardShown && !shellSheetUp
+    }
+
+    /// The room a place root leaves at its bottom for the bar: from the bar's top down to the
+    /// safe area's edge, and 8 more. Kept while a page is pushed so the root never jumps.
+    private func tabBarClearance(safeBottom: CGFloat) -> CGFloat {
+        guard layout.usesBottomBar, !keyboardShown else { return 0 }
+        return max(0, tabBarHeight + tabBarBottomGap(safeBottom: safeBottom) - safeBottom + 8)
+    }
+
+    /// Paper 18A: the pill sits 28 above the screen's bottom edge on a phone with a home indicator.
+    private func tabBarBottomGap(safeBottom: CGFloat) -> CGFloat { safeBottom > 0 ? 28 : 12 }
+
+    @ViewBuilder private var tabBarOverlay: some View {
+        if tabBarShown {
+            let safeBottom = windowSafeBottom
+            let tabs = phoneTabs
+            PhoneTabBar(tabs: tabs, current: selectedTab,
+                        messagesUnread: showsInboxDot, messagesUnreadCount: inboxUnreadCount,
+                        moreHasNews: moreHasNews(tabs: tabs),
+                        initials: barInitials,
+                        select: selectTab,
+                        openMore: { Task { @MainActor in openDrawer() } },
+                        openSearch: { openBarSearch() },
+                        openAccount: { showSettings = true })
+                // The page fades out behind the bar and is solid below it, so list rows never
+                // show as slivers under or beneath the floating pill.
+                .background {
+                    Rectangle().fill(Theme.canvas)
+                        .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.4)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .padding(.top, -24).padding(.bottom, -80)
+                        .allowsHitTesting(false)
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
+                // The overlay ends at the safe area; the pill sits its gap above the screen's edge.
+                .offset(y: safeBottom - tabBarBottomGap(safeBottom: safeBottom))
+                .transition(.opacity)
+        }
+    }
+
+    /// The account button's initials: the first letters of the person's first two names.
+    private var barInitials: String {
+        let name = session.user?.name ?? session.user?.email ?? ""
+        return name.split(separator: " ").prefix(2).map { String($0.prefix(1)) }.joined().uppercased()
+    }
+
+    /// More's dot: what the menu circle's dot said, less the unread Messages its own tab shows.
+    private func moreHasNews(tabs: [MenuItem]) -> Bool {
+        (showsInboxDot && !tabs.contains(.inbox)) || (barSync?.needsPerson ?? false)
+    }
+
+    /// A tab: picking another place selects it; the place showing goes back to its root, or to the
+    /// top of its list when already there.
+    private func selectTab(_ item: MenuItem) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        if selectedTab == item.rawValue {
+            if atTabRoot { ScrollToTop.run() } else { popToRoot(item.rawValue) }
+        } else {
+            selectedTab = item.rawValue
+        }
+    }
+
+    /// Marks a place's root: it leaves room for the bar and reports when it is on screen.
+    private func placeRoot(_ id: String, _ content: some View) -> some View {
+        content
+            .phoneTabBarRoot()
+            .onAppear { rootsShowing.insert(id) }
+            .onDisappear { rootsShowing.remove(id) }
     }
 
     // MARK: - Drawer content
 
-    /// The places the person pinned (the layout's tabs) this role can open.
-    private var pinnedPlaces: [MenuItem] { layout.visibleTabs(session) }
-
-    private var menuPlaces: [MenuItem] {
-        AppMenuContent.places(tabs: pinnedPlaces, hidden: layout.hidden, order: layout.menuOrder,
-                              permitted: { $0.permitted(session) })
+    /// Paper's rows for this role (29N / 57N / 58N). A company layout only hides places; the order
+    /// from Menu and start screen is this phone's own.
+    private var drawerSections: DrawerSections {
+        let own = layout.source == .phone
+        let paper = DrawerSections.make(hidden: menuHidden, order: own ? layout.menuOrder : [],
+                                        local: localSections, role: WorkRole(session), opens: placeOpens)
+        // One place to look: nothing the bar already shows, and no places tucked into Settings.
+        let orphans = PlaceDoors(session: session).places(behind: .settings).filter { entry in
+            if case .place(let item) = entry { return placeOpens(item) && !menuHidden.contains(item) }
+            return true
+        }
+        return paper.phoneMenu(also: orphans, inBar: layout.usesBottomBar ? phoneTabs : [])
     }
 
-    /// Every place this role can reach, grouped (Work, Money, Shop, On this phone); pins from Edit
-    /// menu lead in their own section.
-    private var drawerSections: DrawerSections {
-        DrawerSections.make(pins: pinnedPlaces,
-                            explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
-                            roleDefaults: layout.roleDefaultTabs, hidden: layout.hidden, order: layout.menuOrder,
-                            local: localSections) { item in
-            switch item {
-            case .schedule: primaryAccess.canOpen(.schedule)
-            case .jobs: primaryAccess.canOpen(.jobs)
-            case .customers: primaryAccess.canOpen(.customers)
-            default: item.permitted(session)
-            }
+    /// Places a company layout turned off (this phone's own layout hides none).
+    private var menuHidden: Set<MenuItem> { layout.source == .phone ? [] : layout.hidden }
+
+    /// Whether this person can open a place: one check for the drawer and the bottom bar.
+    private func placeOpens(_ item: MenuItem) -> Bool {
+        switch item {
+        case .schedule: primaryAccess.canOpen(.schedule)
+        case .jobs: primaryAccess.canOpen(.jobs)
+        case .customers: primaryAccess.canOpen(.customers)
+        default: item.permitted(session)
         }
     }
 
@@ -440,11 +586,17 @@ struct RootView: View {
         case .schedule:
             let mine = ScheduleScope.initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
             let left = TodayNumbers.left(TodayNumbers.visits(store.jobs, assignee: mine.assignee(session.user?.id, range: .today)))
-            return left > 0 ? PlaceCount(text: "\(left) left", spoken: "\(left) stop\(left == 1 ? "" : "s") left today") : nil
+            return PlaceCount.number(left, spoken: "\(left) stop\(left == 1 ? "" : "s") left today")
         case .jobs:
             let open = TodayNumbers.open(store.jobs)
             return PlaceCount.number(open, spoken: "\(open) open")
-        case .inbox: return showsInboxDot ? .unread : nil
+        case .inbox:
+            guard showsInboxDot else { return nil }
+            // Paper 57N: the brand badge with the number when it is known; the dot otherwise.
+            if let unread = inboxUnreadCount, unread > 0 {
+                return PlaceCount.badge(unread, spoken: "\(unread) unread")
+            }
+            return .unread
         case .money:
             guard let due = dayMoney.totalDue, due > 0 else { return nil }
             return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
@@ -485,14 +637,25 @@ struct RootView: View {
                                            identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
     }
 
-    /// Asks the server whether Inbox holds unread notices (one row is enough to know).
+    /// Asks the server whether Inbox holds unread notices, and how many when one page shows them all.
     private func refreshInboxDot() async {
-        guard session.can("job.view", feature: "job_booking_notices") else { inboxUnread = false; return }
-        if let page = try? await api.staffNotices(limit: 1) { inboxUnread = page.unreadState == .present }
+        guard session.can("job.view", feature: "job_booking_notices") else {
+            inboxUnread = false
+            inboxUnreadCount = nil
+            return
+        }
+        // One page: the server says whether anything is unread; the count is exact only when the
+        // page is the whole feed (no cursor), so a longer feed keeps the dot.
+        if let page = try? await api.staffNotices(limit: 50) {
+            inboxUnread = page.unreadState == .present
+            let unread = page.items.filter { !$0.read }.count
+            inboxUnreadCount = page.nextCursor == nil && unread > 0 ? unread : nil
+        }
     }
 
-    /// The gear circle: every business (the current one checked), Add a business, Settings, Edit menu.
-    private var settingsItems: [ThorbisMenuItem] {
+    /// Paper 29A, from the workspace name: every business (the open one checked), then Add a
+    /// business (create one, or join another workspace). Settings is the gear's own.
+    private var workspaceItems: [ThorbisMenuItem] {
         let businesses = session.organizations.map { organization in
             let current = organization.id == session.activeOrganization?.id
             return ThorbisMenuItem(organization.name, icon: "building.2", isSelected: current) {
@@ -501,15 +664,8 @@ struct RootView: View {
                 Task { await session.selectOrganization(id: organization.id) }
             }
         }
-        // Saved work left the drawer's list; the gear wears its dot and opens the review.
-        let saved = barSync.map { sync in
-            [ThorbisMenuItem("Saved on this phone", icon: sync.needsPerson ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath",
-                             subtitle: sync.words) { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }]
-        } ?? []
-        return businesses + saved + [
+        return businesses + [
             ThorbisMenuItem("Add a business", icon: "plus") { closeDrawer(thenRun: { workspace = true }) },
-            ThorbisMenuItem("Settings", icon: "gearshape") { closeDrawer(thenRun: { showSettings = true }) },
-            ThorbisMenuItem("Edit menu", icon: "slider.horizontal.3") { closeDrawer(thenRun: { editingMenu = true }) },
         ]
     }
 
@@ -578,8 +734,10 @@ struct RootView: View {
         SearchAction.standard(
             creates: createChoices.map { choice in (choice.title, choice.symbol, { closeBarSearch(); choice.run() }) },
             settings: { closeBarSearch(); showSettings = true },
-            places: menuPlaces,
-            openPlace: { place in closeBarSearch(); open(place) })
+            places: SearchAction.everyPlace(permitted: { $0.permitted(session) }),
+            openPlace: { place in closeBarSearch(); open(place) },
+            records: localSections,
+            openRecord: { section in closeBarSearch(); openLocal(section) })
     }
 
     private var savedWorkScope: SavedWorkScope? {
@@ -591,7 +749,7 @@ struct RootView: View {
         return .make(scope: scope, entries: outbox.entries, media: pendingMedia.items,
                      mediaErrors: pendingMedia.errors, unverifiedMediaIDs: pendingMedia.unverifiedIDs,
                      uploadingMediaID: pendingMedia.uploadingID, commandsSyncing: outbox.syncing,
-                     jobs: store.jobs, listingWarning: pendingMedia.storageWarning)
+                     jobs: store.jobs, listingWarning: pendingMedia.storageWarning ?? outbox.storageWarning)
     }
 
     private var barSync: AppBottomBar.Sync? { .savedWork(savedWorkSnapshot) }
@@ -607,6 +765,10 @@ struct RootView: View {
         }
         if session.can("customer.create", feature: "core_crm") {
             create.append(.init(title: "New customer", symbol: "person.badge.plus") { newCustomer = true })
+        }
+        // Paper 18B's fourth row. It opens Receipts, where "Add receipt" starts the camera.
+        if MenuItem.receipts.permitted(session) {
+            create.append(.init(title: "Scan a receipt", symbol: "doc.viewfinder") { open(.receipts) })
         }
         return create
     }
@@ -651,6 +813,19 @@ struct RootView: View {
         .environment(\.paperDrawer, atTabRoot && !barSearching ? drawerControl : nil)
         .environment(\.searchRouteHost, searchRouteHost)
         .environment(\.paperSearch, PaperSearchAction(run: { openBarSearch() }))
+        .environment(\.phoneTabBarClearance, tabBarClearance(safeBottom: windowSafeBottom))
+    }
+
+    /// The window's bottom safe area (the home indicator), for placing the bar.
+    /// The status bar's height, which tells a Dynamic Island phone from a notched or Home-button one.
+    private var windowSafeTop: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets.top ?? 0
+    }
+
+    private var windowSafeBottom: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets.bottom ?? 0
     }
 
     /// The selected place, with the sheets and request handlers every place shares.
@@ -663,7 +838,7 @@ struct RootView: View {
         .environment(\.paperCreate, headerCreate)
         .sheet(isPresented: $showSettings) { SheetSurface { SettingsView() } }
         .sheet(isPresented: $search) { SheetSurface { PaperGlobalSearch() } }
-        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
+        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet(offersBooking: true) } }
         .sheet(isPresented: $newEstimate) { SheetSurface { NewEstimateView() } }
         .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
         .onChange(of: reviewScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
@@ -757,7 +932,7 @@ struct RootView: View {
         }
         if ["invoice-editor", "invoice-editor-line"].contains(PaperPreview.screen) { previewInvoiceEditor = true; return }
         if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
-        if ["estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line"].contains(PaperPreview.screen) { previewEstimateRevision = true; return }
+        if ["estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line", "builder-text"].contains(PaperPreview.screen) { previewEstimateRevision = true; return }
         switch PaperPreview.screen {
         case "jobs", "jobs-filters": primaryTab = .jobs
         // The owner's layout leads with Home, where owners open.
@@ -769,7 +944,8 @@ struct RootView: View {
             seedPreviewRecents()
             try? await Task.sleep(for: .seconds(1))
             openDrawer()
-        case "app-menu-edit": editingMenu = true
+        // The Edit menu sheet is gone: menu editing is Settings › Menu and start screen.
+        case "app-menu-edit": schedulePath.append(PaperRoute.customizeMenu)
         case "search", "search-typed", "search-customers":
             // `search-customers` opens the same search over Customers, where customers lead.
             if PaperPreview.screen == "search-customers" { primaryTab = .customers }
@@ -822,12 +998,15 @@ struct RootView: View {
         case "invoices": previewPlace(.invoices)
         case "price-book": previewPlace(.priceBook)
         case "drafts": previewPlace(.drafts)
-        case "local-fleet": openLocal(.fleet)
-        case "local-equipment": openLocal(.equipment)
+        case "local-fleet", "vehicle-detail": openLocal(.fleet)
+        case "local-equipment", "equipment-detail": openLocal(.equipment)
         case "local-agreements": openLocal(.agreements)
-        case "team": previewPlace(.team)
+        case "team", "role-editor", "member-access", "team-roles", "team-ownership", "team-invite-detail", "member-offboard": previewPlace(.team)
+        case "payouts": previewPlace(.money, then: .payments)
         case "customize-menu": schedulePath.append(PaperRoute.customizeMenu)
-        case "properties", "property-detail": schedulePath.append(PaperRoute.properties)
+        // Paper 87A / 77: top-level places, so they open as roots with the menu circle.
+        case "properties", "property-detail": previewPlace(.properties)
+        case "notifications": openNotifications()
         case "signature": previewSignature = true
         case "job-schedule", "equipment-editor", "equipment-sections": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
         case "new-job", "book-job", "book-job-filled": createJob = true
@@ -849,26 +1028,51 @@ struct RootView: View {
         case "owner-home":
             layout.tabs = [.home, .schedule, .money, .customers]
             selectedTab = MenuItem.home.rawValue
-        case "estimate-detail", "estimate-draft-detail": previewPlace(.estimates, then: .estimate(PaperPreview.estimate.id))
-        case "reports": previewPlace(.reports)
+        case "estimate-detail", "estimate-draft-detail", "estimate-revisions": previewPlace(.estimates, then: .estimate(PaperPreview.estimate.id))
+        case "reports", "export-report": previewPlace(.reports)
         case "scorecard": previewPlace(.scorecard)
+        case "team-goals": previewPlace(.team, then: .teamGoals)
         case "billing": previewPlace(.billing)
         case "notices", "notice-log": previewPlace(.notices)
+        case "time-clock", "time-clock-break", "time-clock-timeoff", "time-clock-fix", "time-clock-timesheet", "time-clock-date": previewPlace(.timeClock)
+        case "receipts", "receipt-detail", "receipt-editor": previewPlace(.receipts)
+        case "truck-stock", "truck-stock-item", "truck-stock-add", "truck-stock-restock": previewPlace(.truckStock)
+        case "training", "training-license", "training-license-editor": previewPlace(.training)
+        case "pipeline", "lead-detail", "lead-editor": previewPlace(.pipeline)
+        case "vendors", "vendors-orders", "purchase-order", "vendor-detail", "vendor-editor", "purchase-order-receive": previewPlace(.vendors)
+        case "marketing", "marketing-campaign", "marketing-sources", "checklist-templates", "checklist-template", "customer-display", "workflows": previewPlace(.marketing)
+        case "business-settings": previewPlace(.businessSettings)
+        case "help": schedulePath.append(PaperRoute.help)
         case "payments": schedulePath.append(PaperRoute.payments)
         case "billing-detail": previewPlace(.billing, then: .billingSchedule("00000000-0000-4000-8000-000000009501"))
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
-        case "revenue": previewPlace(.money)
+        case "revenue", "payments-list": previewPlace(.money)
+        // Estimates opened from Money's own row (Paper: "from Money").
+        case "money-estimates": previewPlace(.money, then: .estimates)
         case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
+             "job-more", "job-time", "job-voice-note", "job-cancel", "job-add", "job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule", "job-unpaid", "job-contact",
              "job-history", "job-history-empty", "job-onsite",
              "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
+            // Another preview refresh may supersede the one awaited above. Wait for its real
+            // job rather than silently leaving the test on Today when that read is still in flight.
+            for _ in 0..<100 where !store.jobs.contains(where: { $0.id == PaperPreview.jobID }) {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+            }
             if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                 primaryTab = .jobs
                 jobsPath.append(job)
-                if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
+                if PaperPreview.screen == "job-media", ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-test") {
+                    jobsPath.append(PaperRoute.media(jobID: job.id, assetID: "00000000-0000-4000-8000-000000009301"))
+                }
+                if PaperPreview.screen == "job-closeout" || PaperPreview.screen == "job-unpaid" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
                 // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
+                if PaperPreview.screen == "job-contact", let customerID = job.customerId {
+                    jobsPath.append(PaperRoute.contact(customerID: customerID, contactID: "00000000-0000-4000-8000-000000008002"))
+                }
             }
-        case "customer", "customer-activity", "customer-records", "customer-jobs", "customer-money":
+        case "customer", "customer-activity", "customer-details", "customer-records", "customer-jobs", "customer-money", "customer-media", "customer-membership":
             if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                 primaryTab = .customers
                 customersPath.append(customer)
@@ -926,6 +1130,14 @@ struct RootView: View {
         selectedTab = item.rawValue
     }
 
+    /// Paper 77: Notifications is a top-level place (the menu circle, never Back). It has no drawer
+    /// row of its own; the drawer's bell opens it.
+    static let notificationsPlace = "notifications"
+    private func openNotifications() {
+        if selectedTab == Self.notificationsPlace { popToRoot(Self.notificationsPlace) }
+        selectedTab = Self.notificationsPlace
+    }
+
     private func openLocal(_ section: LocalWorkspaceSection) {
         let id = "local-\(section.rawValue)"
         if selectedTab == id { popToRoot(id) }
@@ -956,7 +1168,11 @@ struct RootView: View {
             tabRoot(item)
         } else if id.hasPrefix("local-"), let section = LocalWorkspaceSection(rawValue: String(id.dropFirst(6))) {
             NavigationStack(path: customPath(id)) {
-                PaperRouteView(route: .local(section)).modifier(DrawerCircleInBar()).paperDestinations()
+                placeRoot(id, PaperRouteView(route: .local(section)).modifier(DrawerCircleInBar())).paperDestinations()
+            }
+        } else if id == Self.notificationsPlace {
+            NavigationStack(path: customPath(id)) {
+                placeRoot(id, PaperRouteView(route: .notifications).modifier(DrawerCircleInBar())).paperDestinations()
             }
         } else {
             tabRoot(.schedule)
@@ -965,16 +1181,16 @@ struct RootView: View {
 
     @ViewBuilder private func tabRoot(_ item: MenuItem) -> some View {
         switch item {
-        case .schedule: NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
-        case .jobs: NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
-        case .customers: NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
+        case .schedule: NavigationStack(path: $schedulePath) { placeRoot(item.rawValue, gated(.schedule) { ScheduleView() }).paperDestinations() }
+        case .jobs: NavigationStack(path: $jobsPath) { placeRoot(item.rawValue, gated(.jobs) { JobsView() }).paperDestinations() }
+        case .customers: NavigationStack(path: $customersPath) { placeRoot(item.rawValue, gated(.customers) { CustomersView() }).paperDestinations() }
         default:
             NavigationStack(path: customPath(item.rawValue)) {
                 if let route = item.route {
                     // Places whose root shows a navigation bar carry the menu circle there, and
                     // their Paper header (Estimates, Invoices) then leaves it out.
-                    PaperRouteView(route: route)
-                        .modifier(DrawerCircleInBar(enabled: !item.drawerCircleInHeader))
+                    placeRoot(item.rawValue, PaperRouteView(route: route)
+                        .modifier(DrawerCircleInBar(enabled: !item.drawerCircleInHeader)))
                         .paperDestinations()
                 }
             }
@@ -1082,12 +1298,15 @@ private struct DrawerCircleInBar: ViewModifier {
     @Environment(\.paperDrawer) private var drawer
 
     func body(content: Content) -> some View {
-        if enabled, let drawer {
+        if enabled, let drawer, drawer.showsCircle {
             content
                 .environment(\.paperDrawer, nil)
                 .toolbar {
                     ThorbisToolbarItem(placement: .topBarLeading) { DrawerMenuCircle(control: drawer) }
                 }
+        } else if enabled, drawer != nil {
+            // The bottom bar is on: More is the door, so the bar carries no circle.
+            content.environment(\.paperDrawer, nil)
         } else {
             content
         }
@@ -1131,11 +1350,11 @@ struct PreviewSheets: ViewModifier {
                                            : PaperPreview.screen.hasPrefix("builder-") ? PaperPreview.optionsEstimate : PaperPreview.estimate) { _ in }
                     .environmentObject(api).environmentObject(session).environmentObject(store)
             } }
-            .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
+            .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet(offersBooking: true) } }
             .modifier(PreviewFormSheet(screen: $formSheet))
             .sheet(isPresented: $signature) { SheetSurface {
                 SignatureCaptureSheet(title: "Approve $970.00", summary: "By signing, Danielle Marlowe approves \"AC repair and compressor replacement\" as shown.",
-                                      jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe") { _ in nil }
+                                      jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe", heading: "Sign estimate") { _ in nil }
             } }
             .sheet(isPresented: $newEstimate, onDismiss: {
                 guard EstimateRecoveryPreview.enabled, let id = createdEstimateID else { return }
@@ -1181,6 +1400,8 @@ enum PaperRoute: Hashable {
     case billing
     case billingSchedule(String)
     case notices
+    /// Paper 77: the bell's own screen, the person's staff notices.
+    case notifications
     case estimate(String)
     case invoice(String)
     case followUps(jobID: String)
@@ -1192,6 +1413,7 @@ enum PaperRoute: Hashable {
     case homeList(HomeList)
     case payments
     case businessSetup
+    case timeClock, receipts, truckStock, training, pipeline, vendors, marketing, help
     case companyDetails
     case properties
     case importCustomers
@@ -1230,16 +1452,16 @@ struct PaperRouteView: View {
         case .estimates: EstimatesView()
         case .invoices: InvoicesView()
         case .priceBook:
-            WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-        // Money and Reports are one place: Revenue first, then the reports.
-        case .revenue: ReportsView(includesRevenue: true).id(session.generation)
+            WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("pricebook.edit", feature: "price_book")).id(session.generation)
+        // Paper 59 / 54: Money is its own page; the reports are one row away (Paper 60).
+        case .revenue: MoneyHomeView().id(session.generation)
         case .drafts:
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 InboxLocalDraftView(actorID: actor, organizationID: org)
             }
         case .closeout(let jobID): JobCloseoutView(jobID: jobID)
         case .team: TeamView()
-        case .reports: ReportsView(includesRevenue: MenuItem.money.permitted(session), initialTab: "Operations")
+        case .reports: ReportsSummaryView().id(session.generation)
         case .scorecard: ScorecardView()
         case .teamGoals: TeamGoalsView()
         case .filteredInvoices(let filter): InvoicesView(filter: filter)
@@ -1249,6 +1471,7 @@ struct PaperRouteView: View {
         case .billing: BillingSchedulesView()
         case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
         case .notices: NoticeSettingsView()
+        case .notifications: NotificationsFeedView().id(session.generation)
         case .estimate(let id): EstimateDetailView(id: id)
         case .invoice(let id): InvoiceDetailView(id: id)
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
@@ -1257,8 +1480,16 @@ struct PaperRouteView: View {
         case .attention: NeedsAttentionView()
         case .home: OwnerHomeView()
         case .homeList(let list): OwnerHomeListView(list: list)
-        case .payments: PaymentsSetupView()
+        case .payments: PaymentsSetupView(showsPayouts: true)
         case .businessSetup: BusinessSetupView()
+        case .timeClock: TimeClockView().id(session.generation)
+        case .receipts: ReceiptsView().id(session.generation)
+        case .truckStock: TruckStockView().id(session.generation)
+        case .training: TrainingView().id(session.generation)
+        case .pipeline: PipelineView().id(session.generation)
+        case .vendors: VendorsAndOrdersView().id(session.generation)
+        case .marketing: MarketingView().id(session.generation)
+        case .help: HelpView()
         case .companyDetails: CompanyDetailsView()
         case .properties: PropertiesView()
         case .importCustomers: CustomerImportView()

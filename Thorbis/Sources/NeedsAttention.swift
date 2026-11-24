@@ -8,7 +8,7 @@ enum NeedsAttention {
     static func unpaid(_ invoices: [InvoiceRecord]) -> [(InvoiceRecord, Int)] {
         invoices.compactMap { invoice in
             guard invoice.status == "issued" else { return nil }
-            let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
+            let total = invoice.lines.reduce(0) { $0.addingClamped($1.quantity, times: $1.unitPrice.amount) }
             let balance = total - invoice.amountPaid
             return balance > 0 ? (invoice, balance) : nil
         }
@@ -36,6 +36,11 @@ struct NeedsAttentionView: View {
     @State private var estimates: [EstimateRecord] = []
     @State private var loaded = false
     @State private var error: String?
+    /// A real book can owe hundreds of invoices and hold hundreds of jobs with no time: each group
+    /// shows its oldest few, and "See all" opens the rest (the jobs on the searchable waiting page).
+    @State private var expanded: Set<String> = []
+    @State private var showsAllWaiting = false
+    private static let preview = 5
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -48,14 +53,8 @@ struct NeedsAttentionView: View {
                 // Redesign phase 3: the 30pt semibold title, then one grouped well per kind with its
                 // count; rows lead with their status glyph and amounts are semibold tabular.
                 // v2: the detail title on the ramp (24), one quiet line, then a group per kind.
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Needs attention").font(Theme.font(30, weight: .medium)).tracking(-0.4)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking…")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .foregroundStyle(Theme.foreground)
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                PaperPageTitle(title: "Needs attention", subtitle: loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking\u{2026}")
+                    .padding(.bottom, 14)
                 if let error { ErrorBanner(message: error) }
                 // v2 List room, like Jobs and Customers: rows on the canvas under a 13 Medium label
                 // with its count. Each row names its state as a word ("Unpaid", "Waiting", "No time").
@@ -64,7 +63,7 @@ struct NeedsAttentionView: View {
                     let rows = unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) }
                     if !rows.isEmpty {
                         ListGroupLabel(title: "Unpaid invoices", count: rows.count, first: true)
-                        ForEach(rows) { item in
+                        ForEach(capped(rows, "invoices")) { item in
                             NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
                                 MoneyListRow(title: store.customerName(item.invoice.customerId),
                                              subtitle: "INV-\(item.invoice.id.suffix(4).uppercased()) · \(since("Issued", item.invoice.issuedAt))",
@@ -72,10 +71,11 @@ struct NeedsAttentionView: View {
                                              amount: money(item.balance, currency: item.invoice.currency))
                             }.buttonStyle(RowPressStyle())
                         }
+                        seeAll(rows.count, "invoices", label: "unpaid invoices") { expanded.insert("invoices") }
                     }
                     if !waiting.isEmpty {
                         ListGroupLabel(title: "Estimates waiting on the customer", count: waiting.count, first: rows.isEmpty)
-                        ForEach(waiting) { estimate in
+                        ForEach(capped(waiting, "estimates")) { estimate in
                             NavigationLink(value: PaperRoute.estimate(estimate.id)) {
                                 MoneyListRow(title: store.customerName(estimate.customerId),
                                              subtitle: "\(estimate.title) · \(since("Sent", estimate.sentAt))",
@@ -84,17 +84,19 @@ struct NeedsAttentionView: View {
                                              amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") })
                             }.buttonStyle(RowPressStyle())
                         }
+                        seeAll(waiting.count, "estimates", label: "waiting estimates") { expanded.insert("estimates") }
                     }
                     if !unscheduled.isEmpty {
                         ListGroupLabel(title: "Jobs without a time", count: unscheduled.count, first: rows.isEmpty && waiting.isEmpty)
-                        ForEach(unscheduled) { job in
+                        ForEach(Array(unscheduled.prefix(Self.preview))) { job in
                             NavigationLink(value: job) {
                                 JobRoomRow(job: job, customer: store.customerName(job.customerId), when: "No time yet")
                             }.buttonStyle(RowPressStyle())
                         }
+                        seeAll(unscheduled.count, "jobs", label: "jobs without a time") { showsAllWaiting = true }
                     }
                     if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
-                        ListRoomEmpty(title: "Nothing needs attention.",
+                        ListRoomEmpty(glyph: .bell, title: "Nothing needs attention",
                                       message: "Unpaid invoices, estimates waiting over a week and jobs with no time land here. Pull down to check again.")
                     }
                 }
@@ -109,21 +111,26 @@ struct NeedsAttentionView: View {
         .foregroundStyle(Theme.foreground)
         .task { await load() }
         .refreshable { await load() }
+        .thorbisDestination(isPresented: $showsAllWaiting) { DispatchBoardView(waitingOnly: true) }
     }
 
-    private func summary(_ count: Int) -> String { count == 0 ? "All caught up" : "\(count) item\(count == 1 ? "" : "s")" }
+    private func capped<Item>(_ items: [Item], _ group: String) -> [Item] {
+        expanded.contains(group) ? items : Array(items.prefix(Self.preview))
+    }
+
+    @ViewBuilder private func seeAll(_ count: Int, _ group: String, label: String, action: @escaping () -> Void) -> some View {
+        if count > Self.preview && !expanded.contains(group) {
+            PaperSeeAllRow(count: count, label: "See all \(count) \(label)", inset: ListRoom.gutter,
+                           identifier: "attention-all-\(group)", action: action)
+        }
+    }
+
+    private func summary(_ count: Int) -> String { count == 0 ? "All caught up" : "\(PaperCount.text(count)) item\(count == 1 ? "" : "s")" }
 
     private func since(_ verb: String, _ raw: String?) -> String {
         guard let date = JobFiltering.date(raw) else { return verb }
-        let days = Calendar.current.dateComponents([.day], from: date, to: .now).day ?? 0
-        // "99 days ago" makes you count; past two weeks speak in weeks, then months.
-        func ago(_ n: Int, _ unit: String) -> String { "\(verb) \(n) \(unit)\(n == 1 ? "" : "s") ago" }
-        switch days {
-        case ...0: return "\(verb) today"
-        case 1..<14: return ago(days, "day")
-        case 14..<60: return ago(days / 7, "week")
-        default: return ago(days / 30, "month")
-        }
+        // "121 days ago" makes you count: past two weeks it speaks in weeks, then months.
+        return PaperAge.ago(verb, days: PaperAge.days(from: date))
     }
 
     private func load() async {

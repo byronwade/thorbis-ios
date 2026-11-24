@@ -18,7 +18,7 @@ extension APIClient {
     /// One customer's job-email switch (web customer record); no row means on.
     func customerJobEmailsEnabled(_ customerID: String) async throws -> Bool {
         struct Page: Decodable { let items: [NoticePreference] }
-        let key = customerID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? customerID
+        let key = try Self.pathSegment(customerID)
         let page: Page = try await send("GET", "/v1/notice-preferences/customer/\(key)")
         return page.items.first?.enabled ?? true
     }
@@ -46,68 +46,73 @@ struct NoticeSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Notification rules").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text(managesRoles ? "Who hears when a job is booked, changed or canceled" : "What this phone tells you")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.bottom, 12)
+                // Paper 96: the title in 34 Bold, one muted line, then one card per group of switches.
+                PaperPageTitle(title: "Notification rules", subtitle: managesRoles ? "Who hears when a job is booked, changed or canceled" : "What this phone tells you", columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 16)
                 if PushNotifications.receivesMorningDigest(session) {
                     // TG-11: one push at 6:30, the off switch lives here. Per phone, saved offline.
-                    PaperGroupHeader(title: "This phone").padding(.top, 14)
-                    PaperCard { Toggle(isOn: Binding(get: { morningDigest }, set: { next in
-                        morningDigest = next
-                        PushNotifications.shared.setMorningDigest(next)
-                    })) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Morning digest").font(Theme.font(15, weight: .medium))
-                            Text("At 6:30: yesterday's collections, today's jobs and overdue invoices")
-                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    PaperSection("This phone", count: nil) {
+                        Toggle(isOn: Binding(get: { morningDigest }, set: { next in
+                            morningDigest = next
+                            PushNotifications.shared.setMorningDigest(next)
+                        })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Morning digest").font(Theme.font(16, weight: .medium))
+                                Text("At 6:30: yesterday's collections, today's jobs and overdue invoices")
+                                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            }
                         }
+                        .tint(Theme.brand)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                        .frame(minHeight: 52)
                     }
-                    .tint(Theme.brand)
-                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-                    .frame(minHeight: 52) }
+                    .padding(.bottom, 20)
                 }
                 if managesRoles {
-                    if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
+                    if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin).padding(.bottom, 12) }
                     if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
                     if loaded {
-                        // One panel per role, as in Settings; the header names the role, so the rows don't.
+                        // One card per role; the label names the role, so the rows don't.
                         ForEach(roles, id: \.0) { role, label in
-                            PaperGroupHeader(title: label).padding(.top, 14)
-                            PaperCard {
-                            ForEach(Array(channels.enumerated()), id: \.element.0) { index, pair in
-                                let (channel, channelName) = pair
-                                let key = "\(role):\(channel)"
-                                if index > 0 { WellDivider(leading: PaperCardMetrics.inset) }
-                                Toggle(isOn: Binding(get: { isOn(role, channel) }, set: { next in Task { await save(role, channel, next) } })) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(channelName).font(Theme.font(15, weight: .medium))
-                                        Text(channel == "email" ? "When a job is booked, changed or canceled" : "The same updates, in the app")
-                                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            PaperSection(label, count: nil) {
+                                ForEach(channels, id: \.0) { channel, channelName in
+                                    let key = "\(role):\(channel)"
+                                    if channel != channels.first?.0 { WellDivider() }
+                                    Toggle(isOn: Binding(get: { isOn(role, channel) }, set: { next in Task { await save(role, channel, next) } })) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(channelName).font(Theme.font(16, weight: .medium))
+                                            Text(channel == "email" ? "When a job is booked, changed or canceled" : "The same updates, in the app")
+                                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                        }
                                     }
+                                    .tint(Theme.brand)
+                                    .disabled(saving == key)
+                                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                                    .frame(minHeight: 52)
+                                    .accessibilityLabel("\(label) \(channelName.lowercased())")
                                 }
-                                .tint(Theme.brand)
-                                .disabled(saving == key)
-                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-                                .frame(minHeight: 52)
-                                .accessibilityLabel("\(label) \(channelName.lowercased())")
                             }
-                            }
+                            .padding(.bottom, 20)
                         }
                     }
-                    PaperGroupHeader(title: "History").padding(.top, 14)
+                    // Paper 96: the delivery log is its own card at the end, a row with a chevron.
                     PaperCard {
                         Button { openLog = true } label: {
-                            PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
-                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+                            HStack(spacing: 8) {
+                                Text("Delivery log").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                Spacer(minLength: 8)
+                                PaperChevron()
+                                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                            }
+                            .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 14).padding(.vertical, 9)
+                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(RowPressStyle())
                     }
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 32)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)

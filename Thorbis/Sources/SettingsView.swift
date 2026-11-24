@@ -1,9 +1,9 @@
 import SwiftUI
 import UserNotifications
 
-/// The one Settings: the person on top, then company, business setup, payments, menu, notification
-/// rules, appearance, notifications, What's new and sign-out. Opened from the bottom bar's menu,
-/// More, and the iPad sidebar.
+/// The one Settings (Paper 65, "just me"): the person on top, notifications, appearance and the
+/// menu, work preferences (with what is saved on this phone), the places no menu row leads to,
+/// help and sign-out. Opened from the menu's gear, Search, and the iPad sidebar.
 /// Native grouped lists per D-025 (Apple HIG for settings), Thorbis tokens for color.
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
@@ -11,190 +11,189 @@ struct SettingsView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var pendingMedia: PendingMediaStore
-    @State private var startupDestination: StartupDestination = .automatic
+    @EnvironmentObject private var store: Store
     @State private var confirmSignOut = false
+    /// Saved on this phone: the review of what has not synced yet (it used to hang off the gear).
+    @State private var reviewScope: SavedWorkScope?
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @State private var showWorkspaces = false
     @State private var notifications: UNAuthorizationStatus?
+    /// Paper 65 "Saved signature · On file": whether this person has drawn one on this phone.
+    @State private var signatureOnFile = false
     @Environment(\.openURL) private var openURL
+
+    /// People who hold a company-side permission but not the Business settings menu row (it is
+    /// the owner's) still need a way to the company pages they may open.
+    private var reachesBusinessSettingsHere: Bool {
+        guard !session.can("organization.settings.edit") else { return false }
+        return CustomerImportModel.permitted({ session.can($0, feature: "core_crm") })
+            || session.can("organization.performance.view") || MenuItem.notices.permitted(session)
+    }
 
     var body: some View {
         NavigationStack {
-            // design 2026-10-30: one panel per section with a 13pt label above, neutral glyphs,
-            // the value as a quiet word on the right, no separators or chevrons.
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // v2 Settings room: a column. The person, then each section on its own; every
-                    // row opens a page that saves itself, and danger sits apart at the end.
-                    HStack(spacing: 12) {
-                        InitialsAvatar(name: session.user?.name ?? session.user?.email ?? "?", size: 44)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(17, weight: .medium))
-                                .fixedSize(horizontal: false, vertical: true)
-                            if let email = session.user?.email {
-                                // An address breaks mid-word when it wraps, so it shrinks on one line instead.
-                                Text(email).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                                    .lineLimit(1).minimumScaleFactor(0.6).truncationMode(.middle)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 4)
-                    .accessibilityElement(children: .combine)
+                VStack(alignment: .leading, spacing: 0) {
+                    // Paper 65: the 44pt back circle, 14 under it "Settings" in 34 Bold.
+                    // The way out of a sheet is ×; a chevron is for going back a page.
+                    PaperCircleButton(symbol: "xmark", label: "Close", size: 44, fill: Theme.card) { dismiss() }
+                        .accessibilityIdentifier("settings-close")
+                        .padding(.top, PaperSheetMetrics.pageTop)
+                    AccountPageTitle(title: "Settings", underBar: false)
 
-                    PaperSection("Workspace") {
-                        VStack(spacing: 0) {
-                            Button { showWorkspaces = true } label: {
-                                row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose")
-                            }
-                            .buttonStyle(RowPressStyle())
-                            WellDivider(leading: Self.rowDivider)
-                            NavigationLink { CustomizeMenuView().thorbisBackButton() } label: {
-                                row("Customize menu", symbol: "slider.horizontal.3", value: nil)
-                            }
-                            .buttonStyle(RowPressStyle())
-                            // Owners reach the business screens here, now that the More screen is off the menu.
-                            if session.can("organization.settings.edit") {
-                                WellDivider(leading: Self.rowDivider)
-                                NavigationLink(value: PaperRoute.businessSetup) {
-                                    row("Set up your business", symbol: "checklist", value: nil)
-                                }
-                                .buttonStyle(RowPressStyle())
-                                WellDivider(leading: Self.rowDivider)
-                                NavigationLink(value: PaperRoute.companyDetails) {
-                                    row("Company details", symbol: "building.2", value: nil)
-                                }
-                                .buttonStyle(RowPressStyle())
-                                WellDivider(leading: Self.rowDivider)
-                                NavigationLink(value: PaperRoute.payments) {
-                                    row("Payments", symbol: "creditcard", value: nil)
-                                }
-                                .buttonStyle(RowPressStyle())
-                                WellDivider(leading: Self.rowDivider)
-                                NavigationLink { ReviewRequestsView().thorbisBackButton() } label: {
-                                    row("Review requests", symbol: "star.bubble", value: nil)
-                                }
-                                .buttonStyle(RowPressStyle())
-                            }
-                            if session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm") {
-                                WellDivider(leading: Self.rowDivider)
-                                NavigationLink(value: PaperRoute.importCustomers) {
-                                    row("Import customers", symbol: "square.and.arrow.down", value: nil)
-                                }
-                                .buttonStyle(RowPressStyle())
-                            }
-                            // TG-07: whoever may see the team's numbers sets its goals.
-                            if session.can("organization.performance.view") {
-                                WellDivider(leading: Self.rowDivider)
-                                NavigationLink(value: PaperRoute.teamGoals) {
-                                    row("Team goals", symbol: "target", value: nil)
-                                }
-                                .buttonStyle(RowPressStyle())
-                            }
-                            // Who hears about booked and changed jobs; the feed itself is Inbox.
-                            if MenuItem.notices.permitted(session) {
-                                WellDivider(leading: Self.rowDivider)
-                                NavigationLink(value: PaperRoute.notices) {
-                                    row("Notification rules", symbol: "bell.badge", value: nil)
-                                }
-                                .buttonStyle(RowPressStyle())
-                            }
-                        }
-                        .padding(.vertical, PaperCardMetrics.edge)
-                    }
-
-                    PaperSection(UIDevice.current.userInterfaceIdiom == .pad ? "This iPad" : "This phone") {
-                        VStack(spacing: 0) {
-                            ThorbisMenu(items: [
-                                ThorbisMenuItem("System", isSelected: appearance == "system") { appearance = "system" },
-                                ThorbisMenuItem("Light", isSelected: appearance == "light") { appearance = "light" },
-                                ThorbisMenuItem("Dark", isSelected: appearance == "dark") { appearance = "dark" },
-                            ], title: "Appearance") {
-                                row("Appearance", symbol: "circle.lefthalf.filled",
-                                    value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System")
-                            }
-                            WellDivider(leading: Self.rowDivider)
-                            if let scope = StartupDestination.scope(session: session, api: api) {
-                                ThorbisMenu(items: StartupDestination.allCases.filter { $0.permitted(session) }.map { destination in
-                                    ThorbisMenuItem(destination.displayTitle, isSelected: startupDestination == destination) {
-                                        StartupDestinationPreferences().set(destination, for: scope)
-                                        startupDestination = destination
-                                    }
-                                }, title: "Open app to") {
-                                    row("Open app to", symbol: "rectangle.on.rectangle", value: startupDestination.permitted(session) ? startupDestination.displayTitle : "Automatic")
-                                }
-                                .accessibilityHint("Applies the next time you open the app on this device")
-                                WellDivider(leading: Self.rowDivider)
-                            }
-                            Button {
-                                Task { await notificationsTapped() }
-                            } label: {
-                                row("Notifications", symbol: "bell", value: notificationLabel)
-                            }
-                            .buttonStyle(RowPressStyle())
-                        }
-                        .padding(.vertical, PaperCardMetrics.edge)
-                    }
-                    // Immediate settings say they are immediate (design.thorbis.com Customize).
-                    Text(UIDevice.current.userInterfaceIdiom == .pad ? "Appearance changes right away, on this iPad only." : "Appearance changes right away, on this phone only.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4).padding(.top, -14)
-
-                    PaperSection("About") {
-                        NavigationLink { WhatsNewHistoryView().thorbisBackButton() } label: {
-                            row("What's new", symbol: "sparkles", value: nil)
+                    // Paper 65: the person, then a chevron into Account and data (67).
+                    AccountGroup(title: "Account") {
+                        NavigationLink { AccountAndDataView().thorbisBackButton() } label: {
+                            AccountPersonRow(name: session.user?.name ?? session.user?.email ?? "Account",
+                                             email: session.user?.name == nil ? nil : session.user?.email)
                         }
                         .buttonStyle(RowPressStyle())
-                        .padding(.vertical, PaperCardMetrics.edge)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityHint("Opens Account and data")
+                        .accessibilityIdentifier("settings-account-data")
+                    }
+                    .padding(.top, 20)
+
+                    // Paper 65 draws three category switches and Quiet hours here; the server keeps
+                    // no per-person choices yet, so this is the one real row: the phone's own
+                    // permission, opening My notifications (65C).
+                    AccountGroup(title: "Notifications") {
+                        NavigationLink { MyNotificationsView().thorbisBackButton() } label: {
+                            AccountRow(glyph: .setBell, title: "My notifications", value: notificationLabel)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-my-notifications")
+                    }
+                    .padding(.top, 22)
+
+                    // Paper 65 "Appearance": theme lives on its own page; the menu and the screen
+                    // the app opens to are 65A. (Sidebar / Bottom bar has no setting on a phone.)
+                    AccountGroup(title: "Appearance") {
+                        NavigationLink { SettingsAppearancePage().thorbisBackButton() } label: {
+                            AccountRow(glyph: .setTheme, title: "Theme", value: SettingsAppearancePage.label(appearance))
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-appearance")
+                        WellDivider(leading: AccountRow<EmptyView>.dividerInset)
+                        NavigationLink { CustomizeMenuView().thorbisBackButton() } label: {
+                            AccountRow(glyph: .setSidebar, glyphSize: 17, title: "Menu and start screen")
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-menu")
+                    }
+                    .padding(.top, 22)
+
+                    // Paper 65 "Work preferences": the person's own saved signature. Offline mode has
+                    // no switch: the app always keeps jobs for low signal.
+                    AccountGroup(title: "Work preferences") {
+                        NavigationLink { SavedSignatureView().thorbisBackButton() } label: {
+                            AccountRow(glyph: .setPencil, title: "Saved signature", value: signatureOnFile ? "On file" : "Not set")
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-saved-signature")
+                        // Work this phone still holds, with its review. Shown only while there is some.
+                        if let savedWork {
+                            WellDivider(leading: AccountRow<EmptyView>.dividerInset)
+                            Button { reviewScope = savedWorkScope } label: {
+                                AccountRow(symbol: savedWork.needsPerson ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath",
+                                           glyphColor: savedWork.needsPerson ? Theme.warning : Theme.muted,
+                                           title: "Saved on this phone", subtitle: savedWork.words)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Saved on this phone")
+                            .accessibilityValue(savedWork.words)
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint("Review what is waiting to sync")
+                            .accessibilityIdentifier("settings-saved-work")
+                        }
+                        // Owners have Business settings in their menu; everyone else who may open
+                        // one of its pages gets the row here.
+                        if reachesBusinessSettingsHere {
+                            WellDivider(leading: AccountRow<EmptyView>.dividerInset)
+                            NavigationLink(value: PaperRoute.businessSetup) {
+                                AccountRow(glyph: .bizCompany, glyphSize: 18, title: "Business settings")
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityIdentifier("settings-business")
+                        }
+                    }
+                    .padding(.top, 22)
+                    // Coming back from the page shows what it left: On file, or Not set.
+                    .onAppear { signatureOnFile = SavedSignatureStore.isOnFile(actorID: session.user?.id) }
+
+                    // Places this role's menu does not list and no other screen leads to. Paper
+                    // gives them no parent for this role, so they stay one row away here.
+                    // The phone's menu lists them itself ("Everything else"), so Settings is
+                    // settings only there; iPad's sidebar keeps Paper's rows and this door.
+                    if UIDevice.current.userInterfaceIdiom == .pad {
+                        PlaceDoorRows(door: .settings, title: "Other places")
+                            .padding(.top, 22)
                     }
 
-                    // Danger sits apart: its own group after a wider pause, the word in the danger tone.
-                    VStack(alignment: .leading, spacing: 8) {
+                    AccountGroup(title: "App") {
+                        NavigationLink(value: PaperRoute.help) {
+                            AccountRow(glyph: .setHelp, title: "Help and support", end: .arrowOut)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-help")
+                        WellDivider(leading: AccountRow<EmptyView>.dividerInset)
+                        // Danger ends the card: the word and its mark in the danger tone.
                         Button { confirmSignOut = true } label: {
-                            HStack(spacing: 12) {
-                                PlaceMark(symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive)
-                                Text("Sign out").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.horizontal, PaperCardMetrics.inset)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                            .panelBackground(cornerRadius: Theme.cardRadius)
-                            .contentShape(Rectangle())
+                            AccountRow(glyph: .setSignOut, glyphColor: Theme.destructive, title: "Sign out",
+                                       titleColor: Theme.destructive, end: .none)
                         }
                         .buttonStyle(RowPressStyle())
                         .accessibilityHint("Asks before signing you out of this phone")
-                        Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
-                            .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 4)
                     }
-                    .padding(.top, 24)
+                    .padding(.top, 22)
+
+                    Text("Thorbis \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 4).padding(.top, 24)
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 32)
-                // Medium section headers over grouped wells (v2: 500 is the heaviest weight).
-                .environment(\.paperGroupedWells, true)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 40)
             }
             #if DEBUG
             .modifier(PaperPreviewScrollAnchor())
             #endif
-            .background(Theme.canvas)
+            .background(Theme.background.ignoresSafeArea())
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .paperDestinations()
-            .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .sheet(isPresented: $showWorkspaces) { SheetSurface { WorkspaceSelectionView() } }
-            .thorbisConfirm("Sign out of Thorbis?",
-                            message: signOutWarning,
-                            isPresented: $confirmSignOut,
-                            actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
-            .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
-            .task(id: StartupDestination.scope(session: session, api: api)?.key) {
-                startupDestination = StartupDestination.scope(session: session, api: api).map { StartupDestinationPreferences().get(for: $0) } ?? .automatic
+            .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
+            .onChange(of: reviewScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
+                if !valid { reviewScope = nil }
+            }
+            .sheet(isPresented: $confirmSignOut) {
+                SignOutSheet(company: session.activeOrganization?.name, warning: signOutWarning) {
+                    Task { dismiss(); await session.signOut() }
+                }
+            }
+            .task {
+                #if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-sign-out") { confirmSignOut = true }
+                #endif
+                notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
             }
         }
+        // Paper 65 is a page, not a panel: the page ground with cards on it.
+        .paperPageGround()
+    }
+
+    private var savedWorkScope: SavedWorkScope? {
+        .capture(session: session, api: api, media: pendingMedia, outbox: outbox)
+    }
+
+    /// What the phone still holds, in the words the menu's gear reads out.
+    private var savedWork: AppBottomBar.Sync? {
+        guard let scope = savedWorkScope else { return nil }
+        return .savedWork(.make(scope: scope, entries: outbox.entries, media: pendingMedia.items,
+                                mediaErrors: pendingMedia.errors, unverifiedMediaIDs: pendingMedia.unverifiedIDs,
+                                uploadingMediaID: pendingMedia.uploadingID, commandsSyncing: outbox.syncing,
+                                jobs: store.jobs, listingWarning: pendingMedia.storageWarning ?? outbox.storageWarning))
     }
 
     private var signOutWarning: String {
@@ -214,71 +213,203 @@ struct SettingsView: View {
         default: nil
         }
     }
+}
 
-    /// Not asked yet: ask right here (the system sheet), instead of sending people to Settings
-    /// to find a switch that does not exist until the app has asked. Asked before: open Settings.
-    private func notificationsTapped() async {
-        let center = UNUserNotificationCenter.current()
-        if await center.notificationSettings().authorizationStatus == .notDetermined {
-            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
-            let granted = await center.notificationSettings().authorizationStatus
-            if [.authorized, .provisional, .ephemeral].contains(granted) { UIApplication.shared.registerForRemoteNotifications() }
-            notifications = granted
-        } else if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-            openURL(url)
+/// Paper 65E "Sign out": the question in 22 Bold with one muted line, what is still on this phone
+/// on the warning surface, then Cancel beside the red Sign out. Unsynced work is deleted by
+/// signing out (it does not "sync first" as Paper's sample says), so the card says that.
+struct SignOutSheet: View {
+    let company: String?
+    let warning: String
+    let signOut: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var height: CGFloat = 320
+
+    private var unsynced: Bool { warning.contains("Signing out deletes") }
+
+    var body: some View {
+        // The sheet is as tall as its words. A long warning at the largest text sizes is taller than
+        // the screen, so the words scroll and Cancel and Sign out can always be reached.
+        ScrollView {
+            content
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .presentationDetents([.height(height)])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sign out of \(company ?? "Thorbis")?")
+                    .font(Theme.font(22, weight: .bold)).tracking(-0.22).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text(unsynced ? "You'll need your password to get back in." : warning)
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 4)
+            if unsynced {
+                HStack(alignment: .top, spacing: 10) {
+                    PaperIcon(.signOutSync, size: 20, color: Theme.warning).accessibilityHidden(true)
+                    Text(warning).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            HStack(spacing: 10) {
+                Button { dismiss() } label: {
+                    Text("Cancel").paperButton(.commit, tone: .quiet, fills: true)
+                }
+                .buttonStyle(PressStyle())
+                Button { dismiss(); signOut() } label: {
+                    Text("Sign out").paperButton(.commit, tone: .danger, fills: true)
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("sign-out-confirm")
+            }
+        }
+        .padding(.horizontal, 20).padding(.top, 26).padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension PaperGlyph {
+    /// Paper 65E's "still saving" mark: an open ring with its arrow head.
+    static let signOutSync = PaperGlyph(box: 20, [.stroke("M16 10A6 6 0 1 1 13.5 5.1", 1.8), .stroke("M13.5 2.5V5.5H16.5", 1.8)])
+}
+
+/// Paper 65G: how Thorbis looks on this device. Three theme cards (Light, Dark, Match device) bound to
+/// the same `thorbis.appearance` setting the app reads. Text size and app icon have no setting yet.
+private struct SettingsAppearancePage: View {
+    @AppStorage("thorbis.appearance") private var appearance = "system"
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    static func label(_ value: String) -> String {
+        switch value {
+        case "light": return "Light"
+        case "dark": return "Dark"
+        default: return "Match device"
         }
     }
 
-    /// A settings row, Linear style: a tinted place mark, the setting, its value as a quiet word.
-    private func row(_ title: String, symbol: String, value: String?) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            PlaceMark(symbol: symbol, tint: Self.markTint(symbol))
-            PaperListRow(title: title) {
-                // A long company name wraps to a second line rather than losing its end.
-                // A value in " · " parts shares one line when it fits, otherwise each part takes its own,
-                // so no line starts with the dot.
-                if let value {
-                    let parts = value.components(separatedBy: " \u{00B7} ")
-                    if parts.count > 1 {
-                        ViewThatFits(in: .horizontal) {
-                            valueText(value).fixedSize(horizontal: true, vertical: false)
-                            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 0) {
-                                ForEach(Array(parts.enumerated()), id: \.offset) { valueText($0.element) }
-                            }
-                        }
-                    } else {
-                        valueText(value)
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                PaperPageTitle(title: "Appearance", subtitle: UIDevice.current.userInterfaceIdiom == .pad ? "How Thorbis looks on this iPad" : "How Thorbis looks on this phone")
+                    .padding(.bottom, 16)
+                PaperCardLabel(title: "Theme")
+                let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                                                          : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+                layout {
+                    SettingsThemeChoice(value: "light", title: "Light", selection: $appearance)
+                    SettingsThemeChoice(value: "dark", title: "Dark", selection: $appearance)
+                    SettingsThemeChoice(value: "system", title: "Match device", selection: $appearance)
+                }
+                .paperCardMargin()
+                Text("Changes right away, on this device only.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+            }
+            .padding(.bottom, 32)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.canvas)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// One theme card: a small drawing of the app in that theme, its name under it, and a check on the
+/// chosen one. The card is the button.
+private struct SettingsThemeChoice: View {
+    let value: String
+    let title: String
+    @Binding var selection: String
+
+    private var chosen: Bool { selection == value }
+
+    var body: some View {
+        Button { selection = value } label: {
+            VStack(spacing: 8) {
+                preview
+                    .frame(maxWidth: .infinity).frame(height: 110)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(chosen ? Theme.brand : Theme.border, lineWidth: chosen ? 2 : 1))
+                HStack(spacing: 6) {
+                    if chosen {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 15)).foregroundStyle(Theme.brand)
+                            .accessibilityHidden(true)
                     }
+                    Text(title).font(Theme.font(15, weight: .semibold))
+                        .foregroundStyle(chosen ? Theme.foreground : Theme.subtle)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .environment(\.paperRowInset, 0)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, PaperCardMetrics.inset)
-        .contentShape(Rectangle())
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
-    private func valueText(_ text: String) -> some View {
-        Text(text).font(Theme.font(15)).foregroundStyle(Theme.subtle)
-            // Stacked under its setting at accessibility sizes, the value reads from the left like the title.
-            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
-            .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// The hairline between rows starts under the words, past the place mark.
-    private static let rowDivider: CGFloat = PaperCardMetrics.inset + 26 + 12
-
-    /// One hue per kind of setting, from the place-mark palette (decorative; the word carries it).
-    private static func markTint(_ symbol: String) -> Color {
-        switch symbol {
-        case "building.2": Theme.markOlive
-        case "slider.horizontal.3": Theme.markAccent
-        case "checklist": Theme.markForest
-        case "creditcard": Theme.markPumpkin
-        case "bell.badge", "bell": Theme.markBurnt
-        case "circle.lefthalf.filled": Theme.markAccent
-        case "sparkles": Theme.markPumpkin
-        default: Theme.markGrey
+    /// Decorative: a sidebar beside a page with a blue button, drawn in the theme's own tones.
+    @ViewBuilder private var preview: some View {
+        if value == "system" {
+            HStack(spacing: 0) {
+                SettingsThemeSketch(ground: Color(white: 0.95), panel: .white, line: Color(white: 0.8))
+                SettingsThemeSketch(ground: Color(white: 0.08), panel: Color(white: 0.16), line: Color(white: 0.35))
+            }
+            .accessibilityHidden(true)
+        } else if value == "light" {
+            SettingsThemeSketch(ground: Color(white: 0.95), panel: .white, line: Color(white: 0.8))
+                .accessibilityHidden(true)
+        } else {
+            SettingsThemeSketch(ground: Color(white: 0.08), panel: Color(white: 0.16), line: Color(white: 0.35))
+                .accessibilityHidden(true)
         }
+    }
+}
+
+/// The drawing inside a theme card. Fixed tones on purpose: it shows the other theme, not this one.
+private struct SettingsThemeSketch: View {
+    let ground: Color
+    let panel: Color
+    let line: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
+                Capsule().fill(Theme.brand).frame(width: 14, height: 5)
+                Capsule().fill(line).frame(width: 12, height: 4)
+                Capsule().fill(line).frame(width: 12, height: 4)
+                Spacer(minLength: 0)
+            }
+            .padding(6)
+            .frame(width: 30)
+            .frame(maxHeight: .infinity)
+            .background(panel, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Capsule().fill(line).frame(width: 26, height: 5)
+                Capsule().fill(line).frame(width: 34, height: 4)
+                Capsule().fill(line).frame(width: 22, height: 4)
+                Spacer(minLength: 0)
+                Capsule().fill(Theme.brand).frame(height: 9)
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(panel, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ground)
     }
 }

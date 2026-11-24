@@ -1,5 +1,19 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+/// Copies a gate or alarm code so it stays on this phone and goes away on its own. A plain copy
+/// is handed to the person's other Apple devices and stays on the clipboard until something
+/// replaces it.
+enum AccessCodeCopy {
+    static let lifetime: TimeInterval = 120
+
+    @MainActor
+    static func copy(_ code: String) {
+        UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: code]],
+                                      options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(lifetime)])
+    }
+}
 
 /// "Before you go in": what the technician should know about the place, read from data the app
 /// already has (the job, the customer's locations, equipment and the job's visit history).
@@ -97,7 +111,8 @@ struct JobPropertyHistory: Codable, Hashable {
     }
 
     /// The job's street (the first line of its own location's address), or nil when the job
-    /// records no site (BYR-1593). The account's addresses are never promoted to the job site.
+    /// records no site (BYR-1593). A job without one may be shown at the customer's own address
+    /// (`JobFallbackAddress`), with its caveat, never as if it were the job's own site.
     static func street(job: JobRecord, locations: [ServiceLocationRecord]) -> String? {
         guard let locationID = job.locationId,
               let place = locations.first(where: { $0.id == locationID && $0.customerId == job.customerId && $0.organizationId == job.organizationId })
@@ -136,6 +151,48 @@ struct JobPropertyHistory: Codable, Hashable {
             parts.append(years < 1 ? "Under a year" : "\(years) \(years == 1 ? "yr" : "yrs")")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// Where a job that records no site of its own is shown to be, until BYR-1593 settles which field
+/// holds a job's site: the customer's own address (`customers.address`), as the server's job
+/// notices and the web job page already show it, when it is their only address on file. That is
+/// when no service location says otherwise: they have none, or only the property made from that
+/// same address (New customer and Book job's new caller make one). Every surface that shows it says
+/// `caveat`. A service location's own address is never promoted to the job's, and nothing shows
+/// while the customer's locations are unread.
+struct JobFallbackAddress: Equatable {
+    static let caveat = "From the customer's only address on file"
+
+    let address: String
+    /// The pin of a property at this same address, when one has it.
+    let coordinates: FieldCoordinates?
+
+    /// The street line, as a stop's own address reads it.
+    var street: String? { NextStopPlace.firstLine(address) }
+    var directions: URL? { Directions.url(address: address, coordinates: coordinates) }
+
+    /// - Parameters:
+    ///   - locationID: the job's own `locationId`; a job that has one gets no fallback.
+    ///   - locations: the customer's locations as read, or nil while they are unread or failed.
+    ///   - customerAddress: the customer record's own address.
+    static func make(locationID: String?, customerID: String?, organizationID: String?,
+                     locations: [ServiceLocationRecord]?, customerAddress: String?) -> JobFallbackAddress? {
+        guard locationID == nil, let customerID, let organizationID, let locations else { return nil }
+        let address = customerAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !address.isEmpty else { return nil }
+        let service = locations.filter {
+            $0.customerId == customerID && $0.organizationId == organizationID && $0.kind != "billing"
+        }
+        // A property somewhere else means the account's address is not the only one on file.
+        guard service.allSatisfy({ sameAddress($0.address, address) }) else { return nil }
+        return JobFallbackAddress(address: address, coordinates: service.lazy.compactMap(\.coordinates).first)
+    }
+
+    /// The same words, ignoring case and spacing: the property made from a typed address is that address.
+    static func sameAddress(_ lhs: String, _ rhs: String) -> Bool {
+        func words(_ value: String) -> [Substring] { value.lowercased().split(whereSeparator: \.isWhitespace) }
+        return words(lhs) == words(rhs)
     }
 }
 
@@ -250,7 +307,9 @@ struct JobPropertyHistorySection: View {
             ? history.equipment[...] : history.equipment.prefix(JobPropertyHistoryLayout.collapsedRows)
         let facts = showsFacts ? history.facts : []
         // Cream sheet: a plain cluster heading; the on-site banner keeps the warning mark.
+        // Paper 21O: "Equipment  2", the count beside the label when the panel is only equipment.
         JobPanelSection(title: facts.isEmpty ? "Equipment" : history.title,
+                        count: facts.isEmpty ? "\(history.equipment.count)" : nil,
                         actionTitle: history.equipment.count > JobPropertyHistoryLayout.collapsedRows + 1 ? (expanded ? "Show less" : "Show all \(history.equipment.count)") : nil,
                         actionIdentifier: "job-property-history-show-all",
                         action: { withMotion(.snappy) { expanded.toggle() } }) {
@@ -269,7 +328,7 @@ struct JobPropertyHistorySection: View {
                     JobPanelFact(label: fact.label, value: fact.value, mono: true)
                         .contentShape(Rectangle())
                         .contextMenu {
-                            Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { UIPasteboard.general.string = fact.value }
+                            Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { AccessCodeCopy.copy(fact.value) }
                         }
                         .accessibilityHint("Touch and hold to copy")
                 } else {
@@ -286,23 +345,23 @@ struct JobPropertyHistorySection: View {
         let record = equipment?.first { $0.id == unit.id }
         if canEditEquipment, let record {
             Button { editing = EquipmentEditorItem(record: record) } label: {
-                JobPanelRow(title: unit.name, subtitle: unit.detail, titleSize: 15)
+                JobPanelRow(title: unit.name, subtitle: unit.detail)
             }
             .buttonStyle(RowPressStyle())
             .accessibilityHint("Opens the equipment")
         } else {
-            JobPanelRow(title: unit.name, subtitle: unit.detail, titleSize: 15)
+            JobPanelRow(title: unit.name, subtitle: unit.detail)
                 .accessibilityElement(children: .combine)
         }
     }
 
     private func visitsPanel(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
-        JobPanelSection(title: history.scope == .address ? "Past visits here" : "Past visits", count: "\(history.visits.count)") {
+        // Paper 21O: "Past visits", each row the job's title over "May 14, 2026 · Ramon Mendez".
+        JobPanelSection(title: "Past visits", count: "\(history.visits.count)") {
             savedLine(savedAt)
             ForEach(history.visits) { visit in
                 NavigationLink(value: PaperRoute.job(visit.id)) {
-                    JobPanelRow(title: visit.title, subtitle: visitLine(visit),
-                                leading: visit.date?.formatted(.dateTime.month(.abbreviated).day()) ?? "—", titleSize: 15)
+                    JobPanelRow(title: visit.title, subtitle: visitLine(visit))
                 }
                 .buttonStyle(RowPressStyle())
                 .accessibilityIdentifier("job-property-visit-\(visit.id)")
@@ -311,9 +370,9 @@ struct JobPropertyHistorySection: View {
         }
     }
 
-    /// What was done when the visit says so, else "2026 · You · Completed": status always as a word.
+    /// What was done when the visit says so, then "May 14, 2026 · You · Completed": status always as a word.
     private func visitLine(_ visit: JobPropertyHistory.Visit) -> String {
-        let facts = [visit.date.map { $0.formatted(.dateTime.year()) }, visit.technician, visit.status.statusLabel]
+        let facts = [visit.date.map { $0.formatted(.dateTime.month(.abbreviated).day().year()) }, visit.technician, visit.status.statusLabel]
             .compactMap { $0 }.joined(separator: " · ")
         guard let notes = visit.notes else { return facts }
         return "\(notes)\n\(facts)"

@@ -16,7 +16,7 @@ final class DocumentStatusTests: XCTestCase {
     func testInvoiceStatusesReadFromTheRecordOnly() {
         XCTAssertEqual(DocumentStatus(invoice: invoice("draft")), DocumentStatus(tone: .unscheduled, word: "Draft"))
         XCTAssertEqual(DocumentStatus(invoice: invoice("issued")), DocumentStatus(tone: .scheduled, word: "Unpaid"))
-        XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 10_000)), DocumentStatus(tone: .inProgress, word: "Part paid"))
+        XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 10_000)), DocumentStatus(tone: .inProgress, word: "Partly paid"))
         XCTAssertEqual(DocumentStatus(invoice: invoice("paid", paid: 48_000)), DocumentStatus(tone: .invoiced, word: "Paid"))
         XCTAssertEqual(DocumentStatus(invoice: invoice("void")), DocumentStatus(tone: .cancelled, word: "Void"))
         // Overdue only when the server says so: the record has no due date to work it out from.
@@ -34,6 +34,16 @@ final class DocumentStatusTests: XCTestCase {
 
     func testFullyPaidIssuedInvoiceReadsPaidNotPartPaid() {
         XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 48_000)), DocumentStatus(tone: .invoiced, word: "Paid"))
+    }
+
+    /// Search and the job's rows read the record, not the bare status: part paid reads "Partly paid".
+    @MainActor
+    func testInvoiceStatusWordReadsTheAmountPaid() {
+        XCTAssertEqual(StatusWord(invoice: invoice("issued")).text, "Unpaid")
+        XCTAssertEqual(StatusWord(invoice: invoice("issued", paid: 10_000)).text, "Partly paid")
+        XCTAssertEqual(StatusWord(invoice: invoice("paid", paid: 48_000)).text, "Paid")
+        XCTAssertEqual(StatusWord(invoice: invoice("issued", paid: 10_000)).tint, StatusWord(documentStatus: "issued").tint)
+        XCTAssertEqual(JobDocumentRow(invoice: invoice("issued", paid: 10_000), fresh: true).invoiceWord, "Partly paid")
     }
 
     private func invoice(_ status: String, total: Int = 48_000, paid: Int = 0) -> InvoiceRecord {

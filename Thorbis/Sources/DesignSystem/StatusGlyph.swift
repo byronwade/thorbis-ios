@@ -107,11 +107,21 @@ struct StatusGlyph: View {
         self.init(tone: StatusTone(jobStatus: status, hasTime: hasTime), label: status.statusLabel, pending: pending)
     }
 
+    /// Paper's done check, in the glyph's 14 box.
+    private static let check = PaperGlyph(box: 14, [.stroke("M4.2 7.2L6.2 9.1L9.8 5.2", 1.5)])
+
     var body: some View {
-        let line = max(1.5, size * 0.1)
+        // Paper 18 / 20 draw the glyph in a 14 box: a 1.4 ring of radius 6 (0.5 in from the box),
+        // the half disc at radius 3.8, the done disc at 6.5 with a 1.5 check in the card's colour.
+        // A booked job that has not started is a plain `border-strong` ring, never a colour.
+        let unit = size / 14
+        let line = max(1.5, unit * 1.4)
         ZStack {
-            if tone.fill >= 1 {
-                Circle().fill(tone.hue)
+            if tone == .done {
+                Circle().fill(tone.hue).padding(unit * 0.5)
+                PaperIcon(Self.check, size: size, color: Theme.card)
+            } else if tone.fill >= 1 {
+                Circle().fill(tone.hue).padding(unit * 0.5)
                 if let mark = tone.mark {
                     Image(systemName: mark)
                         .font(.system(size: size * 0.55, weight: .medium))
@@ -119,11 +129,13 @@ struct StatusGlyph: View {
                 }
             } else {
                 Circle()
-                    .strokeBorder(tone.hue, style: StrokeStyle(lineWidth: line, dash: tone == .unscheduled ? [line * 1.4, line * 1.4] : []))
+                    .strokeBorder(tone == .scheduled ? Theme.borderStrong : tone.hue,
+                                  style: StrokeStyle(lineWidth: line, dash: tone == .unscheduled ? [line * 1.4, line * 1.4] : []))
+                    .padding(unit * 0.3)
                 if tone.fill > 0 {
                     RingSlice(fraction: tone.fill)
                         .fill(tone.hue)
-                        .padding(line * 2)
+                        .padding(unit * 3.2)
                 }
             }
         }
@@ -237,66 +249,6 @@ private struct RingSlice: Shape {
     }
 }
 
-/// A property in Linear's chip row: a tinted capsule with an optional glyph or avatar and a word.
-/// With an action it is a button (PressStyle); without one it is a plain label.
-struct PropertyChip<Leading: View>: View {
-    let text: String
-    var tint: Color = Theme.fill
-    var textColor: Color = Theme.foreground
-    var action: (() -> Void)? = nil
-    @ViewBuilder var leading: Leading
-
-    var body: some View {
-        if let action {
-            Button(action: action) { label }.buttonStyle(PressStyle())
-        } else {
-            label
-        }
-    }
-
-    private var label: some View {
-        HStack(spacing: 6) {
-            leading
-            Text(text)
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(textColor)
-                .lineLimit(1)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .frame(minHeight: Theme.chipHeight)
-        .background(tint, in: Capsule())
-        // v2: a chip is a pill with a 1px rim that follows the curve.
-        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-        .contentShape(Capsule())
-    }
-}
-
-extension PropertyChip where Leading == AnyView {
-    /// A chip with an SF Symbol (or nothing) before the word.
-    init(_ text: String, symbol: String? = nil, tint: Color = Theme.fill, textColor: Color = Theme.foreground,
-         action: (() -> Void)? = nil) {
-        self.init(text: text, tint: tint, textColor: textColor, action: action) {
-            AnyView(Group {
-                if let symbol {
-                    Image(systemName: symbol).font(.system(size: 12, weight: .medium)).accessibilityHidden(true)
-                        .foregroundStyle(textColor)
-                }
-            })
-        }
-    }
-
-    /// A job's status as a chip: the word, with its small mark in the status hue (v2: the pill stays
-    /// neutral; colour sits with the word).
-    init(jobStatus status: String, hasTime: Bool = true, pending: Bool = false, action: (() -> Void)? = nil) {
-        let tone = StatusTone(jobStatus: status, hasTime: hasTime)
-        self.init(text: pending ? "\(status.statusLabel) · waiting to sync" : status.statusLabel,
-                  tint: Theme.fill, textColor: Theme.foreground, action: action) {
-            AnyView(StatusMark(tone: tone, pending: pending))
-        }
-    }
-}
-
 /// A person as an initials circle on a tinted fill (redesign: avatars are allowed). The hue is
 /// picked from the name so a person keeps one colour; white initials hold 4.5:1 on every hue.
 struct InitialsAvatar: View {
@@ -313,12 +265,13 @@ struct InitialsAvatar: View {
     }
 
     var body: some View {
+        // Paper's avatar chip (20 Jobs, 53 Office schedule, the drawer's foot): brand text on the
+        // brand surface for everyone, 11 Semibold at 28pt. `hues` stays for callers that colour a mark.
         Text(initials(name))
-            .font(.system(size: size * 0.4, weight: .medium))
-            .foregroundStyle(.white)
+            .font(.custom("Inter-Regular", fixedSize: max(10, (size * 0.4).rounded())).weight(.semibold))
+            .foregroundStyle(Theme.brandText)
             .frame(width: size, height: size)
-            .background(Self.hue(for: name), in: Circle())
-            .dynamicTypeSize(...DynamicTypeSize.large)
+            .background(Theme.brandSurface, in: Circle())
             .accessibilityLabel(name)
     }
 }
@@ -343,9 +296,8 @@ struct PlaceMark: View {
     }
 }
 
-/// A grouped panel (v2): rows sit on one panel (radius 14). Tone, type and space separate rows;
-/// there is no line between them and no box around the group. Use `Well { ... }` for hand-built
-/// content (with `WellDivider` where rows used to take a hairline), or `WellList` for a collection.
+/// A grouped card (Paper v2): rows sit on one panel (radius 20), with a hairline (`WellDivider`)
+/// between rows inside it, inset to the row text; never a line between cards or a box around them.
 struct Well<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -357,28 +309,13 @@ struct Well<Content: View>: View {
     }
 }
 
-/// Where rows of a panel meet. v2 (design.thorbis.com: "never a line between two jobs"): it draws
-/// nothing and keeps the rows' own padding as the pause. `leading` is kept so call sites compile.
+/// Where rows of one grouped card meet. Paper v2 (2026-11-16): a hairline inset to the rows' text,
+/// only inside a card, never between cards or under a heading.
 struct WellDivider: View {
     var leading: CGFloat = PaperCardMetrics.inset
+    @Environment(\.displayScale) private var displayScale
     var body: some View {
-        Color.clear.frame(height: 0).accessibilityHidden(true)
-    }
-}
-
-/// A collection on one panel; space, not lines, between rows.
-struct WellList<Data: RandomAccessCollection, Row: View>: View where Data.Element: Identifiable {
-    let data: Data
-    var dividerInset: CGFloat = PaperCardMetrics.inset
-    @ViewBuilder var row: (Data.Element) -> Row
-
-    var body: some View {
-        let items = Array(data)
-        Well {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                row(item)
-                if index < items.count - 1 { WellDivider(leading: dividerInset) }
-            }
-        }
+        Rectangle().fill(Theme.hairline).frame(height: 1 / max(displayScale, 1))
+            .padding(.leading, leading).accessibilityHidden(true)
     }
 }

@@ -36,6 +36,40 @@ extension EstimateCreationRecoveryTests {
         XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Server error", status: 500, detail: nil)))
     }
 
+    /// The create response a real server gave for a member customer (10% off): the price-book
+    /// line comes back at the member price with the list price kept as the original.
+    func testAMemberPricedPriceBookLineIsStillTheSubmittedLine() throws {
+        let item = "f2f95c70-7153-8303-a8f2-eca16dd834d6"
+        func response(saved: Int, original: Int, overridden: [String]) throws -> EstimateRecord {
+            let json = """
+            {"id":"01a1fe75-3e8c-7364-86a0-097adbd433c3","organizationId":"01a1fe69-9ccf-731d-8377-21bd9280a0aa",
+             "customerId":"01a1fe6a-0f4f-76b0-95ba-c24b732cca6d","createdByUserId":"01a1fe69-8674-7829-952d-b7ef4b15b6d4",
+             "status":"draft","title":"Water heater not heating","createdAt":"2026-11-21T14:14:18.993Z","updatedAt":"2026-11-21T14:14:18.993Z",
+             "lines":[{"id":"01a1fe75-3ea2-748c-8f31-7fdcf821665f","group":"work","quantity":1,"description":"Replace anode rod",
+               "unitPrice":{"amount":\(saved),"currency":"USD"},
+               "source":{"kind":"price_book","capturedAt":"2026-11-21T14:14:18.993Z","addedByUserId":"01a1fe69-8674-7829-952d-b7ef4b15b6d4",
+                 "priceBookItemId":"\(item)","priceBookRevision":1,"overriddenFields":\(overridden),
+                 "originalUnitPrice":{"amount":\(original),"currency":"USD"},"originalDescription":"Replace anode rod"}}]}
+            """
+            return try JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+        }
+        let list = FieldMoney(amount: 18500, currency: "USD")
+        let submitted = FieldEstimateCreate(customerId: "01a1fe6a-0f4f-76b0-95ba-c24b732cca6d", title: "Water heater not heating", lines: [
+            .init(description: "Replace anode rod", quantity: 1, unitPrice: list, source: .priceBookSelection(itemID: item, revision: 1), group: "work")
+        ])
+        XCTAssertTrue(EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: try response(saved: 16650, original: 18500, overridden: ["unit_price"])))
+        XCTAssertTrue(EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: try response(saved: 18500, original: 18500, overridden: [])))
+        // A higher price, an unmarked change, or a different list price is not the submitted line.
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: try response(saved: 19000, original: 18500, overridden: ["unit_price"])))
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: try response(saved: 16650, original: 18500, overridden: [])))
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: try response(saved: 16650, original: 17000, overridden: ["unit_price"])))
+        // A hand-typed line never gets this allowance.
+        let manual = FieldEstimateCreate(customerId: submitted.customerId, title: submitted.title, lines: [
+            .init(description: "Replace anode rod", quantity: 1, unitPrice: list, source: .manual)
+        ])
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(manual, created: try response(saved: 16650, original: 18500, overridden: ["unit_price"])))
+    }
+
     func testCreatedResponseMustMatchSubmittedLineTermsAndProvenance() throws {
         var fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate)) as? [String: Any])
         fixture["status"] = "draft"

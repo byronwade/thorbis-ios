@@ -15,6 +15,12 @@ struct NewEstimateView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var picker: EstimateBuilderTarget?
+    /// Paper 30/32/33: Add materials (Scan, Paste) and the price book are one set of segments. Two
+    /// sheets can't overlap, so the one being left names the next and it opens after the close.
+    @State private var showMaterials = false
+    @State private var materialsMode = AddMaterialsMode.scan
+    @State private var reopenMaterials = false
+    @State private var reopenPicker = false
     @State private var expandedLine: UUID?
     @State private var revealProblem = 0
     @State private var keyboardUp = false
@@ -36,8 +42,18 @@ struct NewEstimateView: View {
     @State private var customerProblem: String?
     @State private var linesProblem: String?
     @State private var descriptionProblem: String?
+    /// Paper 35: "Present to customer" saves, then opens the saved estimate handing it to the customer.
+    @State private var presentAfterSave = false
+    @State private var presenting: PresentedEstimate?
+    @State private var opened = Date.now
+    /// "Copy a past estimate": the picker, and the one-line note shown once something was copied.
+    @State private var showCopy = false
+    @State private var copiedNote: String?
     private let jobID: String?
     private let jobLocationID: String?
+    /// The job's customer when the estimate is being made from a job; the create only names the
+    /// job while the estimate is still for that customer.
+    private let jobCustomerID: String?
     private let onCreated: (EstimateRecord) -> Void
 
     init(customerID: String = "", jobID: String? = nil, locationID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
@@ -45,6 +61,7 @@ struct NewEstimateView: View {
         _title = State(initialValue: title)
         self.jobID = jobID
         self.jobLocationID = jobID == nil ? nil : locationID
+        self.jobCustomerID = jobID == nil || customerID.isEmpty ? nil : customerID
         self.onCreated = onCreated
     }
 
@@ -90,9 +107,23 @@ struct NewEstimateView: View {
             VStack(spacing: 0) {
                 // The shared sheet header (Add equipment, New customer): the title and its close, with
                 // the same discard check the toolbar Cancel had.
-                ThorbisSheetHeader(title: created == nil ? "New estimate" : "Estimate saved",
-                                   closeLabel: created == nil ? "Cancel" : "Close",
-                                   onClose: busy ? nil : { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } })
+                // Paper 35: the screen's title is the 34 Bold heading in the builder; the header keeps Cancel.
+                HStack {
+                    PaperCircleButton(symbol: "xmark", label: created == nil ? "Cancel" : "Close", size: 44, fill: Theme.card) {
+                        if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true }
+                    }
+                    .disabled(busy)
+                    Spacer(minLength: 0)
+                    // Paper 35's "…" circle: the ways to add that Paper keeps off the page, and discard.
+                    if !moreItems.isEmpty {
+                        ThorbisMenu(items: moreItems, title: "New estimate", accessibilityLabel: "More") {
+                            PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                        }
+                        .disabled(busy)
+                        .accessibilityIdentifier("estimate-more")
+                    }
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14)
                 ScrollViewReader { proxy in
                     ScrollView { builder }
                     .scrollDismissesKeyboard(.interactively)
@@ -114,7 +145,9 @@ struct NewEstimateView: View {
             }
             .keyboardDoneButton()
             .trackKeyboard($keyboardUp)
+            .environment(\.builderDocumentLabel, created.map { "EST-\($0.id.suffix(4).uppercased())" } ?? "New estimate")
             .background(Theme.canvas)
+            .paperPageGround()
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -130,6 +163,8 @@ struct NewEstimateView: View {
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
                                     Task {
+                                        // The server revises authority while the create is held: a real change.
+                                        PaperPreviewProtocol.reviseSampleAuthority()
                                         await session.revalidate()
                                         EstimateRecoveryPreview.shared.release()
                                     }
@@ -143,7 +178,15 @@ struct NewEstimateView: View {
             // The header above closes the sheet; the bar stays only for the debug recovery sample.
             .toolbar(Self.showsPreviewBar ? .visible : .hidden, for: .navigationBar)
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-            .sheet(item: $picker) { target in SheetSurface {
+            // The saved estimate, handed to the customer the way the job's next step does it; closing it
+            // closes the builder, since the estimate now lives on its own page.
+            .thorbisDestination(item: $presenting) { saved in
+                EstimateDetailView(id: saved.id, jobID: jobID, presentsOnOpen: true)
+                    .onDisappear { dismiss() }
+            }
+            .sheet(item: $picker, onDismiss: {
+                if reopenMaterials { reopenMaterials = false; showMaterials = true }
+            }) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "this estimate" : title,
                     canUsePriceBook: canUsePriceBook,
@@ -151,9 +194,27 @@ struct NewEstimateView: View {
                     secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
                     addItem: { add($0, group: target.group) },
                     addCustomLine: { addCustom($0, group: target.group) },
-                    refresh: { await refreshCatalog(force: $0) }
+                    refresh: { await refreshCatalog(force: $0) },
+                    materialModes: canUsePriceBook ? AddMaterialsMode.allCases.map { $0.title } : [],
+                    switchMode: { name in
+                        materialsMode = AddMaterialsMode.allCases.first(where: { $0.title == name }) ?? .scan
+                        reopenMaterials = true
+                    }
                 )
                 .environmentObject(session).environmentObject(api)
+            } }
+            .sheet(isPresented: $showMaterials, onDismiss: {
+                if reopenPicker { reopenPicker = false; picker = EstimateBuilderTarget() }
+            }) { SheetSurface {
+                AddMaterialsSheet(initialMode: materialsMode, canUsePriceBook: canUsePriceBook,
+                                  addItem: { add($0, group: nil) },
+                                  refresh: { await refreshCatalog(force: $0) },
+                                  openPriceBook: { reopenPicker = true })
+                .environmentObject(session).environmentObject(api)
+            } }
+            .sheet(isPresented: $showCopy) { SheetSurface {
+                EstimateCopySheet(customerID: customerID) { copyPast($0) }
+                    .environmentObject(session).environmentObject(api).environmentObject(store)
             } }
             .thorbisConfirm("Continue without item groups?",
                             message: "The saved estimate did not keep the Work and Materials groups. Item descriptions, prices and visibility are unchanged. Continue without those groups, or ask your office for help.",
@@ -163,7 +224,8 @@ struct NewEstimateView: View {
                                 Task { await save() }
                             }])
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
-            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)) { await refreshCatalog() }
+            .task(id: PriceBookCatalogLoad(context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority),
+                                           verification: session.verificationRevision)) { await refreshCatalog() }
             .onChange(of: customerID) { _, _ in customerProblem = nil }
             .onChange(of: lines.count) { _, _ in
                 linesProblem = nil
@@ -196,22 +258,133 @@ struct NewEstimateView: View {
             if let removed {
                 LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
             }
-            if !keyboardUp { EstimateBuilderTotal(total: total, detail: memberLine) }
             if let descriptionProblem {
                 FieldProblem(message: descriptionProblem)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.gutter)
             }
-            PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
-                           disabled: !canCommit,
-                           disabledReason: canCommit ? nil : (requiresManualReview ? "Ask your office to review the saved estimate." : createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")) {
-                if requiresGroupDisclosure && !acceptedGroupLoss { confirmGroupLoss = true }
-                else if showProblems() { Task { await save() } }
-            }
+            commitBar
         }
         // The floating keyboard accessory is ~44pt plus chrome and otherwise sits over Save.
         .padding(.bottom, keyboardUp ? 48 : 0)
         .background(Theme.canvas)
+    }
+
+    private var commitDisabledReason: String? {
+        canCommit ? nil : (requiresManualReview ? "Ask your office to review the saved estimate." : createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")
+    }
+
+    private func commit(present: Bool) {
+        presentAfterSave = present
+        if requiresGroupDisclosure && !acceptedGroupLoss { confirmGroupLoss = true }
+        else if showProblems() { Task { await save() } }
+    }
+
+    /// Paper 35's bar: the 50pt brand pill "Present to customer" with its shield, and the 50pt save
+    /// circle on the quiet fill beside it. Presenting saves first; the circle only saves. Once the
+    /// estimate is saved and something still needs an answer, the pill says what (retry, continue).
+    private var commitBar: some View {
+        let recovering = created != nil
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button { commit(present: !recovering) } label: {
+                    HStack(spacing: 7) {
+                        if busy { ProgressView().tint(.white) }
+                        else if !recovering { PaperIcon(.shieldCheck, size: 15, color: .white) }
+                        Text(recovering ? commitTitle : "Present to customer").font(Theme.font(16, weight: .semibold))
+                    }
+                    .inkCommit(enabled: canCommit)
+                }
+                .buttonStyle(PressStyle())
+                .disabled(busy || !canCommit)
+                .accessibilityHint(commitDisabledReason ?? (recovering ? "" : "Saves the estimate, then hands it to the customer"))
+                .accessibilityIdentifier("estimate-present")
+                if !recovering {
+                    Button { commit(present: false) } label: {
+                        PaperIcon(.saveDisk, size: 17, color: Theme.foreground)
+                            .frame(width: 50, height: 50)
+                            .background(Theme.quietFill, in: Circle())
+                            .contentShape(Circle())
+                            .opacity(canCommit ? 1 : 0.4)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy || !canCommit)
+                    .accessibilityLabel(commitTitle)
+                    .accessibilityIdentifier("estimate-save")
+                }
+            }
+            if let commitDisabledReason {
+                Text(commitDisabledReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 8)
+        .background(Theme.background)
+    }
+
+    /// What Paper keeps behind "…": scanning or pasting a parts list, and leaving without saving.
+    private var moreItems: [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        guard created == nil else { return items }
+        if canUsePriceBook, recovery.canEdit {
+            items.append(ThorbisMenuItem("Scan materials", icon: "barcode.viewfinder") { materialsMode = .scan; showMaterials = true })
+            items.append(ThorbisMenuItem("Paste a parts list", icon: "doc.on.clipboard") { materialsMode = .paste; showMaterials = true })
+        }
+        if !lines.isEmpty {
+            items.append(ThorbisMenuItem("Discard estimate", icon: "trash", role: .destructive) { confirmDiscard = true })
+        }
+        return items
+    }
+
+    /// Starting from a past estimate is offered only while the new one has no items yet.
+    private var canCopyPast: Bool {
+        created == nil && recovery.canEdit && lines.isEmpty && session.can("estimate.view", feature: "estimates")
+            && session.can("estimate.create", feature: "estimates")
+    }
+
+    /// A quiet row under the empty line list: 48 tall, on the card tone.
+    private var copyPastRow: some View {
+        Button { showCopy = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.on.doc").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                    .frame(width: 18).accessibilityHidden(true)
+                Text("Copy a past estimate").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                Spacer(minLength: 8)
+                PaperRowChevron()
+            }
+            .padding(.horizontal, 12).frame(minHeight: 48)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+        .padding(.top, 4)
+        .accessibilityHint("Starts this estimate from one already written")
+        .accessibilityIdentifier("estimate-copy-past")
+    }
+
+    /// The name (when none is typed yet) and the lines come across as plain typed lines; the
+    /// customer, approval, signature and discounts do not.
+    private func copyPast(_ estimate: EstimateRecord) {
+        guard canCopyPast else { return }
+        let copied = EstimateCopy.lines(from: estimate)
+        guard !copied.isEmpty else {
+            error = "That estimate has nothing that can be copied."
+            return
+        }
+        title = EstimateCopy.title(current: title, copied: estimate.title)
+        lines = copied
+        copiedNote = EstimateCopy.note(leftOut: EstimateCopy.leftOut(estimate))
+        titleProblem = nil
+        linesProblem = nil
+        error = nil
+    }
+
+    /// The line under the heading: the job it's for and who it's for ("JOB-2214 · Danielle Marlowe").
+    private var subtitle: String? {
+        let parts = [jobID.map { "JOB-\($0.suffix(4).uppercased())" },
+                     customerID.isEmpty ? nil : store.customerName(customerID)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
 
     /// MF-05: what a member would pay, under the total. The saved prices stay the price book's.
@@ -229,51 +402,156 @@ struct NewEstimateView: View {
         return "Save estimate · \(money(total, currency: "USD"))"
     }
 
+    /// Paper 35: "New estimate" at 34 Bold with the job under it, the title field, the Draft and
+    /// customer pills, then (16 from the edges) Add item, the line items card, the tip and the totals.
     private var builder: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 0) {
+            PaperPageTitle(title: created == nil ? "New estimate" : "Estimate saved", subtitle: subtitle)
             VStack(alignment: .leading, spacing: 6) {
-                // The header says "New estimate"; the eyebrow names the job it's for.
-                if let jobID { PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())") }
                 // The label stays above the field; the placeholder is only an example.
-                Text("Title").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .padding(.top, 6).accessibilityHidden(true)
+                // "Name", not "Title": it is what the customer reads beside the price.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Name").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    Text("Your customer sees this").font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                }
+                .padding(.horizontal, 4).accessibilityHidden(true)
                 TextField("", text: $title, prompt: .placeholder("Furnace replacement"), axis: .vertical)
-                    .font(Theme.font(24, weight: .medium)).tracking(-0.3)
+                    .font(Theme.font(17, weight: .medium))
                     .accessibilityLabel("Estimate title")
                     .disabled(!recovery.canEdit)
                     .onChange(of: title) { _, _ in titleProblem = nil }
+                    .padding(.horizontal, 12).padding(.vertical, 12)
+                    .frame(minHeight: 48)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 if let titleProblem { FieldProblem(message: titleProblem) }
-                HStack(spacing: 10) {
-                    StatusLabel(tone: .unscheduled, word: "Draft", emphasis: .quiet)
+            }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
+            VStack(alignment: .leading, spacing: 6) {
+                FlowRow(spacing: 8, lineSpacing: 8) {
+                    HStack(spacing: 6) {
+                        PaperIcon(.statusHalf, size: 14, color: Theme.muted)
+                        Text("Draft").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                    }
+                    .padding(.leading, 10).padding(.trailing, 12).frame(minHeight: 40)
+                    .background(Theme.card, in: Capsule())
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Status, Draft")
+                    HStack(spacing: 6) {
+                        PaperIcon(.clockPill, size: 14, color: Theme.muted)
+                        Text("Today \u{00B7} \(opened.tradeTime)").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                    }
+                    .padding(.leading, 10).padding(.trailing, 12).frame(minHeight: 40)
+                    .background(Theme.card, in: Capsule())
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Started today at \(opened.tradeTime)")
                     ThorbisMenu(items: store.customers.filter { $0.archived != true }.map { customer in
                         ThorbisMenuItem(customer.name, isSelected: customer.id == customerID) { customerID = customer.id }
                     }, title: "Customer") {
-                        Chip(text: customerID.isEmpty ? "Choose customer" : store.customerName(customerID), icon: "person",
-                             tint: customerID.isEmpty ? Theme.brandText : Theme.muted)
-                            .padding(.vertical, 10).contentShape(Rectangle())
+                        customerPill
                     }
                     .disabled(!recovery.canEdit || (jobID != nil && !customerID.isEmpty))
                 }
                 if let customerProblem { FieldProblem(message: customerProblem) }
             }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
 
-            EstimateBuilderSection(
-                label: lines.isEmpty ? "Items" : "Items · \(lines.count)",
-                lines: editableLines, disabled: !recovery.canEdit, focus: $focus, expandedLine: $expandedLine,
-                showTotal: false, materialsSwitch: storesLineGroups, lineActionsLeading: keyboardUp,
-                addItem: { picker = EstimateBuilderTarget() },
-                removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
-            )
-            if let linesProblem {
-                FieldProblem(message: linesProblem)
-            } else if lines.isEmpty {
-                Text(canUsePriceBook ? "No items yet. Add one from the price book, or type a custom item."
-                                     : "No items yet. Add a custom item: your role can't use the price book.")
-                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 10) {
+                EstimateBuilderSection(
+                    label: "Line items",
+                    lines: editableLines, disabled: !recovery.canEdit, focus: $focus, expandedLine: $expandedLine,
+                    showTotal: false, materialsSwitch: storesLineGroups, lineActionsLeading: keyboardUp,
+                    addItem: { picker = EstimateBuilderTarget() },
+                    removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } },
+                    addItemAbove: true, addItemNote: canUsePriceBook ? "Price book or custom" : "Custom item"
+                )
+                if let linesProblem {
+                    FieldProblem(message: linesProblem)
+                } else if lines.isEmpty {
+                    Text(canUsePriceBook ? "No items yet. Add one from the price book, or type a custom item."
+                                         : "No items yet. Add a custom item: your role can't use the price book.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                    if canCopyPast { copyPastRow }
+                } else {
+                    if let copiedNote {
+                        Label(copiedNote, systemImage: "doc.on.doc")
+                            .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4).padding(.top, 8)
+                            .accessibilityIdentifier("estimate-copied-note")
+                    }
+                    Text("Tap an item to edit its name or price. At quantity 1, minus becomes remove.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.top, 8)
+                }
+                if !lines.isEmpty { totalsCard }
+                if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
             }
-            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 22)
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 28)
+        .padding(.bottom, 28)
+    }
+
+    /// The customer as Paper 35's pill: their initials on the brand surface and the name; before
+    /// one is chosen, "Choose customer" in the brand's words.
+    private var customerPill: some View {
+        HStack(spacing: 6) {
+            if customerID.isEmpty {
+                Image(systemName: "person").font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                    .padding(.leading, 4)
+                Text("Choose customer").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+            } else {
+                Text(initials(store.customerName(customerID))).font(Theme.font(11, weight: .semibold))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(width: 22, height: 22)
+                    .background(Theme.brandSurface, in: Circle())
+                    .dynamicTypeSize(...DynamicTypeSize.large)
+                    .accessibilityHidden(true)
+                Text(shortCustomer(store.customerName(customerID))).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 6).padding(.trailing, 12).frame(minHeight: 40)
+        .background(Theme.card, in: Capsule())
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    /// Paper 35's pill names the customer "Danielle M.": the first name and the last initial.
+    private func shortCustomer(_ name: String) -> String {
+        let words = name.split(separator: " ")
+        guard words.count > 1, let last = words.last?.first else { return name }
+        return "\(words[0]) \(last)."
+    }
+
+    /// Paper 35's totals card: the subtotal, then the total at 34 Bold, and a member's price under it.
+    private var totalsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Subtotal").font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                Spacer(minLength: 8)
+                Text(total.map { money($0, currency: "USD") } ?? "\u{2014}").font(Theme.monoFont(15)).foregroundStyle(Theme.subtle)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Total").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                Spacer(minLength: 8)
+                Text(total.map { money($0, currency: "USD") } ?? "\u{2014}")
+                    .font(Theme.font(28, weight: .bold)).monospacedDigit().tracking(-0.56)
+                    .foregroundStyle(Theme.foreground)
+                    .contentTransition(.numericText())
+                    .lineLimit(1).minimumScaleFactor(0.6)
+            }
+            .padding(.top, 4)
+            if let memberLine {
+                Text(memberLine).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 18)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Actions
@@ -365,7 +643,9 @@ struct NewEstimateView: View {
                              source: line.source ?? .manual,
                              group: presentation.group, showToCustomer: presentation.showToCustomer)
             },
-            locationId: jobLocationID)
+            locationId: jobLocationID,
+            // This editor never sends `options`, so a job's estimate always names its job.
+            jobId: FieldEstimateCreate.linkedJobID(jobID: jobID, customerID: customerID, jobCustomerID: jobCustomerID, hasOptions: false))
     }
 
     private func save() async {
@@ -505,6 +785,12 @@ struct NewEstimateView: View {
                 onCreated(estimate)
             }
             guard creationScope == scope else { return }
+            // Present to customer: the saved estimate opens and hands itself over; closing it closes this.
+            if presentAfterSave {
+                presentAfterSave = false
+                presenting = PresentedEstimate(id: estimate.id)
+                return
+            }
             dismiss()
         } catch {
             // A timeout, cancellation or malformed success may follow a committed create.
@@ -515,8 +801,13 @@ struct NewEstimateView: View {
             if uncertain {
                 self.error = "The save could not be confirmed. Check Estimates or ask your office before starting another. Your text is still here."
             } else if !(error is CancellationError) {
-                self.error = error.localizedDescription
+                self.error = EstimateCreationRecovery.refusalMessage(error, creating: createStarted)
             }
         }
     }
+}
+
+/// The saved estimate "Present to customer" opens next.
+private struct PresentedEstimate: Identifiable, Hashable {
+    let id: String
 }

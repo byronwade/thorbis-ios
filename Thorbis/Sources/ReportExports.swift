@@ -40,6 +40,7 @@ private struct ReportExportMenu: ViewModifier {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @StateObject private var preview = DocumentPreviewController()
+    @State private var choosing = false
 
     func body(content: Content) -> some View {
         let exports = ReportExport.available(session)
@@ -47,26 +48,34 @@ private struct ReportExportMenu: ViewModifier {
             .toolbar {
                 if !exports.isEmpty {
                     ThorbisToolbarItem(placement: .topBarTrailing) {
-                        ThorbisMenu(items: exports.map { export in
-                            ThorbisMenuItem(export.label, icon: "tablecells") { open(export) }
-                        }, title: "Download as Excel", accessibilityLabel: "Download as Excel") {
+                        Button { choosing = true } label: {
+                            // Paper 60: the share circle at the top right, 44 on the card tone.
                             if preview.loading {
                                 ProgressView()
+                                    .frame(width: 44, height: 44)
+                                    .background(Theme.card, in: Circle())
                             } else {
-                                Image(systemName: "square.and.arrow.down")
-                                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                                CreamCircleLabel(symbol: "square.and.arrow.up")
                             }
                         }
+                        .buttonStyle(PressStyle())
+                        .disabled(preview.loading)
+                        .accessibilityLabel("Export report")
                     }
                 }
+            }
+            .sheet(isPresented: $choosing) {
+                ReportExportSheet(exports: exports) { export in open(export) }
             }
             .sheet(isPresented: Binding(get: { preview.url != nil }, set: { if !$0 { preview.clear() } })) {
                 if let url = preview.url { NativeDocumentPreview(url: url).ignoresSafeArea() }
             }
-            .alert("The file did not download", isPresented: Binding(get: { preview.error != nil }, set: { if !$0 { preview.clear() } })) {
-                Button("OK", role: .cancel) { preview.clear() }
-            } message: {
-                Text(preview.error ?? "")
+            .thorbisConfirm("The file didn’t download", message: preview.error,
+                            isPresented: Binding(get: { preview.error != nil }, set: { if !$0 { preview.clear() } }), actions: [])
+            .task {
+                #if DEBUG
+                if PaperPreview.enabled, PaperPreview.screen == "export-report" { choosing = true }
+                #endif
             }
     }
 
@@ -86,4 +95,69 @@ private struct ReportExportMenu: ViewModifier {
 extension View {
     /// Adds the Excel download menu to a report screen's bar.
     func reportExports() -> some View { modifier(ReportExportMenu()) }
+}
+
+/// Paper P6 "Export report": Cancel, the title and the blue Export pill over one card of choices,
+/// each with Paper's 22pt radio. The server makes Excel files of whole reports, so Paper's PDF/CSV
+/// tiles and date range are left out; the file opens in Quick Look, whose share button is Paper's
+/// "Send to" (Files, Mail, anything else).
+struct ReportExportSheet: View {
+    let exports: [ReportExport]
+    let onExport: (ReportExport) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var picked: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PaperTaskBar(title: "Export report",
+                         commit: ThorbisSheetHeaderAction(title: "Export", identifier: "export-report-commit") {
+                             guard let export = exports.first(where: { $0.id == (picked ?? exports.first?.id) }) else { return }
+                             dismiss()
+                             onExport(export)
+                         }) { dismiss() }
+                .padding(.bottom, 10)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    PaperSectionLabel(title: "Report", gap: 0)
+                    VStack(spacing: 0) {
+                        ForEach(Array(exports.enumerated()), id: \.element.id) { index, export in
+                            if index > 0 { WellDivider(leading: 0) }
+                            row(export, selected: export.id == (picked ?? exports.first?.id))
+                        }
+                    }
+                    .background(Theme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    Text("Opens as an Excel file. Use its share button to save it to Files or send it to your accountant.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.top, 4)
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 16)
+            }
+        }
+        .background(Theme.canvas)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func row(_ export: ReportExport, selected: Bool) -> some View {
+        Button { picked = export.id } label: {
+            HStack(alignment: .center, spacing: 12) {
+                Text(export.label).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if selected {
+                    PaperIcon(.check, size: 12, color: .white)
+                        .frame(width: 22, height: 22).background(Theme.brand, in: Circle())
+                } else {
+                    Circle().strokeBorder(Theme.borderStrong, lineWidth: 1.5).frame(width: 22, height: 22)
+                }
+            }
+            .padding(.horizontal, PaperCardMetrics.inset)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("export-report-\(export.id)")
+    }
 }

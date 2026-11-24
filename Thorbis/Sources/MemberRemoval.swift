@@ -11,7 +11,7 @@ struct MemberRemoval: Decodable, Equatable {
 extension APIClient {
     func removeMember(_ member: RoleMember, reason: String) async throws -> MemberRemoval {
         struct Body: Encodable { let reason: String }
-        let encodedID = member.member.memberId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? member.member.memberId
+        let encodedID = try Self.pathSegment(member.member.memberId)
         return try await send("POST", "/v1/organization/role-members/\(encodedID)/remove", body: Body(reason: reason))
     }
 }
@@ -47,23 +47,20 @@ private struct RemoveMemberPrompt: ViewModifier {
     let onRemoved: (RoleMember) async -> Void
     let onError: (String) -> Void
     @EnvironmentObject private var api: APIClient
-    @State private var reason = ""
 
     func body(content: Content) -> some View {
-        content.alert(
-            member.map { "Remove \($0.member.displayName)?" } ?? "Remove from team?",
-            isPresented: Binding(get: { member != nil }, set: { if !$0 { member = nil; reason = "" } }),
-            presenting: member
-        ) { target in
-            TextField("Reason (optional)", text: $reason)
-            Button("Remove", role: .destructive) {
-                let typed = reason
+        // The reason is optional: left empty, `MemberRemovalRules.reason` sends the default.
+        content.thorbisConfirm(
+            item: $member,
+            title: { target in "Remove \(target.member.displayName)?" },
+            message: { target in "\(target.member.displayName) loses access to this company right away. Their account and past work stay, and you can invite them again." },
+            reason: ThorbisConfirmReason(label: "Reason", placeholder: "Optional",
+                                         identifier: "remove-member-reason"),
+            actionTitle: "Remove", role: .destructive,
+            action: { target, typed in
                 Task { await remove(target, typed: typed) }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { target in
-            Text("\(target.member.displayName) loses access to this company right away. Their account and past work stay, and you can invite them again.")
-        }
+        )
     }
 
     private func remove(_ target: RoleMember, typed: String) async {

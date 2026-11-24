@@ -53,6 +53,12 @@ enum TodayStopOrder {
         ["Stop \(index + 1) of \(total)", time].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// The card's first line as drawn. Paper F1 names the stop the tech drives to next
+    /// "Next stop · 10:30 a.m."; every other card in the pager keeps its place in the day.
+    static func firstLine(index: Int, total: Int, time: String?, isNext: Bool) -> String {
+        isNext ? ["Next stop", time].compactMap { $0 }.joined(separator: " · ") : position(index: index, total: total, time: time)
+    }
+
     /// What VoiceOver reads for a card: "Stop 2 of 6, 412 Birchwood Ln, Dispatched, 10:30".
     static func spoken(index: Int, total: Int, place: String, status: String, time: String?) -> String {
         ["Stop \(index + 1) of \(total)", place, status, time].compactMap { $0 }.joined(separator: ", ")
@@ -93,16 +99,20 @@ final class StopCardPlaces: ObservableObject {
 
     func place(_ job: Job) -> NextStopPlace? { places[job.id] }
 
-    func load(_ jobs: [Job], api: APIClient, organizationID: String?, canView: Bool, identity: String) async {
+    /// - Parameter customerAddresses: each customer's own address (`Store.customerAddresses`), for a
+    ///   job that records no site of its own (JobFallbackAddress).
+    func load(_ jobs: [Job], api: APIClient, organizationID: String?, canView: Bool, identity: String,
+              customerAddresses: [String: String] = [:]) async {
         if identity != self.identity { self.identity = identity; places = [:]; access = [:]; loaded = [] }
         guard canView, let organizationID else { return }
         for job in jobs where !loaded.contains(job.id) {
             guard !Task.isCancelled else { return }
-            await load(job, api: api, organizationID: organizationID, identity: identity)
+            await load(job, api: api, organizationID: organizationID, identity: identity,
+                       customerAddress: job.customerId.flatMap { customerAddresses[$0] })
         }
     }
 
-    private func load(_ job: Job, api: APIClient, organizationID: String, identity: String) async {
+    private func load(_ job: Job, api: APIClient, organizationID: String, identity: String, customerAddress: String?) async {
         guard let customerID = job.customerId else { loaded.insert(job.id); return }
         let cached = JobDetailCache.stop(job.id).flatMap {
             $0.organizationID == organizationID && $0.customerID == customerID && $0.locationID == job.locationId ? $0 : nil
@@ -111,16 +121,15 @@ final class StopCardPlaces: ObservableObject {
         var next = cached ?? NextStopPlace(jobID: job.id, organizationID: organizationID, customerID: customerID, locationID: job.locationId)
         var reached = false
         var accessLine: String?
-        if let locationID = job.locationId, let records = try? await api.fieldLocations(customerID) {
+        if let records = try? await api.fieldLocations(customerID) {
             reached = true
-            // The job's own service location only, for its own customer (JobLocationPolicy).
-            let record = records.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
-            next.address = record?.address
-            next.coordinates = record?.coordinates
+            // The job's own service location, or with none recorded the customer's only address on file.
+            next.setPlace(from: records, customerAddress: customerAddress)
+            // Access facts only for the job's own site; the job screen's banner says the rest with its caveat.
+            let record = job.locationId.flatMap { locationID in
+                records.first { $0.id == locationID && $0.customerId == customerID && $0.organizationId == organizationID }
+            }
             accessLine = record.flatMap(TodayStopAccess.line)
-        } else if job.locationId == nil {
-            next.address = nil
-            next.coordinates = nil
         }
         if let contacts = try? await api.fieldContacts(customerID) {
             reached = true
@@ -196,8 +205,7 @@ struct TodayStopCards<Commit: View>: View {
                 // touches start only inside it, clear of the drawer's edge strip.
                 .scrollClipDisabled()
                 .padding(.leading, Self.leading)
-                // Room for the card's soft shadow under the pager.
-                .padding(.bottom, 12)
+                // Paper F1: the card is flat on the canvas (no rim, no shadow), so the dots sit close.
                 .mask(edgeFade)
                 .accessibilityIdentifier("today-stop-cards")
                 // The scroll view keeps its offset when the stops reorder (a refresh finishes one), so the
@@ -256,23 +264,34 @@ struct TodayStopCards<Commit: View>: View {
         spoken = id
     }
 
+    /// The stop the tech drives to next: where the pager opens, while that visit is still only booked.
+    private var nextStopID: String? {
+        let status = { (job: Job) in pendingStatus(job) ?? job.status }
+        guard let start = TodayStopOrder.startIndex(stops, status: status),
+              ["scheduled", "dispatched"].contains(status(stops[start])) else { return nil }
+        return stops[start].id
+    }
+
     private func card(_ job: Job, index: Int) -> some View {
-        TodayStopCard(job: job, index: index, total: stops.count, customer: customer(job), street: street(job),
+        TodayStopCard(job: job, index: index, total: stops.count, isNext: job.id == nextStopID, customer: customer(job), street: street(job),
                       place: place(job), access: access(job), pendingStatus: pendingStatus(job),
                       etaMinutes: etaMinutes(job), etaMiles: etaMiles(job), onSiteSince: onSiteSince(job), locationNotice: locationNotice(job),
                       canOpenCustomerView: canOpenCustomerView, spoken: $spoken, move: move) { commit(job) }
     }
 }
 
-/// One stop (C-Today.dc.html): a quiet map strip on top with the drive pill (a tap opens directions),
-/// then "Stop 3 of 6 · 10:30 a.m." with the status word and its dot, the street, the problem and who,
-/// the access facts, then the one ink commit and the call circle. Tapping the card's body opens the
-/// job (Customer view lives there). At accessibility sizes the call circle goes under the commit and
-/// the street never truncates.
+/// One stop (Paper F1 "Today (field)", the Next stop card): "Stop 3 of 6 · 10:30 a.m." in brand
+/// text (a status word beside it once the visit is under way), the street in bold, the problem and
+/// who, then under a hairline the drive ("18 min drive · arrive 10:25 a.m.") and the access facts.
+/// Call and Directions are two pills, the one commit sits under them. Tapping the card's body opens
+/// the job (Customer view lives there). At accessibility sizes the pills stack and the street never
+/// truncates.
 private struct TodayStopCard<Commit: View>: View {
     let job: Job
     let index: Int
     let total: Int
+    /// The stop the tech drives to next: its first line reads "Next stop · 10:30 a.m." (Paper F1).
+    let isNext: Bool
     let customer: String
     let street: String?
     let place: NextStopPlace?
@@ -292,10 +311,16 @@ private struct TodayStopCard<Commit: View>: View {
     private var headline: String { place?.firstLine ?? street ?? job.title }
     private var hasStreet: Bool { place?.firstLine != nil || street != nil }
     private var supporting: String { hasStreet ? "\(job.title) · \(customer)" : customer }
+    /// Said under the street when it is the customer's only address on file, not the job's own site.
+    private var caveat: String? { place?.caveat }
     private var status: String { pendingStatus ?? job.status }
     private var tone: StatusTone { StatusTone(jobStatus: status, hasTime: job.scheduledFor != nil) }
     private var time: String? { JobFiltering.date(job.scheduledFor)?.clockTime }
+    /// "18 min · 6.2 mi" for VoiceOver (the Directions pill's value and the card's own label).
     private var drive: String? { MapStrip.drive(minutes: etaMinutes, miles: etaMiles) }
+    /// A plain booked visit needs no status word (its time is in the first line); anything under way,
+    /// done, waiting to sync or on site says where it stands.
+    private var showsStatus: Bool { pendingStatus != nil || onSiteSince != nil || !["scheduled", "dispatched"].contains(status) }
 
     private func statusWord(now: Date) -> String {
         if pendingStatus != nil { return "\(status.statusLabel) · waiting to sync" }
@@ -303,117 +328,197 @@ private struct TodayStopCard<Commit: View>: View {
         return status.statusLabel
     }
 
+    /// Paper F1: "18 min drive · arrive 10:25 a.m.", from the drive time and the clock.
+    private func driveLine(minutes: Int, now: Date) -> String {
+        let arrive = now.addingTimeInterval(TimeInterval(minutes * 60))
+        return "\(minutes) min drive · arrive \(arrive.clockTime)"
+    }
+
+    private var spokenSummary: String {
+        var text = TodayStopOrder.spoken(index: index, total: total, place: headline, status: statusWord(now: .now), time: time)
+        if let caveat { text += ", \(caveat)" }
+        if let drive { text += ", \(drive)" }
+        if let access { text += ", \(access)" }
+        return text
+    }
+
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
-            map
-            VStack(alignment: .leading, spacing: 0) {
-                NavigationLink(value: job) { summary }
-                    .buttonStyle(.plain)
-                    .jobContextMenu(job, customer: customer)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(TodayStopOrder.spoken(index: index, total: total, place: headline,
-                                                              status: statusWord(now: .now), time: time)
-                                        + (drive.map { ", \($0)" } ?? ""))
-                    .accessibilityHint("Opens the job. Swipe up or down for another stop.")
-                    // VoiceOver: the card is adjustable; swipe up for the next stop, down for the one before.
-                    .accessibilityAdjustableAction { direction in
-                        switch direction {
-                        case .increment: move(1)
-                        case .decrement: move(-1)
-                        @unknown default: break
-                        }
-                    }
-                    .accessibilityFocused(spoken, equals: job.id)
-                    .accessibilityIdentifier("today-stop-card-\(job.id)")
-                if let locationNotice {
-                    NextStopLocationNotice(dismiss: locationNotice).padding(.top, 12)
-                }
-                Spacer(minLength: 0)
-                let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                                           : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-                actions {
-                    commit()
-                    if let call = place?.call {
-                        Button { openURL(call) } label: { CreamCircleLabel(symbol: "phone", size: 46) }
-                            .buttonStyle(PressStyle())
-                            .accessibilityLabel("Call \(customer)")
-                            .accessibilityIdentifier("today-stop-call")
+            NavigationLink(value: job) { summary }
+                .buttonStyle(.plain)
+                .jobContextMenu(job, customer: customer)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spokenSummary)
+                .accessibilityHint("Opens the job. Swipe up or down for another stop.")
+                // VoiceOver: the card is adjustable; swipe up for the next stop, down for the one before.
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: move(1)
+                    case .decrement: move(-1)
+                    @unknown default: break
                     }
                 }
-                // The row keeps its height while a commit loads, so nothing jumps on a swipe.
-                .frame(minHeight: 46, alignment: .leading)
-                .padding(.top, 14)
+                .accessibilityFocused(spoken, equals: job.id)
+                .accessibilityIdentifier("today-stop-card-\(job.id)")
+            if let locationNotice {
+                NextStopLocationNotice(dismiss: locationNotice).padding(.top, 12)
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
+            Spacer(minLength: 0)
+            // Paper F1: Call and Directions side by side, the one commit under them.
+            VStack(alignment: .leading, spacing: 10) {
+                reach
+                commit()
+                    // The row keeps its height while a commit loads, so nothing jumps on a swipe.
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            }
+            .padding(.top, 16)
         }
+        .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The panel, a 1px rim and a soft drop: the card is the figure on the cream canvas.
+        // Paper v2: a flat card on the canvas, radius 20, no rim and no shadow.
         .background(Theme.card, in: shape)
         .clipShape(shape)
-        .overlay(shape.strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
-        .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 8)
     }
 
-    /// The map strip; with an address on file it opens driving directions in Maps.
-    @ViewBuilder private var map: some View {
-        let strip = MapStrip(pill: drive, aspect: 3, hasPlace: place?.directions != nil)
-        if let directions = place?.directions {
-            Button { openURL(directions) } label: { strip }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Directions to \(headline)")
-                .accessibilityValue(drive ?? "")
-                .accessibilityHint("Opens driving directions in Maps")
-                .accessibilityIdentifier("today-stop-directions")
-        } else {
-            strip
+    /// Call and Directions: two pills on the field fill, each shown only when there is a number or
+    /// an address on file. Directions opens driving directions in Maps.
+    @ViewBuilder private var reach: some View {
+        let call = place?.call
+        let directions = place?.directions
+        if call != nil || directions != nil {
+            let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                                   : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
+            row {
+                if let call {
+                    Button { openURL(call) } label: { RimmedButtonLabel(title: "Call", symbol: "phone", height: 52, size: 17) }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Call \(customer)")
+                        .accessibilityIdentifier("today-stop-call")
+                }
+                if let directions {
+                    Button { openURL(directions) } label: { RimmedButtonLabel(title: "Directions", symbol: "mappin.and.ellipse", height: 52, size: 17) }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Directions to \(headline)")
+                        .accessibilityValue(drive ?? "")
+                        .accessibilityHint("Opens driving directions in Maps")
+                        .accessibilityIdentifier("today-stop-directions")
+                }
+            }
         }
     }
 
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            let meta = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-            meta {
-                Text(TodayStopOrder.position(index: index, total: total, time: time))
-                    .font(Theme.font(12, weight: .medium)).monospacedDigit()
-                    .foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
-                TimelineView(.everyMinute) { context in
-                    StatusLabel(tone: tone, word: statusWord(now: context.date), pending: pendingStatus != nil, size: 12, dot: true)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                let meta = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                        : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                meta {
+                    Text(TodayStopOrder.firstLine(index: index, total: total, time: time, isNext: isNext))
+                        .font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(Theme.brandText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                    if showsStatus {
+                        TimelineView(.everyMinute) { context in
+                            StatusLabel(tone: tone, word: statusWord(now: context.date), pending: pendingStatus != nil, size: 13, dot: true)
+                        }
+                    }
                 }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(headline).font(Theme.font(22, weight: .medium)).tracking(-0.3)
+                // Paper F1: the street at 28 Bold, tracked -0.02em.
+                Text(headline).font(Theme.heading()).tracking(-0.56)
                     .foregroundStyle(Theme.foreground)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(supporting).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                if let caveat {
+                    Text(caveat).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(supporting).font(Theme.font(16)).foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.leading)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let access {
-                Text(access).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("today-stop-access")
+            if etaMinutes != nil || access != nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    Rectangle().fill(Theme.hairline).frame(height: 1).padding(.bottom, 4)
+                    if let etaMinutes {
+                        TimelineView(.everyMinute) { context in
+                            fact("clock", driveLine(minutes: etaMinutes, now: context.date), weight: .semibold, id: "today-stop-drive")
+                        }
+                    }
+                    if let access {
+                        fact("key", access, weight: .medium, id: "today-stop-access")
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
+
+    /// One fact under the hairline: a 24pt glyph slot in the marker grey, then the words at 17.
+    private func fact(_ symbol: String, _ text: String, weight: Font.Weight, id: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            Text(text).font(Theme.font(17, weight: weight)).monospacedDigit()
+                .foregroundStyle(Theme.foreground)
+                .multilineTextAlignment(.leading)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(id)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
-/// The view bar's Cards / List circle: shows what a tap switches to.
+/// Paper 18C: Cards / List as a small two-part segment at the trailing edge of the day's first group
+/// label (the card track, the chosen part raised). One button: a tap switches to the other layout.
+struct TodayLayoutSegment: View {
+    let mode: TodayLayoutMode
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 0) {
+                part("Cards", on: mode == .cards)
+                part("List", on: mode == .list)
+            }
+            .padding(2)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(mode == .cards ? "Show as list" : "Show as cards")
+        .accessibilityValue(mode == .cards ? "Cards" : "List")
+        .accessibilityIdentifier("today-layout-toggle")
+    }
+
+    private func part(_ title: String, on: Bool) -> some View {
+        Text(title).font(Theme.font(13, weight: on ? .semibold : .medium))
+            .foregroundStyle(on ? Theme.foreground : Theme.subtle)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 36)
+            .background {
+                if on { RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.selectedSegment) }
+            }
+    }
+}
+
+/// The view bar's Cards / List circle: shows what a tap switches to. Shown only when the day has
+/// no group label to carry `TodayLayoutSegment`.
 struct TodayLayoutToggle: View {
     let mode: TodayLayoutMode
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) { CreamCircleLabel(symbol: mode == .cards ? "list.bullet" : "rectangle.stack", size: 40) }
+        Button(action: action) { CreamCircleLabel(symbol: mode == .cards ? "list.bullet" : "rectangle.stack", size: 44) }
             .buttonStyle(PressStyle())
             .accessibilityLabel(mode == .cards ? "Show as list" : "Show as cards")
             .accessibilityValue(mode == .cards ? "Cards" : "List")

@@ -7,13 +7,157 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testDraftInvoiceOffersDirectLineItemEditing() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<8 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 20))
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["invoice-add-item"].exists)
+    }
+
+    func testDirectLineEditingAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<20 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        // At this size Edit can sit half under the pinned Issue invoice bar: it still reports hittable,
+        // but a tap at its centre lands on Issue. Bring it clear of the bar first, as a person would.
+        app.scrollClearOfFoot(edit)
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 10))
+    }
+
+    func testDirectLineEditingRequiresDraftAndPermission() {
+        for arguments in [["--paper-preview-invoice-detail-draft", "--paper-preview-deny-document-edit"], []] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail"] + arguments
+            app.launch()
+            XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+            // The title can be drawn from the copy saved on this phone, which never offers Edit. The
+            // page's menu exists only once the live invoice has answered, and Edit is decided from it.
+            XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 20))
+            XCTAssertFalse(app.buttons["invoice-detail-edit-items"].exists)
+            app.terminate()
+        }
+    }
+
+    func testInvalidDraftStillAllowsEditingForCorrection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-overflow"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<8 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        XCTAssertTrue(edit.isHittable)
+        edit.tap()
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 10))
+    }
+
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-pages"] + extra
         app.launch()
-        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 20))
         return app
+    }
+
+    func testLongInvoiceCanAddFromTheSectionHeading() {
+        let app = launch(["--paper-preview-long-catalog-sections"])
+        let add = app.buttons["invoice-add-item"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertTrue(add.isHittable, "The catalog should be reachable before scrolling through the lines")
+        XCTAssertGreaterThanOrEqual(add.frame.height, 44)
+        XCTAssertEqual(lineCount(app), 12)
+        add.tap()
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("Camera sewer inspection")
+        let item = app.buttons[itemID]
+        XCTAssertTrue(item.waitForExistence(timeout: 10)); item.tap()
+        app.buttons["price-book-done"].tap()
+        XCTAssertTrue(search.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(lineCount(app), 13)
+        _ = openLineIdentity(app)
+    }
+
+    func testHeadingCatalogKeepsAnUnsavedLineEdit() {
+        let app = launch(["--paper-preview-long-catalog-sections"])
+        let first = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sample work item 1")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.tap()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        reveal(quantity, in: app); quantity.tap()
+        replaceQuantity(quantity, with: "2", in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.waitForKeyboardToHide())
+        // Paper 40: Add item is a field above "Line items", and opening a line scrolls it under the
+        // page's pinned circle row, where it still reports hittable. Scroll back until it is clear.
+        let add = app.buttons["invoice-add-item"]
+        let bar = app.buttons["invoice-more"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        func reachable() -> Bool { add.isHittable && add.frame.minY >= bar.frame.maxY }
+        for _ in 0..<8 where !reachable() {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)))
+        }
+        XCTAssertTrue(reachable(), "Add item must be reachable above the lines"); add.tap()
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("Camera sewer inspection")
+        let done = app.buttons["price-book-done"]
+        // The commit rides up with the keyboard; on a slow run it is still moving when typing ends.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: done)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed, "The catalog action must be reachable after the keyboard settles")
+        XCTAssertLessThanOrEqual(done.frame.maxY, app.keyboards.firstMatch.frame.minY, "The keyboard must not cover the catalog action")
+        done.tap()
+        XCTAssertTrue(app.textFields["invoice-catalog-search"].waitForNonExistence(timeout: 10))
+        if !quantity.exists { first.tap() }
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        XCTAssertEqual(quantity.value as? String, "2", "Opening the catalog must keep the unsaved edit")
+    }
+
+    func testLongInvoiceHeadingActionAtLargestText() {
+        let app = launch(["--paper-preview-long-catalog-sections", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let add = app.buttons["invoice-add-item"]
+        reveal(add, in: app)
+        XCTAssertGreaterThanOrEqual(add.frame.height, 44)
+        add.tap()
+        XCTAssertTrue(app.textFields["invoice-catalog-search"].waitForExistence(timeout: 10))
+    }
+
+    func testHeadingActionRespectsInvoiceEditPermission() {
+        let app = launch(["--paper-preview-long-catalog-sections", "--paper-preview-deny-document-edit"])
+        let add = app.buttons["invoice-add-item"]
+        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        XCTAssertFalse(add.isEnabled)
+    }
+
+    func testHeadingActionRespectsInvoiceLineLimit() {
+        let app = launch(["--paper-preview-max-catalog-sections"])
+        let add = app.buttons["invoice-add-item"]
+        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        XCTAssertFalse(add.isEnabled, "The heading action must respect the same 500-line limit")
     }
 
     /// "Line items · N" read from its identifier, so additions are counted, not guessed.
@@ -35,18 +179,32 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         return search
     }
 
-    /// The one line the editor opened: only an open line carries its description field.
-    private func openLineIdentity(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) -> String {
+    /// The one line the editor opened: only an open line carries its description field. Straight
+    /// after launch the editor sheet is still on its way, so a launch passes the 20 s that
+    /// `launch()` gives the editor to appear.
+    private func openLineIdentity(_ app: XCUIApplication, timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) -> String {
         let fields = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-"))
-        XCTAssertTrue(fields.firstMatch.waitForExistence(timeout: 5), "The last added line must open for editing", file: file, line: line)
+        XCTAssertTrue(fields.firstMatch.waitForExistence(timeout: timeout), "The last added line must open for editing", file: file, line: line)
         XCTAssertEqual(fields.count, 1, "Exactly one line opens", file: file, line: line)
         return String(fields.firstMatch.identifier.dropFirst("invoice-line-description-".count))
     }
 
+    /// Scrolls `element` clear of the pinned Save draft / Issue invoice bar. At accessibility sizes
+    /// that bar covers the lower third of the sheet, and a control under it still reports hittable.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
-        for _ in 0..<8 where !element.isHittable { app.swipeUp() }
-        XCTAssertTrue(element.isHittable, app.debugDescription)
+        let bar = app.buttons["Save draft"]
+        func clear() -> Bool {
+            guard element.isHittable else { return false }
+            return !bar.exists || element.frame.maxY <= bar.frame.minY - 4
+        }
+        for _ in 0..<14 where !clear() {
+            // A held drag has no momentum, so the control cannot be flung past the viewport.
+            let below = !bar.exists || element.frame.maxY > bar.frame.minY - 4
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: below ? 0.55 : 0.35))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: below ? 0.35 : 0.55)))
+        }
+        XCTAssertTrue(clear(), app.debugDescription)
     }
 
     func testCatalogAddsDistinctLinesAndOpensTheLastForEditing() {
@@ -94,10 +252,14 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let keyboardDone = app.buttons["Done"].firstMatch
         XCTAssertTrue(keyboardDone.exists)
         XCTAssertFalse(close.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover the line's Done control")
+        // The keyboard's Done bar takes taps across its whole width, not only on its pill, so the
+        // line's own actions have to sit above it.
+        XCTAssertLessThanOrEqual(close.frame.maxY, keyboardDone.frame.minY, "The line's Done control must sit above the keyboard's Done bar")
         let remove = app.buttons["Remove"].firstMatch
         XCTAssertTrue(remove.isHittable, "Remove remains available while editing")
         XCTAssertGreaterThanOrEqual(remove.frame.minX - close.frame.maxX, 20, "Separate the destructive action from Done")
         XCTAssertFalse(remove.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover Remove")
+        XCTAssertLessThanOrEqual(remove.frame.maxY, keyboardDone.frame.minY, "Remove must sit above the keyboard's Done bar")
         XCTAssertFalse(remove.frame.intersects(app.keyboards.firstMatch.frame), "The keyboard must not cover Remove")
         let saveWhileTyping = app.buttons["Save draft"]
         if saveWhileTyping.exists && saveWhileTyping.isHittable {
@@ -106,7 +268,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         close.tap()
         XCTAssertTrue(quantity.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "Closing the line must dismiss the keyboard")
-        let summary = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "10", "245.00")).firstMatch
+        let summary = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "for 10", "2,450.00")).firstMatch
         XCTAssertTrue(summary.waitForExistence(timeout: 5), "The closed line keeps the edited quantity")
         XCTAssertTrue(app.buttons["Save draft"].isHittable)
         XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
@@ -117,10 +279,21 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
         app.launch()
-        let identity = openLineIdentity(app)
+        let identity = openLineIdentity(app, timeout: 20)
         let price = app.textFields["invoice-line-price-" + identity]
         XCTAssertTrue(price.waitForExistence(timeout: 10))
-        reveal(price, in: app); price.tap(); price.doubleTap(); app.typeText("12.5")
+        reveal(price, in: app); price.tap()
+        // Focus brings the keyboard up and centres the line; a double tap sent while the page is
+        // still moving lands on whatever has slid under it (the next line's minus).
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        settle(price)
+        // Replace the amount with the keyboard's own delete key, wherever the caret landed.
+        price.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        let existing = (price.value as? String) ?? ""
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count))
+        // An empty field reads as its "0.00" placeholder.
+        XCTAssertTrue(["", "0.00"].contains(price.value as? String ?? ""), "The old amount is cleared before typing")
+        app.typeText("12.5")
         XCTAssertEqual(price.value as? String, "12.5")
         let close = app.buttons["Close line"].firstMatch
         reveal(close, in: app)
@@ -140,7 +313,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        let identity = openLineIdentity(app)
+        let identity = openLineIdentity(app, timeout: 20)
         let price = app.textFields["invoice-line-price-" + identity]
         reveal(price, in: app)
         price.tap()
@@ -170,7 +343,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
         app.launch()
-        let identity = openLineIdentity(app)
+        let identity = openLineIdentity(app, timeout: 20)
         let price = app.textFields["invoice-line-price-" + identity]
         reveal(price, in: app)
         price.tap()
@@ -318,9 +491,31 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         add(reviewProof)
     }
 
+    /// Waits until `element` has stopped moving (keyboard avoidance and the scroll to the open line).
+    private func settle(_ element: XCUIElement, timeout: TimeInterval = 4) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = element.frame
+        while Date() < deadline {
+            usleep(300_000)
+            let now = element.frame
+            if now == last { return }
+            last = now
+        }
+    }
+
     private func replaceQuantity(_ quantity: XCUIElement, with text: String, in app: XCUIApplication) {
         // Select the existing digits with the native touch interaction, then type through the app
         // so XCTest does not move the caret.
+        // The editor centres the open line again once the keyboard is up. Select only when the
+        // field has stopped moving, or the double tap lands where the field was.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        var last = quantity.frame
+        for _ in 0..<10 {
+            usleep(250_000)
+            let now = quantity.frame
+            if now == last { break }
+            last = now
+        }
         quantity.doubleTap()
         app.typeText(text)
     }

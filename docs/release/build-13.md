@@ -17,6 +17,6 @@ The native customer estimate flow displays the issued estimate and handles token
 
 ## Distribution
 
-`xcodebuild -exportArchive` reported **Upload succeeded** and **Uploaded package is processing** at 5:20 AM EDT on 2026-10-27. App Store Connect has not been checked for processing completion. Hayley Wade (`hayleywoods15@gmail.com`) is already listed in the external tester group, but Build 13 has not been assigned and no new invitation has been confirmed. External beta review still needs the App Review contact and demo-login details documented in `apple-record.md`.
+`xcodebuild -exportArchive` reported **Upload succeeded** and **Uploaded package is processing** at 5:20 AM EDT on 2026-10-27. App Store Connect has not been checked for processing completion. An external tester is already listed in the external tester group, but Build 13 has not been assigned and no new invitation has been confirmed. External beta review still needs the App Review contact and demo-login details documented in `apple-record.md`.
 
 This incremental beta does not establish full Paper/TanStack parity or authenticated live-device validation. See `beta-coverage.md` for remaining work.

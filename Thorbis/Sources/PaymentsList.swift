@@ -11,13 +11,27 @@ struct CompanyPayment: Identifiable, Hashable {
     let recordedAt: String
 
     var refunded: Bool { status == "refunded" || refundedAmount > 0 }
+    /// What this payment still brings in: a part refund counts what is left, as on the web.
+    var net: Int { status == "recorded" ? max(0, amount - refundedAmount) : 0 }
+    /// Money collected across payments, net of refunds.
+    static func collected(_ payments: [CompanyPayment]) -> Int { payments.reduce(0) { $0 + $1.net } }
     var isCard: Bool { method.contains("card") || method.contains("tap") }
     var isCash: Bool { method == "cash" }
+    /// The method as the shared money word table names it (contracts/design/money-and-flow.md in
+    /// the web repo): "Card", "Bank transfer (ACH)", never a raw value.
     var methodLabel: String {
         switch method {
         case "tap_to_pay": "Tap to Pay"
         case "": "Payment"
-        default: method.replacingOccurrences(of: "_", with: " ").capitalized
+        default: FieldPaymentMethod(rawValue: method)?.displayName ?? method.statusLabel
+        }
+    }
+    /// The method inside a sentence: "card", "bank transfer (ACH)", "Tap to Pay".
+    var methodPhrase: String {
+        switch method {
+        case "tap_to_pay": "Tap to Pay"
+        case "ach": "bank transfer (ACH)"
+        default: methodLabel.lowercased()
         }
     }
 }
@@ -85,52 +99,160 @@ struct CompanyPaymentsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var payments: [CompanyPayment] = []
     @State private var complete = true
     @State private var invoiceCustomers: [String: String] = [:]
     @State private var loaded = false
     @State private var error: String?
     @State private var tab = "All"
+    @State private var search = ""
     @State private var openInvoice: String?
+    /// Paper 54A's chip in the search field: the stretch of time the list and its total cover.
+    @State private var period = PaymentPeriod.week
 
-    private var shown: [CompanyPayment] {
-        switch tab {
-        case "Card": payments.filter(\.isCard)
-        case "Cash": payments.filter(\.isCash)
-        case "Refunded": payments.filter(\.refunded)
-        default: payments
+    enum PaymentPeriod: String, CaseIterable {
+        case week = "This week", month = "This month", all = "All time"
+        var start: Date? {
+            switch self {
+            case .week: Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start
+            case .month: Calendar.current.dateInterval(of: .month, for: .now)?.start
+            case .all: nil
+            }
         }
     }
-    private var collected: Int { payments.filter { !$0.refunded }.reduce(0) { $0 + $1.amount } }
+    /// The iPad page keeps its own week summary beside the full list.
+    private var activePeriod: PaymentPeriod { wide ? .all : period }
+    private var inPeriod: [CompanyPayment] {
+        guard let start = activePeriod.start else { return payments }
+        return payments.filter { (JobFiltering.date($0.recordedAt) ?? .distantPast) >= start }
+    }
 
+    /// Paper 54A's segments. "Cash and check" holds the money handed over in person.
+    private static let tabs = ["All", "Card", "Cash and check", "Refunds"]
+
+    private var shown: [CompanyPayment] {
+        let scope = inPeriod
+        let byTab: [CompanyPayment] = switch tab {
+        case "Card": scope.filter(\.isCard)
+        case "Cash and check": scope.filter { $0.isCash || $0.method == "check" }
+        case "Refunds": scope.filter(\.refunded)
+        default: scope
+        }
+        let query = search.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return byTab }
+        return byTab.filter { payment in
+            [invoiceCustomers[payment.invoiceID] ?? "", reference(payment) ?? "", payment.methodLabel]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
+    private var collected: Int { CompanyPayment.collected(payments) }
+
+    /// Payments by the day they were recorded, newest day first, each with what came in that day.
+    private struct DayGroup: Identifiable {
+        let id: String
+        let label: String
+        var payments: [CompanyPayment]
+        var total: Int { CompanyPayment.collected(payments) }
+    }
+
+    private var days: [DayGroup] {
+        var groups: [DayGroup] = []
+        for payment in shown {
+            let date = JobFiltering.date(payment.recordedAt)
+            let key = date.map { Calendar.current.startOfDay(for: $0).ISO8601Format() } ?? "unknown"
+            if let last = groups.indices.last, groups[last].id == key {
+                groups[last].payments.append(payment)
+            } else {
+                groups.append(DayGroup(id: key, label: date.map { dayLabel($0) } ?? "Date not recorded", payments: [payment]))
+            }
+        }
+        return groups
+    }
+
+    /// The iPad layout (Paper T54A): the search field beside the method chips, the days in the wide
+    /// column and the week's summary beside them. A phone keeps the single column.
+    private var wide: Bool { sizeClass == .regular }
+
+    /// This calendar week, and whether the payments read reach back past its start (so the week's
+    /// numbers are whole). When they don't, the summary says how many payments it covers instead.
+    private var weekStart: Date? { Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start }
+    private var weekCovered: Bool {
+        guard let weekStart else { return false }
+        return complete || payments.contains { (JobFiltering.date($0.recordedAt) ?? .distantFuture) < weekStart }
+    }
+    private var summaryPayments: [CompanyPayment] {
+        guard weekCovered, let weekStart else { return payments }
+        return payments.filter { (JobFiltering.date($0.recordedAt) ?? .distantPast) >= weekStart }
+    }
+
+    private var phoneSubtitle: String {
+        guard loaded else { return "Every payment, newest first" }
+        // Paper 54A: "This week · $12,480 collected". When the read stops short of the period's
+        // start, the line says how many payments the figure covers.
+        let start = activePeriod.start
+        let whole = complete || start.map { start in
+            payments.contains { (JobFiltering.date($0.recordedAt) ?? .distantFuture) < start }
+        } ?? false
+        let sum = CompanyPayment.collected(inPeriod)
+        let figure = "\(money(sum, currency: "USD")) collected\(whole ? "" : " in the latest \(payments.count)")"
+        return activePeriod == .all ? figure : "\(activePeriod.rawValue) \u{00B7} \(figure)"
+    }
+
+    private var periodChips: [PaperFilterChip] {
+        period == .all ? [] : [PaperFilterChip(id: "period", title: period.rawValue) { period = .all }]
+    }
+
+    private var periodMenu: [ThorbisMenuItem] {
+        PaymentPeriod.allCases.map { option in
+            ThorbisMenuItem(option.rawValue, isSelected: period == option) { period = option }
+        }
+    }
+
+    /// Paper T54A: "This week · $12,480 collected" under the title.
+    private var wideSubtitle: String {
+        guard loaded, weekCovered else { return phoneSubtitle }
+        let week = CompanyPayment.collected(summaryPayments)
+        return "This week \u{00B7} \(money(week, currency: "USD")) collected"
+    }
+
+    /// Paper 54A: the 34 Bold title with what's been collected, a search field, the method
+    /// segments, then one card per day under its label and the day's total.
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Payments",
-                            subtitle: loaded ? "\(money(collected, currency: "USD")) collected\(complete ? "" : " in the latest \(payments.count)")"
-                                             : "Every payment, newest first")
+                // Paper 54A and T54A: "This week · $12,480 collected" whenever the read covers the
+                // week; otherwise what the latest payments add up to.
+                PaperHeader(title: "Payments", subtitle: wide ? wideSubtitle : phoneSubtitle, showsCreate: true)
                     // A pushed page: the back button leads, never the drawer's menu circle.
                     .environment(\.paperMenuButton, false)
                     .environment(\.paperDrawer, nil)
-                PaperTabs(options: ["All", "Card", "Cash", "Refunded"], selection: $tab, wrapOverflow: true, textTabs: true)
-                    .padding(.horizontal, ListRoom.gutter - 4).padding(.bottom, 4)
-                if let error { ErrorBanner(message: error) { await load() } }
-                if !loaded && error == nil { ListRoomSkeleton(count: 5, threeLines: false) }
-                if loaded && shown.isEmpty {
-                    ListRoomEmpty(title: payments.isEmpty ? "No payments yet." : "None here.",
-                                  message: payments.isEmpty ? "Collect a payment on an invoice and it shows here." : nil)
-                }
-                ForEach(shown) { payment in
-                    Button { openInvoice = payment.invoiceID } label: {
-                        MoneyListRow(title: invoiceCustomers[payment.invoiceID] ?? "Payment",
-                                     subtitle: subtitle(payment),
-                                     status: payment.refunded ? DocumentStatus(tone: .cancelled, word: "Refunded")
-                                                              : DocumentStatus(tone: .done, word: "Paid"),
-                                     amount: money(payment.amount, currency: "USD"))
+                if wide {
+                    wideBar
+                } else {
+                    // Paper 54A: the period chip in the field, the filter circle choosing the period.
+                    PlaceSearchField(query: $search, placeholder: "Search or ask", chips: periodChips, identifier: "payments-search") {
+                        ThorbisMenu(items: periodMenu, title: "Show", accessibilityLabel: "Choose the period") {
+                            PaperFilterCircle(active: false)
+                        }
+                        .accessibilityIdentifier("header-filter")
                     }
-                    .buttonStyle(RowPressStyle())
-                    .disabled(payment.invoiceID.isEmpty)
-                    .accessibilityHint("Opens the invoice")
+                    PaperTabs(options: Self.tabs, selection: $tab)
+                        .padding(.top, 16)
+                }
+                if let error { ErrorBanner(message: error) { await load() } }
+                if wide {
+                    HStack(alignment: .top, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 0) { dayGroups }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if loaded && !payments.isEmpty {
+                            weekSummary
+                                .frame(width: 340, alignment: .leading)
+                                .padding(.trailing, PaperCardMetrics.margin)
+                        }
+                    }
+                } else {
+                    dayGroups
                 }
             }
             .environment(\.paperRowInset, ListRoom.gutter)
@@ -145,16 +267,146 @@ struct CompanyPaymentsView: View {
         }
     }
 
+    /// Loading, empty, then one card per day under its label and the day's total.
+    @ViewBuilder private var dayGroups: some View {
+        if !loaded && error == nil { ListRoomSkeleton(count: 5, threeLines: false) }
+        if loaded && shown.isEmpty {
+            ListRoomEmpty(glyph: .money, title: payments.isEmpty ? "No payments yet" : "None here",
+                          message: payments.isEmpty ? "Collect a payment on an invoice and it shows here." : nil)
+        }
+        ForEach(days) { day in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(day.label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(money(day.total, currency: "USD")).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            }
+            .accessibilityElement(children: .combine)
+            .padding(.horizontal, Theme.gutter).padding(.top, 20).padding(.bottom, 8)
+            ForEach(Array(day.payments.enumerated()), id: \.element.id) { index, payment in
+                Button { openInvoice = payment.invoiceID } label: {
+                    // Paper 54A: 16 Medium name, 16 Semibold amount, the 14 muted line; money that
+                    // went back in full reads "−$60.00" in the destructive text colour.
+                    DocumentCardRow(title: invoiceCustomers[payment.invoiceID] ?? "Payment",
+                                    amount: amountText(payment),
+                                    subtitle: subtitle(payment),
+                                    divider: index > 0,
+                                    compact: true,
+                                    amountTint: wentBack(payment) ? Theme.destructive : Theme.foreground)
+                }
+                .buttonStyle(RowPressStyle())
+                .disabled(payment.invoiceID.isEmpty)
+                .accessibilityHint("Opens the invoice")
+                .documentCardSlot(first: index == 0, last: index == day.payments.count - 1, topGap: 0)
+            }
+        }
+    }
+
+    /// Paper T54A's top row: the search field, then All / Card / Cash and check / Refunds as chips
+    /// (40 tall, the chosen one brand-tinted).
+    private var wideBar: some View {
+        HStack(alignment: .center, spacing: 0) {
+            DocumentSearchField(text: $search, label: "Search payments")
+                .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                ForEach(Self.tabs, id: \.self) { option in filterChip(option) }
+            }
+            .padding(.top, 4)
+            .padding(.trailing, PaperCardMetrics.margin)
+        }
+    }
+
+    private func filterChip(_ option: String) -> some View {
+        let selected = tab == option
+        return Button { tab = option } label: {
+            PaperChoiceChipLabel(title: option, isOn: selected)
+        }
+        .buttonStyle(PressStyle())
+        .fixedSize()
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// Paper T54A's "This week" card: what came in, what went back and the average payment.
+    private var weekSummary: some View {
+        let scope = summaryPayments
+        let kept = scope.filter { $0.net > 0 }
+        let collectedCents = CompanyPayment.collected(scope)
+        let refundCents = scope.reduce(0) { $0 + refundedCents($1) }
+        let refundText = refundCents > 0 ? "\u{2212}\(money(refundCents, currency: "USD"))" : money(0, currency: "USD")
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(weekCovered ? "This week" : "Latest \(payments.count) payments")
+                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 4).padding(.top, 20).padding(.bottom, 8)
+            VStack(spacing: 0) {
+                summaryRow("Collected", money(collectedCents, currency: "USD"), tint: Theme.foreground, divider: false)
+                summaryRow("Refunds", refundText, tint: refundCents > 0 ? Theme.destructive : Theme.foreground, divider: true)
+                if !kept.isEmpty {
+                    summaryRow("Average payment", money(collectedCents / kept.count, currency: "USD"),
+                               tint: Theme.foreground, divider: true)
+                }
+            }
+            .padding(.horizontal, 16)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        }
+    }
+
+    private func summaryRow(_ title: String, _ value: String, tint: Color, divider: Bool) -> some View {
+        HStack(spacing: 12) {
+            Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value).font(Theme.monoFont(16, weight: .semibold)).foregroundStyle(tint)
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(minHeight: 54)
+        .overlay(alignment: .top) { if divider { WellDivider(leading: 0) } }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// What went back on one payment: the recorded refund, or the whole payment when it is marked
+    /// refunded without an amount.
+    private func refundedCents(_ payment: CompanyPayment) -> Int {
+        payment.refundedAmount > 0 ? payment.refundedAmount : (payment.status == "refunded" ? payment.amount : 0)
+    }
+
+    /// The whole payment went back to the customer (a part refund keeps its amount and says so in
+    /// the line under the name).
+    private func wentBack(_ payment: CompanyPayment) -> Bool {
+        payment.refunded && refundedCents(payment) >= payment.amount && payment.amount > 0
+    }
+
+    /// "$340.00", or "−$60.00" for a payment refunded in full (Paper 54A).
+    private func amountText(_ payment: CompanyPayment) -> String {
+        let text = money(payment.amount, currency: "USD")
+        return wentBack(payment) ? "\u{2212}\(text)" : text
+    }
+
     private struct OpenedID: Identifiable, Hashable { let id: String }
 
+    private func reference(_ payment: CompanyPayment) -> String? {
+        payment.invoiceID.isEmpty ? nil : "INV-\(payment.invoiceID.suffix(4).uppercased())"
+    }
+
+    /// "Today", "Yesterday", then "Mon, Jul 19".
+    private func dayLabel(_ date: Date) -> String {
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: date),
+                                                   to: Calendar.current.startOfDay(for: .now)).day ?? 0
+        return days <= 0 ? "Today" : days == 1 ? "Yesterday" : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+    }
+
+    /// "INV-2209 · Card", "INV-8819 · Card · refunded" (the day is the group's label).
     private func subtitle(_ payment: CompanyPayment) -> String {
-        let invoice = payment.invoiceID.isEmpty ? nil : "INV-\(payment.invoiceID.suffix(4).uppercased())"
-        let when = JobFiltering.date(payment.recordedAt).map { date -> String in
-            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: date),
-                                                       to: Calendar.current.startOfDay(for: .now)).day ?? 0
-            return days <= 0 ? "Today" : days == 1 ? "Yesterday" : date.formatted(.dateTime.month(.abbreviated).day())
+        // Paper 54A: "INV-8819 · Refund to Visa ending 7302". The record carries the method, not
+        // the card or who took it, so a full refund reads "Refund to card".
+        if wentBack(payment) {
+            let to = payment.method.isEmpty ? "Refund" : "Refund to \(payment.methodPhrase)"
+            return [reference(payment), to].compactMap { $0 }.joined(separator: " \u{00B7} ")
         }
-        return [invoice, payment.methodLabel, when].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        let refund: String? = payment.refunded
+            ? (payment.refundedAmount > 0 ? "\(money(payment.refundedAmount, currency: "USD")) refunded" : "refunded")
+            : nil
+        return [reference(payment), payment.methodLabel, refund].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
     private func load() async {

@@ -17,4 +17,4 @@ This is an incremental staff beta, **not full Paper/TanStack parity**. See `beta
 
 ## Distribution
 
-`xcodebuild -exportArchive` uploaded build 7 successfully at 12:49 AM EDT on 2026-10-27. Apple reports **Uploaded package is processing**. Upload log: `../../outputs/testflight-upload-7.log`. App Store Connect is currently signed out, so processing and tester assignment have not been rechecked. Hayley Wade (`hayleywoods15@gmail.com`) is already in the `External Testers` group; build 7 has not been assigned and no invitation has been sent. External beta review still needs an App Review contact phone and reviewer demo login.
+`xcodebuild -exportArchive` uploaded build 7 successfully at 12:49 AM EDT on 2026-10-27. Apple reports **Uploaded package is processing**. Upload log: `../../outputs/testflight-upload-7.log`. App Store Connect is currently signed out, so processing and tester assignment have not been rechecked. An external tester is already in the `External Testers` group; build 7 has not been assigned and no invitation has been sent. External beta review still needs an App Review contact phone and reviewer demo login.

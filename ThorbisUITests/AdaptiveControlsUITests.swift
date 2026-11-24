@@ -18,6 +18,18 @@ final class AdaptiveControlsUITests: XCTestCase {
         // showed form-to-keyboard pans leave the keyboard up. Done (and Hide keyboard on iPad)
         // puts it away without pulling the sheet.
         _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+        // With the simulator's hardware keyboard connected, focus alone leaves the software keyboard
+        // off screen (the keyboard element exists below the window), so there is nothing to cover
+        // the form and no Done to show. Typing brings the software keyboard up, as a phone without
+        // a hardware keyboard shows it on focus, so Done is still checked over the real keyboard.
+        let name = app.textFields["Name"]
+        let up = Date().addingTimeInterval(3)
+        while !app.keyboardShowing && Date() < up { usleep(200_000) }
+        if !app.keyboardShowing, name.exists {
+            name.typeText("A")
+            name.typeText(XCUIKeyboardKey.delete.rawValue)
+        }
+        XCTAssertTrue(app.keyboardShowing, "The software keyboard covers the form at this size: \(app.keyboards.firstMatch.frame)")
         XCTAssertTrue(
             app.buttons["keyboard-done"].waitForExistence(timeout: 5)
                 || app.keyboards.buttons["Hide keyboard"].waitForExistence(timeout: 1),
@@ -25,10 +37,9 @@ final class AdaptiveControlsUITests: XCTestCase {
         )
         XCTAssertTrue(app.dismissSoftwareKeyboard(from: form), "Dismiss the keyboard before navigating the form.")
         XCTAssertFalse(app.keyboardShowing, "Dismiss the keyboard before navigating the form.")
-        // The pinned Save bar is disabled in the read-only preview, and a disabled bar does not
-        // block XCUI's hit test: a choice behind it reports hittable while a tap lands on the bar.
-        let save = app.buttons["Save customer"]
-        func revealed() -> Bool { commercial.isHittable && (!save.exists || commercial.frame.maxY <= save.frame.minY) }
+        // Paper v2 (47A): Save customer sits in the sheet's header, so nothing pinned at the bottom
+        // can cover the choice; it only has to be on screen.
+        func revealed() -> Bool { commercial.isHittable && app.windows.firstMatch.frame.contains(commercial.frame) }
         for _ in 0..<10 where !revealed() { form.swipeUp() }
         XCTAssertTrue(revealed(), app.debugDescription)
         XCTAssertGreaterThanOrEqual(commercial.frame.width, 44)
@@ -50,8 +61,9 @@ final class AdaptiveControlsUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         let signOut = app.buttons["Sign out"]
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30))
-        for _ in 0..<8 where !signOut.isHittable { app.swipeUp() }
+        // Paper 65: Settings is a page with its own back circle and 34 Bold title; the bar is hidden.
+        XCTAssertTrue(app.buttons["settings-account-data"].waitForExistence(timeout: 30))
+        for _ in 0..<12 where !signOut.isHittable { app.swipeUp() }
         XCTAssertTrue(signOut.isHittable)
         signOut.tap()
         let warning = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "older saved photos")).firstMatch
@@ -60,7 +72,8 @@ final class AdaptiveControlsUITests: XCTestCase {
         for _ in 0..<8 where !cancel.isHittable { app.swipeUp() }
         XCTAssertTrue(cancel.isHittable, app.debugDescription)
         cancel.tap()
-        XCTAssertFalse(warning.exists)
+        // Cancel slides the sign out sheet away, and its words stay in the tree until it has gone.
+        XCTAssertTrue(warning.waitForNonExistence(timeout: 10))
     }
 }
 

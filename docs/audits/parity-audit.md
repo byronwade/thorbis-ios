@@ -1,12 +1,14 @@
 # Native Swift parity audit
 
+> Snapshot, 26-28 October 2026. Not maintained. Current API gaps: [GAPS.md](../GAPS.md). Current screen coverage: [paper-screen-index.md](../design/paper-screen-index.md).
+
 Audit date: 2026-10-26. Read-only product audit of `thorbis-ios` against `Thorbis-TanStack`. This is source/contract evidence, not a live production validation or release approval. Paths below are relative to the workspace root.
 
 ## Executive finding
 
 The Swift app is a small online scaffold, not mobile parity. It reads and creates customers/jobs and exposes part of job progression. It has four tabs, several selection controls with no content/filter behavior, no durable sync, no organization selection, and no effective capability projection. The web registry declares 28 destinations; their maturity differs substantially. Copying every route as if it were a production-backed feature would reproduce demo/local-only behavior and overstate parity.
 
-This paragraph and the matrix below record the initial source audit before the subsequent native increments documented in `docs/release/beta-coverage.md`. In particular, contact quick-add, core Paper presentation, and the first functional My Day slice have since been added. The audit remains useful for the still-open parity gaps; read the beta coverage record for current implemented scope and test evidence.
+This paragraph and the matrix below record the initial source audit before the subsequent native increments documented in `docs/design/paper-screen-index.md`. In particular, contact quick-add, core Paper presentation, and the first functional My Day slice have since been added. The audit remains useful for the still-open parity gaps; read the screen index for current implemented scope.
 
 The canonical OpenAPI contains 274 paths, including separate Network/community APIs, public customer document flows, internal provider/administrative operations, and staff operations. That number is not a native-screen target. The first product scope should be the staff workspace in `apps/web`, with explicit decisions for separate Network/customer-facing products.
 
@@ -44,15 +46,15 @@ Legend: **API-backed** means canonical endpoints/domain contracts exist; it does
 
 ## Concrete Swift defects and mismatches
 
-1. **Arrival action is rejected by canonical domain.** `API.swift:84` encodes only `{to}`. OpenAPI `JobProgressRequest` requires `arrival: {method}` exactly for `arrived`; `domains/jobs/src/commands.ts:1026` throws conflict without it. Supply explicit manual evidence; do not infer geofence.
-2. **Pagination is dropped.** `Items<T>` stores only `items`; jobs/customers calls do not send continuation. API lists use `{items,nextCursor}`. Counts and customer-job association can be incomplete after the first page.
+1. **Arrival action is rejected by canonical domain.** `API.swift:84` encodes only `{to}`. OpenAPI `JobProgressRequest` requires `arrival: {method}` exactly for `arrived`; `domains/jobs/src/commands.ts:1026` throws conflict without it. Supply explicit manual evidence; do not infer geofence. (Fixed since.)
+2. **Pagination is dropped.** `Items<T>` stores only `items`; jobs/customers calls do not send continuation. API lists use `{items,nextCursor}`. Counts and customer-job association can be incomplete after the first page. (Fixed since.)
 3. **Schedule is not a schedule.** `Screens.swift:31` filters all nonterminal jobs, treats first as next, and never applies Today/Week/Map. `Job` has no scheduled time, assigned user, duration, or service-location fields. Cannot truthfully show an appointment order.
 4. **Assigned/All/Recent does not filter.** `JobsView` binds a `filter` string but builds groups from the same store array. Its fixed groups also omit paused/canceled and any unrecognized state.
 5. **Record segments are cosmetic.** Job Overview/Estimates/Invoice/Media/Activity and customer Overview/Jobs/Billing/Media/Activity never branch their content. More entries are text rows, not navigation controls; phone/message glyphs are not actions.
 6. **Incomplete execution workflow.** `nextStep` recognizes only en_route/arrived/in_progress. No pause reason/next-action, cancel, follow-up, closeout evidence, completion invoice, or complete endpoint. `allowedTransitions` is state-machine evidence, not sufficient authorization to offer actions.
-7. **Auth state can publish before hydration succeeds.** `signIn` sets `.session` before `/v1/me` completes. That Network account projection is not a substitute for workspace membership activation and effective authorization. No startup get-session flow; production default points at loopback unless configured.
-8. **Sign-out does not revoke the server session or clear business arrays.** It deletes all shared cookies and sets auth to none, while Store arrays remain. Introduce an actor/workspace generation boundary, scoped session handling, cancellation/stale-response rejection, and local-store erasure before identity change.
-9. **Development identity origin validation is substring-based.** `isLoopback` uses contains(`localhost`/`127.0.0.1`), so an arbitrary hostname containing either substring qualifies. `useDevIdentity` has no internal origin guard. Parse exact URL host and bind dev-header emission to allowed loopback origins.
+7. **Auth state can publish before hydration succeeds.** `signIn` sets `.session` before `/v1/me` completes. That Network account projection is not a substitute for workspace membership activation and effective authorization. No startup get-session flow; production default points at loopback unless configured. (Fixed since.)
+8. **Sign-out does not revoke the server session or clear business arrays.** It deletes all shared cookies and sets auth to none, while Store arrays remain. Introduce an actor/workspace generation boundary, scoped session handling, cancellation/stale-response rejection, and local-store erasure before identity change. (Fixed since.)
+9. **Development identity origin validation is substring-based.** `isLoopback` uses contains(`localhost`/`127.0.0.1`), so an arbitrary hostname containing either substring qualifies. `useDevIdentity` has no internal origin guard. Parse exact URL host and bind dev-header emission to allowed loopback origins. (Fixed since.)
 10. **Errors and retries need contract behavior.** Customer create uses `try?`, discarding a validation/authorization failure. Creation controls permit repeated submissions. Problem model lacks stable code/conflict metadata. No command identity or reconciliation UX exists.
 11. **Not all current schemas are expressible in committed OpenAPI.** For example the job detail response uses generic `2XX: Success`, so full DTO generation alone cannot prove parity. Use domain projections and HTTP contract fixtures to complete client contract tests.
 

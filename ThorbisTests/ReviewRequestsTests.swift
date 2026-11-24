@@ -49,4 +49,11 @@ final class ReviewRequestsTests: XCTestCase {
         store.clearAll()
         XCTAssertTrue(store.changes(actorID: "A", organizationID: "O").isEmpty)
     }
+
+    func testSignOutForgetsTheLastLoadedSettings() {
+        let defaults = UserDefaults(suiteName: "ReviewRequestsTests.\(UUID().uuidString)")!
+        defaults.set(Data("{}".utf8), forKey: ReviewRequestsCache.key)
+        ReviewRequestsCache.clear(defaults)
+        XCTAssertNil(defaults.data(forKey: ReviewRequestsCache.key))
+    }
 }

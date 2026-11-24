@@ -101,6 +101,9 @@ struct JobChecklistSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
+                    // Paper 21F: the 34 Bold title, "AC repair · 5 of 8 done" under it.
+                    PaperPageTitle(title: "Checklist", subtitle: headerSubtitle, columnInset: PaperCardMetrics.margin)
+                        .padding(.bottom, 10)
                     if let run, let template { runList(run, template) } else if !finished { picker }
                     if let result {
                         Label(result.message, systemImage: result.succeeded ? (result == .saved ? "checkmark.circle" : "clock.arrow.circlepath") : "exclamationmark.triangle")
@@ -113,21 +116,30 @@ struct JobChecklistSheet: View {
                             .padding(.horizontal, 4).padding(.top, 8)
                     }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.canvas)
-            .navigationTitle(template?.title ?? "Checklist")
+            .background(Theme.background)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) {
-                    Button(finished ? "Done" : "Close", action: onDone)
+            // Paper 21F: the bar is the 44pt back circle alone. "Start over" is behind More. The
+            // page sheet's circle row, not a system bar, so it opens at the same height as the rest.
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaperPageSheetBar {
+                    PaperCircleButton(symbol: "xmark", label: finished ? "Done" : "Close", size: 44, fill: Theme.card, action: onDone)
                         .accessibilityHint(finished ? "" : "Progress stays on this phone.")
                         .accessibilityIdentifier("checklist-close")
+                } trailing: {
+                    if run != nil, !finished {
+                        ThorbisMenu(items: [ThorbisMenuItem("Start over", icon: "arrow.counterclockwise", role: .destructive) { confirmRestart = true }],
+                                    accessibilityLabel: "Checklist actions") {
+                            PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                        }
+                    }
                 }
-                if run != nil, !finished {
-                    ThorbisToolbarItem(placement: .topBarTrailing) { Button("Start over") { confirmRestart = true } }
-                }
+                .background(Theme.background)
+            }
+            .toolbar {
                 ThorbisKeyboardDoneBar { focused = nil }
             }
             .safeAreaInset(edge: .bottom) {
@@ -139,7 +151,7 @@ struct JobChecklistSheet: View {
                         }
                         // Not pre-disabled for an empty run: pressing says what's missing. Without
                         // the note permission it stays off, and the sentence under it says why.
-                        PaperActionBar(title: "Finish · add to notes", symbol: "checklist", busy: busy,
+                        PaperActionBar(title: "Mark checklist done", busy: busy,
                                        disabled: !JobNotePoster.canPost(session),
                                        disabledReason: "Your role can't add job notes. Ask your office.") {
                             if run.doneCount(template) == 0 {
@@ -170,15 +182,23 @@ struct JobChecklistSheet: View {
                 run = previewRun ?? JobChecklistStore.run(jobID: jobID, session: session)
             }
         }
+        // Paper 21F is a page: cards on the page's ground, not on the sheet's panel.
+        .paperPageGround()
+    }
+
+    /// "AC repair · 5 of 8 done" while a run is open; what to do otherwise.
+    private var headerSubtitle: String {
+        if let run, let template { return "\(template.title) · \(run.doneCount(template)) of \(template.items.count) done" }
+        return finished ? "Added to the job\u{2019}s notes" : "Choose a checklist for this job"
     }
 
     // MARK: Pick a template
 
     private var picker: some View {
         VStack(alignment: .leading, spacing: 6) {
-            PaperGroupHeader(title: "Choose a checklist").padding(.horizontal, 4)
-            PaperCard {
+            PaperSection("Choose a checklist") {
                 ForEach(ChecklistTemplates.all) { template in
+                    if template.id != ChecklistTemplates.all.first?.id { WellDivider() }
                     Button { update(ChecklistRun(templateID: template.id)) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(template.title).font(Theme.font(16, weight: .medium))
@@ -193,7 +213,6 @@ struct JobChecklistSheet: View {
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("checklist-template-\(template.id)")
                 }
-                .padding(.vertical, PaperCardMetrics.edge / 2)
             }
             Text("Checklists are kept on this phone. Finishing one adds a summary to the job’s notes.")
                 .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.horizontal, 4).padding(.top, 4)
@@ -203,35 +222,44 @@ struct JobChecklistSheet: View {
     // MARK: Run
 
     private func runList(_ run: ChecklistRun, _ template: ChecklistTemplate) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            PaperGroupHeader(title: "\(run.doneCount(template)) of \(template.items.count) done") {
-                Text("Saved on this phone").font(Theme.font(13))
-            }
-            .padding(.horizontal, 4)
+        VStack(alignment: .leading, spacing: 8) {
             PaperCard {
-                ForEach(template.items) { item in row(item, run) }
-                    .padding(.vertical, PaperCardMetrics.edge / 2)
+                ForEach(template.items) { item in
+                    if item.id != template.items.first?.id { WellDivider(leading: PaperCardMetrics.inset + 40) }
+                    row(item, run)
+                }
             }
+            Text("Saved on this phone until you mark it done.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4)
         }
     }
 
     private func row(_ item: ChecklistItem, _ run: ChecklistRun) -> some View {
         let isDone = run.done.contains(item.id)
         let photos = run.photos[item.id] ?? 0
-        return HStack(alignment: .center, spacing: 12) {
+        // Paper 21F: the 28pt mark 16 from the card's edge and the words 12 after it; the mark's
+        // 44pt target takes the other 8 on each side.
+        return HStack(alignment: .center, spacing: 4) {
             Button { toggle(item) } label: {
-                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 24, weight: .regular))
-                    .foregroundStyle(isDone ? Theme.success : Theme.subtle)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                // Paper 21F: a 28pt filled green tick, or an empty ring.
+                ZStack {
+                    if isDone {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 28, weight: .regular))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(Theme.background, Theme.statusDone)
+                    } else {
+                        Circle().strokeBorder(Theme.borderStrong, lineWidth: 1.5).frame(width: 28, height: 28)
+                    }
+                }
+                .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
             .accessibilityLabel(item.label)
             .accessibilityValue(isDone ? "Done" : "Not done")
             .accessibilityIdentifier("checklist-tick-\(item.id)")
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.label).font(Theme.font(16, weight: .medium))
-                    .foregroundStyle(isDone ? Theme.muted : Theme.foreground)
+                Text(item.label).font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                    .foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                 if let reading = item.reading {
                     HStack(spacing: 6) {
@@ -254,10 +282,16 @@ struct JobChecklistSheet: View {
             .padding(.vertical, 8)
             Spacer(minLength: 0)
             if canPhoto {
-                PaperCircleButton(symbol: "camera", label: "Add a photo for \(item.label)", size: 44) { photoFor = item }
+                // Paper 21F: "Add photo" as a brand chip on the row.
+                Button { photoFor = item } label: {
+                    Text("Add photo").paperButton(.secondary, tone: .tinted)
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Add a photo for \(item.label)")
             }
         }
-        .padding(.leading, PaperCardMetrics.inset - 10).padding(.trailing, PaperCardMetrics.inset - 6)
+        .frame(minHeight: 56)
+        .padding(.leading, PaperCardMetrics.inset - 8).padding(.trailing, 12)
     }
 
     // MARK: Actions

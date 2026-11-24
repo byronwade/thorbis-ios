@@ -1,5 +1,7 @@
 # Native workspace slice report
 
+> Snapshot, 26-28 October 2026. Not maintained. Current API gaps: [GAPS.md](../GAPS.md). Current screen coverage: [paper-screen-index.md](../design/paper-screen-index.md).
+
 Implemented typed API and standalone SwiftUI surfaces for staff notices, a live revenue report, and Price Book list/detail. Source files: `thorbis-ios/Thorbis/Sources/WorkspaceAPI.swift`, `thorbis-ios/Thorbis/Sources/WorkspaceViews.swift`; tests: `thorbis-ios/ThorbisTests/WorkspaceAPITests.swift`. Added safe `queryItems: [URLQueryItem]` arguments to the existing `APIClient.send` overloads in `Thorbis/Sources/API.swift` so query resource parameters are encoded as actual URL query items.
 
 The views for More integration are `WorkspaceNoticesView(api:available:)`, `WorkspaceRevenueView(api:available:)`, and `WorkspacePriceBookView(api:canList:canViewDetail:)`. The root caller supplies availability after obtaining effective capabilities/features; the API remains the final authority. Methods are `staffNotices(limit:cursor:)`, `markStaffNoticesRead(limit:cursor:)`, `revenueReport()`, `priceBookItems(limit:cursor:)`, and `priceBookItem(_:)`.

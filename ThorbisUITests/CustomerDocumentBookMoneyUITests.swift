@@ -2,6 +2,88 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testMixedCurrencyInvoiceDoesNotShowMisleadingOverviewAmount() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money", "--paper-preview-job-invoice-mixed-currency"]
+        app.launch()
+        let actions = app.buttons["Job actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        XCTAssertTrue(invoice.label.contains("Amount needs verification"))
+        XCTAssertFalse(invoice.label.contains("$300.00"))
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].waitForExistence(timeout: 20))
+    }
+
+    func testPartPaidInvoiceOverviewDoesNotSayUnpaid() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        // The row settles once the invoice's payments arrive; read it after that.
+        let settled = expectation(for: NSPredicate(format: "label CONTAINS %@", "due"), evaluatedWith: invoice)
+        wait(for: [settled], timeout: 10)
+        XCTAssertTrue(invoice.label.contains("$150.00"), invoice.label)
+        XCTAssertFalse(invoice.label.contains("Unpaid"), invoice.label)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Issued")).firstMatch.exists)
+    }
+    func testInvoiceOverviewAtNormalText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Invoice overview normal text"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(invoice.isHittable); invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))
+    }
+    func testInvoiceOverviewAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Invoice overview largest text"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(invoice.isHittable); invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))
+    }
+    func testPayExplainsWhenFreshPaymentHistoryCannotBeVerified() {
+        let app = openPrimary(extra: ["--paper-preview-job-documents-money", "--paper-preview-job-invoice-signed", "--paper-preview-payment-recheck-fails"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        let message = app.staticTexts["Payment isn't ready. Ask your technician to check this invoice."]
+        XCTAssertTrue(message.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        XCTAssertFalse(message.exists, "A payment warning must not follow the customer to another invoice")
+    }
+
+    func testPayCannotLeaveCustomerViewAfterAuthorityIsRetiredDuringUnlock() {
+        let app = openPrimary(extra: ["--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved", "--paper-preview-payment-retire-on-unlock"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        XCTAssertTrue(app.staticTexts["This document isn’t available any more"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        XCTAssertFalse(app.buttons["Job actions"].isHittable)
+    }
     func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
@@ -35,9 +117,10 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         assertMoneyRow("Total", "$300.00", in: app)
         assertMoneyRow("Paid", "$150.00", in: app)
         assertMoneyRow("Amount due", "$150.00", in: app)
-        XCTAssertFalse(text("Paid in full", in: app).exists)
         // A short payment history is visible without requiring a second tap.
         assertText("Card", in: app)
+        // The payments can change the headline, so it is read once they have arrived.
+        XCTAssertFalse(text("Paid in full", in: app).exists)
         let expanded = XCTAttachment(screenshot: app.screenshot())
         expanded.name = "Payment history visible by default"
         expanded.lifetime = .keepAlways
@@ -46,7 +129,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         reveal(history, in: app)
         XCTAssertTrue(history.isHittable)
         history.tap()
-        XCTAssertFalse(text("Card", in: app).exists)
+        // The history folds with an animation, and its rows stay in the tree until it ends.
+        XCTAssertTrue(text("Card", in: app).waitForNonExistence(timeout: 10))
         let collapsed = XCTAttachment(screenshot: app.screenshot())
         collapsed.name = "Payment history collapsed by customer"
         collapsed.lifetime = .keepAlways
@@ -80,7 +164,10 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
 
         app.buttons["Choose a job document"].tap()
         app.buttons["INV-2209"].tap()
-        XCTAssertEqual(app.staticTexts["customer-document-position"].label, "4 of 4 documents")
+        // The document menu runs its row's action once its popover has gone.
+        let position = app.staticTexts["customer-document-position"]
+        let onLast = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "4 of 4 documents"), object: position)
+        XCTAssertEqual(XCTWaiter.wait(for: [onLast], timeout: 10), .completed, "Position reads \(position.label)")
         openHistory(in: app)
         assertText("Refunded $50.00", in: app)
         assertText("Cash", in: app)
@@ -140,7 +227,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(history.isHittable)
         XCTAssertTrue(text("Card", in: app).exists)
         history.tap()
-        XCTAssertFalse(text("Card", in: app).exists)
+        // The history folds with an animation, and its rows stay in the tree until it ends.
+        XCTAssertTrue(text("Card", in: app).waitForNonExistence(timeout: 10))
         let refresh = pages(app).buttons["Refresh payments"]
         reveal(refresh, in: app)
         XCTAssertTrue(refresh.isHittable)
@@ -157,6 +245,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
     func testDraftInvoiceShowsDraftTotalRatherThanAClaimOfPayment() {
         let app = openPrimary(extra: ["--paper-preview-job-invoice-draft"])
         assertText("Draft total", in: app)
+        // The payments can change the headline, so it is read once they have arrived.
+        XCTAssertTrue(text("No payments yet.", in: app).waitForExistence(timeout: 10))
         XCTAssertFalse(text("Paid in full", in: app).exists)
         assertMoneyRow("Total", "$340.00", in: app)
     }
@@ -164,6 +254,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
     func testZeroDollarInvoiceDoesNotClaimPayment() {
         let app = openPrimary(extra: ["--paper-preview-job-invoice-zero"])
         assertText("No balance due", in: app)
+        // The payments can change the headline, so it is read once they have arrived.
+        XCTAssertTrue(text("No payments yet.", in: app).waitForExistence(timeout: 10))
         XCTAssertFalse(text("Paid in full", in: app).exists)
         assertMoneyRow("Total", "$0.00", in: app)
         assertMoneyRow("Amount due", "$0.00", in: app)
@@ -174,6 +266,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
         XCTAssertTrue(app.staticTexts["Deposit invoice"].waitForExistence(timeout: 10))
         assertText("Payments couldn't be loaded", in: app)
+        assertText("Try again to see payment history", in: app)
+        XCTAssertFalse(text("The invoice's paid amount is shown above", in: app).exists)
         assertText("No balance due", in: app)
         XCTAssertFalse(text("Paid in full", in: app).exists)
         assertMoneyRow("Paid", "$340.00", in: app)

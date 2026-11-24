@@ -2,7 +2,7 @@ import XCTest
 
 /// Row swipes (owner-approved 31 Oct 2026): Jobs and Today rows reveal Call and Directions on the
 /// right and the server's next move on the left; Inbox rows reveal Open job. Gestures share the
-/// screen with vertical scrolling, the drawer's edge swipe and Today's stop-card pager.
+/// screen with vertical scrolling and the drawer's edge swipe.
 @MainActor
 final class RowSwipeUITests: XCTestCase {
     /// 412 Birchwood Ln: dispatched, the server allows On my way; it has a number and a place.
@@ -33,6 +33,8 @@ final class RowSwipeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         // iPad: the Jobs preview has already picked this job into the detail column beside the list,
         // so "the job opened" is read from the list staying put rather than from the job's controls.
+        // iPad: the detail column draws its job after the list's rows. Let it settle before the one look.
+        if app.usesTabletLayout { _ = app.buttons["job-status"].waitForExistence(timeout: 15) }
         let jobShownBefore = app.buttons["job-status"].exists
         // Right: Call and Directions, each a button with its word.
         drag(row, by: 200)
@@ -93,8 +95,10 @@ final class RowSwipeUITests: XCTestCase {
         XCTAssertFalse(row.label.contains("En route"), "A refused move must not show the job as en route: \(row.label)")
     }
 
+    /// Paper 18 / 53: an office role's Schedule opens on the board by technician (its rows open the
+    /// assign and reschedule menu); a tech's own day keeps "Later today" rows, and those swipe.
     func testTodayRowSwipeOffersOnMyWay() {
-        let app = launch("schedule")
+        let app = launch("schedule", ["--paper-preview-role", "tech"])
         let row = any(app, "today-row-\(birchwood)")
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         drag(row, by: -130)
@@ -108,33 +112,27 @@ final class RowSwipeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["row-swipe-directions-\(birchwood)"].exists)
     }
 
-    /// Rows sit below Today's stop-card pager: the pager still pages, a row still swipes, and a drag
-    /// from the screen's edge level with a row opens the drawer instead of the row.
-    func testSwipesLeaveThePagerAndTheDrawerEdgeAlone() throws {
-        try skipOnTablet(because: "the stop-card pager is the phone's Today; iPad Schedule rows swipe in testTodayRowSwipeOffersOnMyWay and the sidebar's edge swipe is in DrawerGearMenuUITests.")
-        let app = launch("next-stop", ["--paper-preview-role", "tech", "--paper-preview-today-cards"])
-        let pager = any(app, "today-stop-cards")
-        XCTAssertTrue(pager.waitForExistence(timeout: 30))
-        let cards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "today-stop-card-"))
-        func shown() -> String? { cards.allElementsBoundByIndex.first { $0.exists && $0.isHittable }?.identifier }
-        // Known on the base branch too: when another screen's test ran first in the same run, the
-        // pager can open with no card on screen (TodayStopCardsUITests fails the same way).
-        let deadline = Date().addingTimeInterval(15)
-        while shown() == nil && Date() < deadline { usleep(500_000) }
-        guard let before = shown() else {
-            throw XCTSkip("The stop-card pager opened with no card showing (pre-existing, order-dependent).")
-        }
-        pager.swipeLeft()
-        sleep(1)
-        XCTAssertNotEqual(shown(), before, "The pager still pages")
-
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Outlet replacement")).firstMatch
-        for _ in 0..<4 where !(row.exists && row.isHittable && row.frame.maxY < app.frame.height * 0.85) { app.swipeUp(velocity: .slow) }
+    /// A drag from the screen's edge level with a Today row opens the drawer instead of the row, and
+    /// the row still swipes afterwards. (The stop-card pager this test also covered left the Schedule
+    /// with Paper 18; it returns with Field mode, Paper F1.)
+    func testEdgeSwipeOverATodayRowOpensTheDrawerNotTheRow() throws {
+        try skipOnTablet(because: "the drawer is the phone's; the iPad sidebar's edge swipe is in DrawerGearMenuUITests.")
+        let app = launch("schedule", ["--paper-preview-role", "tech"])
+        let row = any(app, "today-row-\(birchwood)")
+        XCTAssertTrue(row.waitForExistence(timeout: 30))
+        for _ in 0..<4 where !(row.isHittable && row.frame.maxY < app.frame.height * 0.85) { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(row.isHittable)
         let y = row.frame.midY / app.frame.height
         let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: y))
         edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: y)))
         XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 5), "The edge swipe opens the drawer over a row")
+        XCTAssertFalse(app.buttons["row-swipe-call-\(birchwood)"].exists, "The edge swipe must not open the row's actions")
+        // Close the drawer on the page beside it; the row then still answers its own swipe.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["drawer-search"].waitForNonExistence(timeout: 5), "A tap beside the drawer closes it")
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        drag(row, by: -130)
+        XCTAssertTrue(app.buttons["row-swipe-move-\(birchwood)"].waitForExistence(timeout: 10), "The row still swipes after the drawer closes")
     }
 
     func testInboxRowSwipeOpensTheJob() {

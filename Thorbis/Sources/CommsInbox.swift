@@ -4,7 +4,11 @@ import SwiftUI
 /// never hides the other. Shared with an open thread, so a link made there shows in the list.
 @MainActor
 final class CommsInboxModel: ObservableObject {
-    @Published private(set) var calls: [BookingCallRecord] = []
+    @Published private(set) var calls: [BookingCallRecord] = [] {
+        didSet { threads = CommsCallGrouping.threads(calls) }
+    }
+    /// The calls grouped by caller, kept beside them so the list never regroups the log on a read.
+    @Published private(set) var threads: [CommsCallThread] = []
     @Published private(set) var callsCursor: String?
     @Published private(set) var callsLoading = false
     @Published private(set) var callsLoaded = false
@@ -36,8 +40,6 @@ final class CommsInboxModel: ObservableObject {
         seen.markSeen(thread.calls)
         if seen.ids != seenIDs { seenIDs = seen.ids }
     }
-
-    var threads: [CommsCallThread] { CommsCallGrouping.threads(calls) }
 
     func thread(_ id: String) -> CommsCallThread? { threads.first { $0.id == id } }
 
@@ -149,21 +151,23 @@ final class CommsInboxModel: ObservableObject {
     var canMarkNoticesRead: Bool { unreadState == .present || readCursor != nil }
 }
 
-/// The Inbox (web apps/web features/inbox, phone layout; a beta there too): one list at a time.
-/// Its title is a menu of sections (All, Calls, Voicemail, Texts, Email, Job notices), the line
-/// under it a menu of folders, and the view bar the quick filters. A conversation opens on its
-/// own screen.
+/// Messages (web apps/web features/inbox, phone layout; a beta there too; Paper 49N): one list of
+/// customer conversations, calls and job notices. A single row of chips under the search field
+/// narrows it (All, Unread, Calls, Texts, Email, Drafts); the rarer lenses (Needs reply, Starred,
+/// Sent, Archive, Bin) and marking the notices read sit behind the header's "…". A conversation
+/// opens on its own screen.
 struct CommsInboxView: View {
     let access: CommsInboxAccess
     @EnvironmentObject private var api: APIClient
     @StateObject private var model: CommsInboxModel
     @ObservedObject private var local: CommsLocalStore
+    @EnvironmentObject private var store: Store
 
-    @State private var section: CommsInboxSection
-    @State private var folder: CommsFolder = .inbox
-    @State private var filter = CommsQuickFilter.all.rawValue
-    /// The folder glyph grows with its 15pt label, capped so it never outweighs the word.
-    @ScaledMetric(relativeTo: .subheadline) private var folderGlyph: CGFloat = 13
+    /// The chip that is on. Plain view state, like the old menu's: it holds while the place lives
+    /// (opening a conversation and coming back keeps it) and starts at All on a fresh launch.
+    @State private var chip: CommsInboxFilter
+    /// A lens from the "…" menu; while set, no chip is lit.
+    @State private var moreFilter: CommsInboxMoreFilter?
     @State private var open: CommsOpen?
     @State private var openingJob: String?
     @State private var composing: CommsComposeKind?
@@ -177,17 +181,35 @@ struct CommsInboxView: View {
         _model = StateObject(wrappedValue: CommsInboxModel(seen: CommsCallSeen(defaults: Self.persistsSeen ? .standard : nil,
                                                                                 actorID: actorID, organizationID: organizationID)))
         _local = ObservedObject(wrappedValue: CommsLocalStore.shared(actorID: actorID, organizationID: organizationID))
-        _section = State(initialValue: Self.previewSection(access) ?? access.defaultSection)
-        _folder = State(initialValue: Self.previewFolder ?? .inbox)
+        let preview = Self.previewScope(access)
+        _chip = State(initialValue: preview.chip)
+        _moreFilter = State(initialValue: preview.more)
     }
 
-    private var quickFilter: CommsQuickFilter { CommsQuickFilter(rawValue: filter) ?? .all }
+    /// What the list shows: the chip's lens, or the "…" lens across everything.
+    private var section: CommsInboxSection { moreFilter == nil ? chip.section : .all }
+    private var folder: CommsFolder { moreFilter?.folder ?? chip.folder }
+    private var quickFilter: CommsQuickFilter { moreFilter?.quick ?? chip.quick }
+
+    private func choose(_ next: CommsInboxFilter) {
+        moreFilter = nil
+        chip = next
+        swipes.close()
+    }
+
+    private func choose(_ next: CommsInboxMoreFilter) {
+        moreFilter = moreFilter == next ? nil : next
+        chip = .all
+        swipes.close()
+    }
 
     var body: some View {
+        // Read the store once per update: the whole list and its unread count come from one pass.
+        let scope = scoped
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                header
-                content
+                header(unread: unreadSummary(scope))
+                content(scope.filter { matchesQuickFilter($0) })
             }
             .padding(.bottom, 24)
         }
@@ -196,24 +218,17 @@ struct CommsInboxView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if access.notices && section.showsNotices && folder == .inbox && model.canMarkNoticesRead {
+            if access.workspace || (access.notices && model.canMarkNoticesRead) {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
-                    PaperCircleButton(symbol: "checkmark.circle", label: model.readCursor == nil ? "Mark all notices read" : "Continue marking read",
-                                      fill: Theme.card, bordered: true) { Task { await model.markNoticesRead(api: api) } }
-                        .disabled(model.noticesLoading)
+                    HStack(spacing: 8) {
+                        moreMenu
+                        if access.workspace { composeButton }
+                    }
                 }
-            }
-            if access.workspace {
-                ThorbisToolbarItem(placement: .topBarTrailing) { composeButton }
             }
         }
         .refreshable { await model.refresh(api: api, access: access) }
         .onScrollPhaseChange { _, phase in if phase != .idle { swipes.close() } }
-        .onChange(of: section) { _, next in
-            filter = CommsQuickFilter.all.rawValue
-            if !CommsInboxScope.folders(next).contains(folder) { folder = .inbox }
-            swipes.close()
-        }
         .thorbisDestination(item: $openingJob) { JobDetailView(jobId: $0).tabletReadable() }
         .thorbisDestination(item: $open) { target in
             switch target {
@@ -230,68 +245,105 @@ struct CommsInboxView: View {
         .task {
             await model.refresh(api: api, access: access)
             if let target = Self.previewOpen(model.threads) { open = target }
+            #if DEBUG
+            if PaperPreview.enabled, PaperPreview.opensSheet("inbox-new-text") { composing = .text }
+            #endif
         }
     }
 
     // MARK: Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                ThorbisMenu(items: access.sections.map { item in
-                    ThorbisMenuItem(item.menuTitle, icon: item.symbol, isSelected: item == section) { section = item }
-                }, accessibilityLabel: "\(section.title), switch what the Inbox shows") {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(section.title).font(Theme.font(34, weight: .medium)).tracking(-0.8)
-                            .foregroundStyle(Theme.foreground)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Image(systemName: "chevron.down").font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("inbox-section-menu")
-                .accessibilityAddTraits(.isHeader)
-                // The Inbox is a beta on the web too: a quiet word, not a badge.
-                Text("Beta").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .accessibilityLabel("Beta")
-                Spacer(minLength: 0)
-            }
-            let folders = CommsInboxScope.folders(section)
-            if folders.count > 1 {
-                ThorbisMenu(items: folders.map { item in
-                    ThorbisMenuItem(item.title, icon: item.symbol, isSelected: item == folder) { folder = item }
-                }, accessibilityLabel: "Folder, \(folder.title)") {
-                    // The folder's icon keeps "Inbox" here from reading as a second title.
-                    HStack(spacing: 6) {
-                        Image(systemName: folder.symbol).font(.system(size: min(folderGlyph, 28), weight: .medium)).foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                        Text(folder.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
-                        Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("inbox-folder-menu")
-            } else {
-                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(minHeight: 32, alignment: .leading)
-            }
+    /// Paper 49N: "Messages" (34/40 Bold) 20 in, 2 under it one 15 muted line ("3 unread"), then
+    /// 14 to the search field, then 16 to the one row of filter chips (where Paper draws its
+    /// segments; there is no team chat, so there is no Team).
+    private func header(unread: String?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaperPageTitle(title: "Messages", subtitle: unread ?? moreFilter?.title)
+            PaperSearchBar(placeholder: "Search or ask", chips: moreChips) { EmptyView() }
+                .paperCardMargin()
+                .padding(.top, 14)
+            chipRow
+                .padding(.top, 14)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
     }
 
-    private var subtitle: String {
-        section == .notices ? "Booked, changed and assigned jobs" : section.title
+    /// One row of chips, one on at a time; it scrolls sideways when large text needs the room.
+    private var chipRow: some View {
+        ScrollViewReader { reader in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(CommsInboxFilter.available(access)) { item in
+                        PaperChoiceChip(title: item.title, isOn: moreFilter == nil && chip == item) { choose(item) }
+                            .id(item)
+                            .accessibilityIdentifier("inbox-filter-\(item.rawValue)")
+                            .accessibilityHint("Shows \(item == .all ? "everything in Messages" : item.title.lowercased())")
+                    }
+                }
+                .padding(.horizontal, PaperCardMetrics.margin)
+            }
+            .scrollClipDisabled()
+            // The chip that is on is always in sight, the last one included.
+            .onAppear { reader.scrollTo(chip) }
+            .onChange(of: chip) { _, next in withAnimation(.snappy) { reader.scrollTo(next) } }
+        }
+        .accessibilityIdentifier("inbox-filters")
+    }
+
+    /// The "…" lens, inside the search field as a chip whose × goes back to All.
+    private var moreChips: [PaperFilterChip] {
+        guard let moreFilter else { return [] }
+        return [PaperFilterChip(id: "inbox-more-\(moreFilter.rawValue)", title: moreFilter.title) { choose(.all) }]
+    }
+
+    /// The header's "…": marking the job notices read, then the rarer lenses the chips leave out.
+    private var moreMenu: some View {
+        var items: [ThorbisMenuItem] = []
+        if access.notices && model.canMarkNoticesRead {
+            // The notices API acknowledges the job notices only; calls and texts keep their own
+            // read state on this phone, so the row says what it marks.
+            items.append(ThorbisMenuItem(model.readCursor == nil ? "Mark all notices read" : "Continue marking read",
+                                         icon: "checkmark", isDisabled: model.noticesLoading) {
+                Task { await model.markNoticesRead(api: api) }
+            })
+        }
+        let lenses = CommsInboxMoreFilter.available(access)
+        for item in lenses where !item.isFolder {
+            items.append(ThorbisMenuItem(item.title, icon: item.symbol, isSelected: moreFilter == item,
+                                         startsGroup: item == lenses.first && !items.isEmpty) { choose(item) })
+        }
+        for item in lenses where item.isFolder {
+            items.append(ThorbisMenuItem(item.title, icon: item.symbol, isSelected: moreFilter == item,
+                                         startsGroup: item == lenses.first(where: \.isFolder) && !items.isEmpty) { choose(item) })
+        }
+        return ThorbisMenu(items: items, title: "Messages", accessibilityLabel: "More for Messages", opensOnAppear: Self.previewOpensMore) {
+            CreamCircleLabel(symbol: "ellipsis")
+        }
+        .accessibilityIdentifier("inbox-more-menu")
+    }
+
+    /// "3 unread" across what this chip and folder hold. While older pages are still on the
+    /// server the count can only be a floor ("3+ unread"), and nothing unread is never claimed.
+    private func unreadSummary(_ all: [CommsInboxItem]) -> String? {
+        guard !loading else { return nil }
+        let count = all.filter(isUnread).count
+        let more = folder == .inbox && ((section.showsCalls && access.calls && model.callsCursor != nil)
+            || (section.showsNotices && access.notices && model.noticesCursor != nil))
+        if count > 0 { return more ? "\(count)+ unread" : "\(count) unread" }
+        return more || all.isEmpty ? nil : "All caught up"
+    }
+
+    private func isUnread(_ item: CommsInboxItem) -> Bool {
+        switch item {
+        case .calls(let thread):
+            CommsInboxScope.callUnread(thread, flags: local.callFlags[thread.id] ?? CommsThreadFlags(), seen: model.seenIDs)
+        case .local(let thread): thread.unread
+        case .notice(let notice): !notice.read
+        }
     }
 
     @ViewBuilder private var composeButton: some View {
-        let label = PaperCircleLabel(symbol: "square.and.pencil", size: 36, fill: Theme.card, bordered: true)
+        // Paper v2: the brand + circle starts a conversation.
+        let label = CreamCircleLabel(symbol: "plus", ink: true)
         switch section {
         case .texts:
             Button { composing = .text } label: { label }.buttonStyle(PressStyle()).accessibilityLabel("New text")
@@ -307,15 +359,19 @@ struct CommsInboxView: View {
 
     // MARK: Content
 
-    @ViewBuilder private var content: some View {
-        ListViewBar(options: CommsInboxScope.filters(section).map(\.rawValue), selection: $filter)
+    @ViewBuilder private func content(_ list: [CommsInboxItem]) -> some View {
         if section.showsCalls, let error = model.callsError {
             ErrorBanner(message: error) { await model.refreshCalls(api: api) }
         }
         if section.showsNotices, access.notices, let error = model.noticesError {
             ErrorBanner(message: error) { await model.refreshNotices(api: api) }
         }
-        let list = items
+        if local.storageBlocked {
+            Text("Inbox storage could not be confirmed. Reopen the app and check drafts before making changes.")
+                .font(Theme.font(13)).foregroundStyle(Theme.warning)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Theme.gutter).padding(.top, 12)
+        }
         if loading && list.isEmpty { ListRoomSkeleton(count: 6, threeLines: false) }
         rows(list)
         more
@@ -333,31 +389,80 @@ struct CommsInboxView: View {
         (section.showsCalls && access.calls && !model.callsLoaded) || (section.showsNotices && access.notices && !model.noticesLoaded)
     }
 
-    private var items: [CommsInboxItem] {
-        CommsInboxScope.items(section: section, folder: folder, filter: quickFilter,
+    /// Everything the chip's section and folder hold, newest first, before the quick filter; the
+    /// header's unread count and the list both come from this one read.
+    private var scoped: [CommsInboxItem] {
+        CommsInboxScope.items(section: section, folder: folder, filter: .all,
                               calls: access.calls && !model.callsDenied ? model.threads : [],
                               local: access.workspace ? local.threads : [],
                               notices: access.notices ? model.notices : [],
                               callFlags: local.callFlags, seen: model.seenIDs)
     }
 
+    /// `CommsInboxScope.items`' quick filter, applied to the already-scoped list.
+    private func matchesQuickFilter(_ item: CommsInboxItem) -> Bool {
+        switch (quickFilter, item) {
+        case (.all, _): true
+        case (.unread, _): isUnread(item)
+        case (.needsReply, .calls): true  // a call is from the caller: it waits on a reply (web threadNeedsReply)
+        case (.needsReply, .local(let thread)): thread.needsReply
+        case (.starred, .calls(let thread)): local.callFlags[thread.id]?.starredAt != nil
+        case (.starred, .local(let thread)): thread.flags.starredAt != nil
+        case (.needsReply, .notice), (.starred, .notice): false
+        }
+    }
+
+    /// Paper 49N: one 13 Semibold label ("Recent") over one card of rows, a hairline between them;
+    /// each row carries its own day ("9:38 AM", "Mon", "Jul 28"). The rows sit straight in the
+    /// page's lazy stack as slices of that card, so only the ones on screen are built.
     @ViewBuilder private func rows(_ list: [CommsInboxItem]) -> some View {
-        let displayCalendar = calendarWithTimeZone
-        ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
-            let raw = item.at(in: section)
-            let heading = InboxNoticeDay.header(raw, after: index > 0 ? list[index - 1].at(in: section) : nil,
-                                                hasPrevious: index > 0, calendar: displayCalendar, locale: locale)
-            if let heading {
-                ListGroupLabel(title: dayLabel(heading, raw: raw, calendar: displayCalendar, item: item), first: index == 0)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("inbox-day-heading")
-            }
-            switch item {
-            case .calls(let thread): callRow(thread)
-            case .local(let thread): localRow(thread)
-            case .notice(let notice): noticeRow(notice)
+        if !list.isEmpty {
+            PaperCardLabel(title: folder == .inbox ? "Recent" : folder.title)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("inbox-day-heading")
+                .padding(.top, 20)
+            let jobs = linkedJobs(list)
+            let last = list.count - 1
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
+                VStack(spacing: 0) {
+                    if index > 0 { WellDivider(leading: 0) }
+                    switch item {
+                    case .calls(let thread): callRow(thread, context: callContext(thread, jobs: jobs))
+                    case .local(let thread): localRow(thread)
+                    case .notice(let notice): noticeRow(notice)
+                    }
+                }
+                .paperRowsCardSlice(first: index == 0, last: index == last)
             }
         }
+    }
+
+    /// The jobs the listed calls are linked to, read from the store in one pass (never per row).
+    private func linkedJobs(_ list: [CommsInboxItem]) -> [String: Job] {
+        var wanted = Set<String>()
+        for item in list {
+            if case .calls(let thread) = item, let id = thread.calls.first(where: { $0.jobId != nil })?.jobId { wanted.insert(id) }
+        }
+        guard !wanted.isEmpty else { return [:] }
+        var found: [String: Job] = [:]
+        for job in store.jobs where wanted.contains(job.id) && found[job.id] == nil {
+            found[job.id] = job
+            if found.count == wanted.count { break }
+        }
+        return found
+    }
+
+    /// Paper 49N's third line for a caller: the job the call is linked to and where it stands
+    /// ("AC not cooling · On the way"); a number nobody knows yet says so.
+    private func callContext(_ thread: CommsCallThread, jobs: [String: Job]) -> String? {
+        if let id = thread.calls.first(where: { $0.jobId != nil })?.jobId {
+            guard let job = jobs[id] else { return nil }
+            return "\(job.title) \u{00B7} \(job.status.statusLabel)"
+        }
+        if thread.calls.allSatisfy({ ($0.customerId ?? "").isEmpty && ($0.callerName ?? "").isEmpty }) {
+            return "New caller \u{00B7} no job yet"
+        }
+        return nil
     }
 
     /// Archive (or back to the inbox) on the leading side, star on the trailing side; the thread's
@@ -374,7 +479,7 @@ struct CommsInboxView: View {
         return ([move], [star])
     }
 
-    private func callRow(_ thread: CommsCallThread) -> some View {
+    private func callRow(_ thread: CommsCallThread, context: String?) -> some View {
         let flags = local.callFlags[thread.id] ?? CommsThreadFlags()
         let unread = CommsInboxScope.callUnread(thread, flags: flags, seen: model.seenIDs)
         let alert = thread.alert(seen: model.seenIDs, in: section)
@@ -382,9 +487,11 @@ struct CommsInboxView: View {
         let swipe = swipeActions(thread.id, name: thread.name)
         return RowSwipeContainer(id: thread.id, leading: swipe.leading, trailing: swipe.trailing, state: swipes) {
             Button { open = .calls(thread.id) } label: {
-                CommsThreadRow(thread: thread, section: section, unread: unread, alert: alert, starred: flags.starredAt != nil)
+                CommsThreadRow(thread: thread, section: section, unread: unread, alert: alert, starred: flags.starredAt != nil,
+                               context: context)
             }
             .buttonStyle(RowPressStyle())
+            .background(Theme.card)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel([thread.name, thread.calls.count > 1 ? "\(thread.calls.count) calls" : nil,
                                  alert, thread.line(in: section),
@@ -403,6 +510,7 @@ struct CommsInboxView: View {
         return RowSwipeContainer(id: thread.id, leading: swipe.leading, trailing: swipe.trailing, state: swipes) {
             Button { open = .local(thread.id) } label: { CommsLocalRow(thread: thread, folder: folder) }
                 .buttonStyle(RowPressStyle())
+                .background(Theme.card)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel([thread.contactName, thread.channel == .email ? "Email" : "Text", thread.line(in: folder),
                                      JobFiltering.date(thread.latestAt)?.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)),
@@ -427,6 +535,7 @@ struct CommsInboxView: View {
                 CommsNoticeRow(notice: notice)
             }
             .buttonStyle(RowPressStyle())
+            .background(Theme.card)
             .accessibilityElement(children: .combine)
             .accessibilityLabel([notice.title, notice.meta, spokenTime(notice.at), notice.read ? "Read" : "Unread"]
                 .filter { !$0.isEmpty }.joined(separator: ", "))
@@ -455,67 +564,57 @@ struct CommsInboxView: View {
         .padding(.top, 12)
     }
 
-    /// Each empty view says why it is empty (web inbox ListEmpty, one reason each).
+    /// Each empty view says why it is empty (web inbox ListEmpty, one reason each), with the
+    /// chip's own glyph.
     @ViewBuilder private var empty: some View {
-        let name = section == .all ? "the Inbox" : section.title
-        if section == .calls || section == .voicemail, model.callsDenied {
-            ListRoomEmpty(title: "Calls are for the office.",
+        if section == .calls, model.callsDenied {
+            ListRoomEmpty(symbol: "lock", title: "Calls are for the office",
                           message: "The call log needs access to every customer. A call linked to your job shows on the job.")
-        } else if (section == .calls || section == .voicemail), model.callsError != nil {
+        } else if section == .calls, model.callsError != nil {
             EmptyView()
-        } else if quickFilter != .all {
-            switch quickFilter {
-            case .unread: ListRoomEmpty(title: "Nothing unread.", message: "All shows everything in \(folder.title).")
-            case .needsReply: ListRoomEmpty(title: "Nothing needs a reply.", message: "You answered last everywhere in \(folder.title).")
-            default: ListRoomEmpty(title: "Nothing starred.", message: "Star a conversation from its menu or by swiping left on it.")
-            }
-        } else {
-            switch folder {
-            case .drafts:
-                ListRoomEmpty(title: "No drafts.", message: "A text or email you save without sending waits here, on this device.")
+        } else if let moreFilter {
+            switch moreFilter {
+            case .needsReply:
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing needs a reply", message: "You answered last everywhere in Messages.")
+            case .starred:
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing starred", message: "Star a conversation from its menu or by swiping left on it.")
             case .sent:
-                ListRoomEmpty(title: "Nothing sent yet.",
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing sent yet",
                               message: "What you send collects here. Until a text or email provider is connected, a message waits instead of going out, and says so.")
             case .archive:
-                ListRoomEmpty(title: "Nothing archived.", message: "Archived conversations in \(name) wait here until you move them back.")
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing archived", message: "Archived conversations wait here until you move them back.")
             case .bin:
-                ListRoomEmpty(title: "The bin is empty.", message: "Binned conversations wait here. Nothing empties on its own.")
-            case .inbox:
-                switch section {
-                case .calls:
-                    ListRoomEmpty(title: "No calls yet.", message: "Calls to your business number land here with a recording and a summary.")
-                case .voicemail:
-                    ListRoomEmpty(title: "No voicemail.",
-                                  message: "Thorbis records calls from when they\u{2019}re answered, so it doesn\u{2019}t take voicemail yet. Calls nobody answered show as missed calls.")
-                case .texts:
-                    ListRoomEmpty(title: "No texts.", message: "Start a text from a customer or with the pencil above. Drafts stay on this device.",
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "The bin is empty", message: "Binned conversations wait here. Nothing empties on its own.")
+            }
+        } else {
+            switch chip {
+            case .unread:
+                ListRoomEmpty(symbol: "checkmark.circle", title: "No unread messages", message: "You\u{2019}re all caught up. All shows everything in Messages.")
+            case .calls:
+                ListRoomEmpty(symbol: "phone", title: "No calls yet", message: "Calls to your business number land here with a recording and a summary.")
+            case .texts:
+                ListRoomEmpty(symbol: "bubble.left", title: "No texts yet", message: "Start a text from a customer or with the + above. Drafts stay on this device.",
+                              actionTitle: "New text") { composing = .text }
+            case .email:
+                ListRoomEmpty(symbol: "envelope", title: "No email yet", message: "New mail lands here when an email account is connected.",
+                              actionTitle: "New email") { composing = .email }
+            case .drafts:
+                ListRoomEmpty(symbol: "square.and.pencil", title: "No drafts",
+                              message: "A text or email you save without sending waits here, on this device.")
+            case .all:
+                // A first visit is usually empty: point at the way in rather than only explain.
+                if access.workspace {
+                    ListRoomEmpty(title: "Nothing waiting",
+                                  message: "Calls, texts, email and job notices land here. Text on a customer or job opens their conversation here too.",
                                   actionTitle: "New text") { composing = .text }
-                case .email:
-                    ListRoomEmpty(title: "No email waiting.", message: "New mail lands here when an email account is connected.",
-                                  actionTitle: "New email") { composing = .email }
-                case .notices:
-                    ListRoomEmpty(title: "No notices yet.", message: "New assignments and job changes land here.")
-                case .all:
-                    // A first visit is usually empty: point at the way in rather than only explain.
-                    if access.workspace {
-                        ListRoomEmpty(title: "Nothing waiting.",
-                                      message: "Calls, texts, email and job notices land here. Text on a customer or job opens their conversation here too.",
-                                      actionTitle: "New text") { composing = .text }
-                    } else {
-                        ListRoomEmpty(title: "Nothing waiting.", message: "Calls, texts, email and job notices land here as they come in.")
-                    }
+                } else {
+                    ListRoomEmpty(title: "Nothing waiting", message: "Calls, texts, email and job notices land here as they come in.")
                 }
             }
         }
     }
 
     // MARK: Time words
-
-    private var calendarWithTimeZone: Calendar {
-        var result = calendar
-        result.timeZone = timeZone
-        return result
-    }
 
     private func timeLabel(_ raw: String?) -> String {
         guard let raw, let date = JobFiltering.date(raw) else { return "" }
@@ -525,14 +624,6 @@ struct CommsInboxView: View {
     private func spokenTime(_ raw: String?) -> String {
         guard let raw, let date = JobFiltering.date(raw) else { return "" }
         return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
-    }
-
-    private func dayLabel(_ heading: String, raw: String?, calendar: Calendar, item: CommsInboxItem) -> String {
-        if case .local = item, raw == nil { return "New" }
-        guard let date = JobFiltering.date(raw) else { return heading }
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
-        return heading
     }
 
     // MARK: Screenshot flags
@@ -556,15 +647,40 @@ struct CommsInboxView: View {
         #endif
     }
 
-    /// `--paper-preview-inbox-section calls|voicemail|texts|email|notices`.
-    private static func previewSection(_ access: CommsInboxAccess) -> CommsInboxSection? {
-        guard let raw = previewArgument("--paper-preview-inbox-section"), let section = CommsInboxSection(rawValue: raw),
-              access.sections.contains(section) else { return nil }
-        return section
+    /// `--paper-preview-inbox-section calls|voicemail|texts|email|notices` and
+    /// `--paper-preview-inbox-folder drafts|sent|archive|bin`, from before the chips: each opens
+    /// on the chip (or "…" lens) that shows the same rows. Voicemail is part of Calls; job notices
+    /// are part of All (their own list is Notifications).
+    private static func previewScope(_ access: CommsInboxAccess) -> (chip: CommsInboxFilter, more: CommsInboxMoreFilter?) {
+        let chips = CommsInboxFilter.available(access)
+        var chip = CommsInboxFilter.all
+        switch previewArgument("--paper-preview-inbox-section") {
+        case "calls", "voicemail": chip = .calls
+        case "texts": chip = .texts
+        case "email": chip = .email
+        default: break
+        }
+        if let raw = previewArgument("--paper-preview-inbox-filter"), let named = CommsInboxFilter(rawValue: raw) { chip = named }
+        var more: CommsInboxMoreFilter?
+        switch previewArgument("--paper-preview-inbox-folder").flatMap(CommsFolder.init(rawValue:)) {
+        case .drafts?: chip = .drafts
+        case .sent?: more = .sent
+        case .archive?: more = .archive
+        case .bin?: more = .bin
+        default: break
+        }
+        if more != nil && !CommsInboxMoreFilter.available(access).contains(more!) { more = nil }
+        return (chips.contains(chip) ? chip : .all, more)
     }
 
-    /// `--paper-preview-inbox-folder drafts|sent|archive|bin`.
-    private static var previewFolder: CommsFolder? { previewArgument("--paper-preview-inbox-folder").flatMap(CommsFolder.init(rawValue:)) }
+    /// `--paper-preview-inbox-more`: opens the header's "…" for a screenshot.
+    private static var previewOpensMore: Bool {
+        #if DEBUG
+        return PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-more")
+        #else
+        return false
+        #endif
+    }
 
     /// `--paper-preview-inbox-thread calls|text|email`: opens that sample conversation.
     private static func previewOpen(_ threads: [CommsCallThread]) -> CommsOpen? {
@@ -585,140 +701,262 @@ enum CommsOpen: Hashable {
 
 
 
-/// A caller's row (web rows.tsx CallRow): the avatar with its channel badge, the name (Medium
-/// while unread), how many calls, the compact age and the unread dot; then what happened and
-/// what was said. A missed call or voicemail nobody opened carries its word and dot.
+/// Paper v2 section: a 13 Semibold muted label 8 above one card (radius 20), 16 from the screen's
+/// edges and 20 below the section before it.
+struct CommsDayCard<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+        VStack(alignment: .leading, spacing: 0) {
+            if !title.isEmpty {
+                Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("inbox-day-heading")
+                    .padding(.horizontal, 4).padding(.bottom, 8)
+            }
+            VStack(alignment: .leading, spacing: 0) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: shape)
+                .clipShape(shape)
+        }
+        .padding(.horizontal, 16).padding(.top, 16)
+    }
+}
+
+// MARK: - Rows
+
+/// How a row's 40pt circle reads (Paper 49N): unread in brand, a missed call nobody opened in
+/// the warning hue, the rest quiet.
+enum CommsAvatarTone {
+    case quiet, unread, alert
+
+    var fill: Color {
+        switch self {
+        case .quiet: Theme.fill
+        case .unread: Theme.brandSurface
+        case .alert: Theme.warningSurface
+        }
+    }
+
+    var ink: Color {
+        switch self {
+        case .quiet: Theme.subtle
+        case .unread: Theme.brandText
+        case .alert: Theme.warning
+        }
+    }
+}
+
+/// Paper 49N's row frame: an 8pt lane for the unread dot, the 40pt circle, then the words; 14
+/// above and below, on the card. At accessibility sizes the circle steps aside for the words.
+struct CommsRowShell<Avatar: View, Content: View>: View {
+    let unread: Bool
+    @ViewBuilder var avatar: Avatar
+    @ViewBuilder var content: Content
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle().fill(unread ? Theme.brand : .clear).frame(width: 8, height: 8)
+                .padding(.top, 16)
+                .frame(width: 8)
+                .accessibilityHidden(true)
+            if !typeSize.isAccessibilitySize { avatar }
+            VStack(alignment: .leading, spacing: 2) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.leading, 8).padding(.trailing, 14).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        // No fill here: the row's button sits on `Theme.card` so its press tint shows over it.
+        .contentShape(Rectangle())
+    }
+}
+
+/// A row's first line: the name (Semibold while unread), how many, the star, and the time, in
+/// brand while unread.
+struct CommsRowTitle: View {
+    let name: String
+    let time: String
+    let unread: Bool
+    var count: Int? = nil
+    var starred = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        // At the largest text sizes the time drops under the name, so the name keeps the row's width.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        return layout {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(name).font(Theme.font(16, weight: unread ? .semibold : .medium))
+                    .foregroundStyle(Theme.foreground)
+                    .lineLimit(stacked ? 2 : 1)
+                if let count, count > 1 {
+                    Text("\(count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                if starred {
+                    Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
+                        .accessibilityHidden(true)
+                }
+            }
+            if !stacked { Spacer(minLength: 8) }
+            Text(time).font(Theme.font(13, weight: unread ? .semibold : .regular))
+                .foregroundStyle(unread ? Theme.brandText : Theme.subtleForeground)
+                .fixedSize()
+        }
+    }
+}
+
+/// Paper 49N: the time of day today ("9:38 AM"), then the day ("Mon"), then the date ("Jul 28").
+private func commsRowTime(_ raw: String?, now: Date = .now, calendar: Calendar = .current) -> String {
+    guard let date = JobFiltering.date(raw) else { return "" }
+    if calendar.isDate(date, inSameDayAs: now) { return date.tradeTime }
+    let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0
+    if days == 1 { return "Yesterday" }
+    if days > 1 && days < 7 { return date.formatted(.dateTime.weekday(.abbreviated)) }
+    return date.formatted(.dateTime.month(.abbreviated).day())
+}
+
+/// A caller's row (web rows.tsx CallRow, Paper 49N): the dot, the caller's circle, the name and
+/// time; then what happened with its glyph (a missed call in red) and what was said. A missed call
+/// or voicemail nobody opened carries its word under it.
 struct CommsThreadRow: View {
     let thread: CommsCallThread
     let section: CommsInboxSection
     let unread: Bool
     let alert: String?
     var starred = false
+    /// The linked job and where it stands, or "New caller · no job yet".
+    var context: String? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
         let lead = thread.lead(in: section)
-        HStack(alignment: .top, spacing: 12) {
-            if !stacked { CommsAvatar(initials: thread.initials, symbol: lead.kind == .voicemail ? "recordingtape" : "phone.fill") }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(thread.name).font(Theme.font(15, weight: unread ? .medium : .regular))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(stacked ? nil : 1)
-                    if thread.calls.count > 1 {
-                        Text("\(thread.calls.count)").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                    }
-                    if starred {
-                        Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
-                    }
-                    Spacer(minLength: 8)
-                    Text(CommsAge.compact(lead.startedAt)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                        .fixedSize()
-                    Circle().fill(unread ? Theme.brand : .clear).frame(width: 7, height: 7)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                }
-                // The status word sits under the line, not beside it, so a voicemail's words get
-                // the full width instead of half of it.
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Image(systemName: lead.kind.symbol).font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(lead.kind == .missed || lead.kind == .dropped ? Theme.destructive : Theme.muted)
-                        Text(thread.line(in: section, alerted: alert != nil)).font(Theme.font(14))
-                            .foregroundStyle(unread ? Theme.foreground : Theme.muted)
-                            // The thread holds the rest; a long summary shouldn't fill the screen.
-                            .lineLimit(stacked ? 4 : 2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    if let alert {
-                        StatusLabel(tone: lead.kind == .voicemail ? .dispatched : .attention, word: alert, emphasis: .quiet)
-                            .fixedSize()
-                    }
-                }
+        let missed = lead.kind == .missed || lead.kind == .dropped
+        let tone: CommsAvatarTone = unread ? (alert != nil && lead.kind == .missed ? .alert : .unread) : .quiet
+        CommsRowShell(unread: unread) {
+            CommsAvatar(initials: thread.initials, symbol: lead.kind == .voicemail ? "recordingtape" : "phone.fill",
+                        tone: tone, badge: false)
+        } content: {
+            CommsRowTitle(name: thread.name, time: commsRowTime(lead.startedAt), unread: unread,
+                          count: thread.calls.count, starred: starred)
+            // Paper 49N: "Missed call · voicemail 0:42" behind a 14pt handset, red when missed.
+            HStack(alignment: .center, spacing: 6) {
+                PaperIcon(.phone, size: 14, color: missed ? Theme.destructive : Theme.muted)
+                Text(thread.line(in: section)).font(Theme.font(15))
+                    .foregroundStyle(unread ? Theme.foreground : Theme.muted)
+                    // The thread holds the rest; a long summary shouldn't fill the screen.
+                    .lineLimit(stacked ? 4 : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let context {
+                Text(context).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                    .lineLimit(stacked ? nil : 1)
             }
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 
-/// A job notice in the inbox, laid out like the call and message rows around it: a round mark in
-/// the avatar column (a job, not a person), the title with its age and dot, the job under it.
+/// A job notice (Paper 77, and in Messages beside the conversations): the dot, a bell on brand
+/// while unread, what happened with its time, then the job it is about.
 struct CommsNoticeRow: View {
     let notice: StaffNotice
+    /// Paper 77: how long ago ("12m", "1h", "yesterday") in place of the time of day, for a list
+    /// with no day labels. Messages keeps the time of day under its day labels.
+    var relativeTime = false
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// "now", "12m", "3h", "yesterday", "4d", then the date ("Jun 15"). Empty when there is no time.
+    static func relative(_ raw: String?, now: Date = .now, calendar: Calendar = .current) -> String {
+        guard let date = JobFiltering.date(raw) else { return "" }
+        let seconds = now.timeIntervalSince(date)
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
+                                           to: calendar.startOfDay(for: now)).day ?? 0
+        if days <= 0 { return "\(Int(seconds / 3600))h" }
+        if days == 1 { return "yesterday" }
+        if days < 7 { return "\(days)d" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
         let unread = !notice.read
-        HStack(alignment: .top, spacing: 12) {
-            if !stacked {
-                Image(systemName: "wrench.and.screwdriver").font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.subtle)
-                    .frame(width: 36, height: 36).background(Theme.fill, in: Circle())
-                    .accessibilityHidden(true)
+        let time = relativeTime ? Self.relative(notice.at) : commsRowTime(notice.at)
+        CommsRowShell(unread: unread) {
+            Image(systemName: "bell").font(.system(size: 15, weight: .medium))
+                .foregroundStyle(unread ? Theme.brand : Theme.muted)
+                .frame(width: 40, height: 40)
+                .background(unread ? Theme.brandSurface : Theme.fill, in: Circle())
+                .accessibilityHidden(true)
+        } content: {
+            let head = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+            head {
+                Text(notice.title).font(Theme.font(16, weight: unread ? .semibold : .regular))
+                    .foregroundStyle(unread ? Theme.foreground : Theme.muted)
+                    .lineLimit(stacked ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !stacked { Spacer(minLength: 8) }
+                Text(time).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted).fixedSize()
             }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(notice.title).font(Theme.font(15, weight: unread ? .medium : .regular))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(stacked ? nil : 1)
-                    Spacer(minLength: 8)
-                    Text(CommsAge.compact(notice.at)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted).fixedSize()
-                    Circle().fill(unread ? Theme.brand : .clear).frame(width: 7, height: 7)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                }
-                if !notice.meta.isEmpty {
-                    Text(notice.meta).font(Theme.font(14)).foregroundStyle(unread ? Theme.foreground : Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if !notice.meta.isEmpty {
+                Text(notice.meta).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .lineLimit(stacked ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 
-/// A caller's initials (or a person) on the fill, with the channel's glyph on a small badge.
+/// A person's initials (or a person glyph) in a circle. On a row it is 40pt and toned (Paper
+/// 49N); a conversation's header keeps the channel's glyph on a small badge.
 struct CommsAvatar: View {
     let initials: String?
     let symbol: String
-    var size: CGFloat = 36
+    var size: CGFloat = 40
+    var tone: CommsAvatarTone = .quiet
+    var badge = true
 
     var body: some View {
         ZStack {
-            Circle().fill(Theme.fill)
+            Circle().fill(tone.fill)
             if let initials {
                 // The circle is a fixed size, so its letters can't follow Dynamic Type past it
                 // or the channel badge covers them.
-                Text(initials).font(Theme.font(size * 0.36, weight: .medium)).foregroundStyle(Theme.subtle)
+                Text(initials).font(Theme.font(size > 44 ? 17 : 14, weight: .semibold)).foregroundStyle(tone.ink)
                     .lineLimit(1).minimumScaleFactor(0.6)
                     .dynamicTypeSize(...DynamicTypeSize.large)
-                    .offset(x: -1, y: -1)
+                    .offset(x: badge ? -1 : 0, y: badge ? -1 : 0)
             } else {
-                Image(systemName: "person.fill").font(.system(size: size * 0.42)).foregroundStyle(Theme.muted)
+                Image(systemName: "person.fill").font(.system(size: size * 0.4)).foregroundStyle(tone.ink)
             }
         }
         .frame(width: size, height: size)
         .overlay(alignment: .bottomTrailing) {
-            Image(systemName: symbol).font(.system(size: size * 0.22, weight: .semibold))
-                .foregroundStyle(Theme.muted)
-                .frame(width: size * 0.42, height: size * 0.42)
-                .background(Theme.card, in: Circle())
-                .overlay(Circle().stroke(Theme.background, lineWidth: 1.5))
-                .offset(x: 5, y: 5)
+            if badge {
+                Image(systemName: symbol).font(.system(size: size * 0.22, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: size * 0.42, height: size * 0.42)
+                    .background(Theme.card, in: Circle())
+                    .overlay(Circle().stroke(Theme.background, lineWidth: 1.5))
+                    .offset(x: 5, y: 5)
+            }
         }
         .accessibilityHidden(true)
     }
 }
 
-/// A text or email conversation's row (web TextRow / EmailRow): the avatar with its channel
-/// badge, the name (Medium while unread), the compact age and the dot; then the newest line, or
-/// an email's subject. Ours and unsent says so ("Draft:", "Queued:").
+/// A text or email conversation's row (web TextRow / EmailRow, Paper 49N): the dot, the circle,
+/// the name and time; then the channel's glyph and the newest line, or an email's subject. Ours
+/// and unsent says so ("Draft:", "Queued:").
 struct CommsLocalRow: View {
     let thread: CommsLocalThread
     var folder: CommsFolder = .inbox
@@ -726,33 +964,26 @@ struct CommsLocalRow: View {
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
-        HStack(alignment: .top, spacing: 12) {
-            if !stacked { CommsAvatar(initials: thread.initials, symbol: thread.channel == .email ? "envelope.fill" : "bubble.left.fill") }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(thread.contactName).font(Theme.font(15, weight: thread.unread ? .medium : .regular))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(stacked ? nil : 1)
-                    if thread.channel == .email && thread.messages.count > 1 {
-                        Text("\(thread.messages.count)").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                    }
-                    if thread.flags.starredAt != nil {
-                        Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
-                    }
-                    Spacer(minLength: 8)
-                    Text(CommsAge.compact(thread.latestAt)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                        .fixedSize()
-                    Circle().fill(thread.unread ? Theme.brand : .clear).frame(width: 7, height: 7)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+        let email = thread.channel == .email
+        CommsRowShell(unread: thread.unread) {
+            CommsAvatar(initials: thread.initials, symbol: email ? "envelope.fill" : "bubble.left.fill",
+                        tone: thread.unread ? .unread : .quiet, badge: false)
+        } content: {
+            CommsRowTitle(name: thread.contactName, time: commsRowTime(thread.latestAt), unread: thread.unread,
+                          count: email ? thread.messages.count : nil, starred: thread.flags.starredAt != nil)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // Paper 49N: a text is its words alone; an email keeps its envelope so it reads apart.
+                if email {
+                    Image(systemName: "envelope").font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                        .accessibilityHidden(true)
                 }
-                Text(thread.line(in: folder)).font(Theme.font(14))
+                Text(thread.line(in: folder)).font(Theme.font(15))
                     .foregroundStyle(thread.unread ? Theme.foreground : Theme.muted)
-                    .lineLimit(stacked ? 4 : 2)
+                    .lineLimit(stacked ? 4 : 1)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }

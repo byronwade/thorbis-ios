@@ -129,6 +129,21 @@ struct SavedCopyNote: View {
     }
 }
 
+/// "Checking for changes" under a saved copy while the live read is on its way.
+struct CheckingForChangesNote: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text("Saved on this phone \u{00B7} checking for changes")
+        }
+        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.gutter).padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("saved-copy-checking")
+    }
+}
+
 extension APIClient {
     /// Customer names read six at a time (a technician's schedule refresh used to read up to 40
     /// one after another). Unreadable ones are left out, as before.
@@ -151,7 +166,7 @@ extension APIClient {
 
     private func customerName(_ id: String) async -> Customer? {
         guard let record = try? await fieldCustomer(id) else { return nil }
-        return Customer(id: record.id, name: record.name, archived: nil, createdAt: nil)
+        return Customer(id: record.id, name: record.name, archived: nil, createdAt: nil, address: record.address)
     }
 }
 
@@ -159,13 +174,13 @@ extension APIClient {
     /// For reads that feed a customer's signature, a payment or an edit: a copy saved on this phone
     /// is refused as if there were no signal, so those flows only ever act on a live answer.
     func liveFieldEstimate(_ id: String) async throws -> EstimateRecord {
-        let record = try await fieldEstimate(id)
+        let record = try await SavedCopies.$liveOnly.withValue(true) { try await fieldEstimate(id) }
         try requireLive("/v1/estimates/\(id)")
         return record
     }
 
     func liveFieldInvoice(_ id: String) async throws -> InvoiceRecord {
-        let record = try await fieldInvoice(id)
+        let record = try await SavedCopies.$liveOnly.withValue(true) { try await fieldInvoice(id) }
         try requireLive("/v1/invoices/\(id)")
         return record
     }
@@ -179,9 +194,11 @@ extension APIClient {
     /// The job's estimate links for a signature's membership check: a copy saved on this phone
     /// (served when the read drops) must never stand in for the server's answer.
     func liveFieldJobEstimateLinks(_ jobID: String) async throws -> [JobEstimateLink] {
-        let links = try await fieldJobEstimateLinks(jobID)
-        try requireLive("/v1/jobs/\(jobID)/estimates")
-        return links
+        // Every page must bypass local caches, including a 404 compatibility fallback.
+        // The task-local live scope prevents saved-copy fallback on every page.
+        // A shared path marker may belong to a concurrent ordinary read and is not
+        // provenance for this request, so it must not reject this live result.
+        return try await SavedCopies.$liveOnly.withValue(true) { try await fieldJobEstimateLinks(jobID) }
     }
 
     private func requireLive(_ path: String) throws {

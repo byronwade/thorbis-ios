@@ -58,12 +58,14 @@ final class RouteBodyTests: XCTestCase {
 
     func testRoleReviseSendsGrantsWithoutTheRoleId() async throws {
         let roleID = "00000000-0000-4000-8000-000000000777"
-        let reply = #"{"role":{"id":"\#(roleID)","currentRevision":6},"revision":{"name":"Tech","description":"","grants":[]}}"#
+        // The server answers the role's identity at its new version, not the role with its grants.
+        let reply = #"{"id":"\#(roleID)","organizationId":"00000000-0000-4000-8000-000000000001","currentRevision":6,"createdAt":"2026-11-01T10:00:00.000Z","updatedAt":"2026-11-21T10:00:00.000Z"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
         let grants = [RoleGrant(capability: "estimate.discount", scope: "assigned", conditions: ["maxDiscountPercent": 10]),
                       RoleGrant(capability: "invoice.refund", scope: "organization", effect: "deny")]
         let saved = try await client.reviseOrganizationRole(roleID, expectedRevision: 5, name: "Tech", description: "", grants: grants)
-        XCTAssertEqual(saved.role.currentRevision, 6)
+        XCTAssertEqual(saved.id, roleID)
+        XCTAssertEqual(saved.currentRevision, 6)
         let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
         XCTAssertEqual(request.url?.path, "/v1/organization/roles/\(roleID)/revise")
         let body = try json(request.body)
@@ -73,6 +75,21 @@ final class RouteBodyTests: XCTestCase {
         XCTAssertEqual(sent.count, 2)
         XCTAssertEqual((sent[0]["conditions"] as? [String: Int])?["maxDiscountPercent"], 10)
         XCTAssertEqual(sent[1]["effect"] as? String, "deny")
+    }
+
+    func testRoleCreateReadsTheNewRoleFromTheFlatReply() async throws {
+        let roleID = "00000000-0000-4000-8000-000000000778"
+        let reply = #"{"id":"\#(roleID)","organizationId":"00000000-0000-4000-8000-000000000001","currentRevision":1,"createdAt":"2026-11-21T10:00:00.000Z","updatedAt":"2026-11-21T10:00:00.000Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(201, reply)]), baseURL: "https://app.thorbis.com")
+        let created = try await client.createOrganizationRole(name: "Estimator", description: "", idempotencyKey: "k-role")
+        XCTAssertEqual(created.id, roleID)
+        XCTAssertEqual(created.currentRevision, 1)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/organization/roles")
+        let body = try json(request.body)
+        XCTAssertEqual(body["name"] as? String, "Estimator")
+        XCTAssertEqual(body["idempotencyKey"] as? String, "k-role")
+        XCTAssertEqual((body["grants"] as? [Any])?.count, 0)
     }
 
     func testPersonOverrideRevokesWithNullPolicyAndTargetsTheMember() async throws {
@@ -96,5 +113,23 @@ final class RouteBodyTests: XCTestCase {
         XCTAssertEqual(invitation.roleLabel, "Technician")
         let body = try json(URLProtocolFixture.recorded.first?.body)
         XCTAssertEqual(body as? [String: String], ["email": "hayley@example.invalid", "role": "technician"])
+    }
+
+    func testARetryOfTheSameChangeKeepsItsKeyUntilTheServerAnswers() {
+        var key = RetryKey<String>()
+        let first = key.key(for: "role-a")
+        key.settle(after: URLError(.timedOut))
+        XCTAssertEqual(key.key(for: "role-a"), first, "A lost answer is retried as the same request")
+        key.settle(after: Problem(title: "Unavailable", status: 503, detail: nil))
+        XCTAssertEqual(key.key(for: "role-a"), first)
+        key.settle(after: Problem(title: "Too many", status: 429, detail: nil))
+        XCTAssertEqual(key.key(for: "role-a"), first)
+        let other = key.key(for: "role-b")
+        XCTAssertNotEqual(other, first, "A different change is a different request")
+        key.settle(after: Problem(title: "Conflict", status: 409, detail: nil))
+        XCTAssertNotEqual(key.key(for: "role-b"), other, "A definite refusal retires the key")
+        let sent = key.key(for: "role-b")
+        key.settle(after: nil)
+        XCTAssertNotEqual(key.key(for: "role-b"), sent, "After a success the same change is a new request")
     }
 }

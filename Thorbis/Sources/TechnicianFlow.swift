@@ -37,7 +37,8 @@ enum TechJobStep: Equatable {
         case .transition(let target):
             switch target {
             case "en_route": "On my way"
-            case "arrived": "Arrive"
+            // Paper F2 "Driving": the commit reads "I've arrived".
+            case "arrived": "I've arrived"
             case "in_progress": resuming ? "Resume work" : "Start work"
             case "dispatched": "Dispatch"
             default: "Mark \(target.statusLabel.lowercased())"
@@ -75,6 +76,8 @@ enum TechJobFlow {
     /// Status steps that move the call forward, in the order they happen. Pause, reschedule and
     /// dispatch-back are never the next step (TF-04); they stay on the job as rows.
     static let forwardSteps = ["en_route", "arrived", "in_progress"]
+    /// How far along the visit each status is. Paused sits with arrived so the bar offers Resume.
+    private static let forwardRank = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "paused": 2, "in_progress": 3]
 
     /// TF-01: the one next step on the job, or nil when nothing is left for the tech.
     /// - Parameters:
@@ -88,7 +91,12 @@ enum TechJobFlow {
         case "in_progress", "completed": break
         default:
             // Before the work starts, the bar walks the visit: on my way, arrived, start (or resume).
-            if let step = forwardSteps.first(where: transitions.contains) { return .transition(step) }
+            // The server also allows stepping back (arrived lists en_route), so only a step
+            // after the current one is the next one: never "On my way" once the tech is there.
+            let reached = forwardRank[status] ?? 0
+            if let step = forwardSteps.first(where: { transitions.contains($0) && (forwardRank[$0] ?? 0) > reached }) {
+                return .transition(step)
+            }
             if transitions.contains("dispatched") { return .transition("dispatched") }
             return nil
         }
@@ -141,8 +149,145 @@ enum TechJobFlow {
     }
 
     /// Balance due in cents, or nil when the lines can't be totalled exactly.
+    /// Field mode's "Paid" stage: the job's invoice is issued with nothing owing, and nothing else
+    /// on the job is waiting to be billed or paid. A job put back in progress after it was
+    /// completed (reopened) has work to do again, so it opens on Working, not on "Paid · Done".
+    static func paidStage(status: String, completedAt: String?, invoices: [InvoiceRecord]) -> Bool {
+        if status != "completed", completedAt != nil { return false }
+        let live = invoices.filter { $0.status != "void" && $0.status != "voided" }
+        // A paid deposit is money ahead of the work, not the job's bill (see nextStep above).
+        guard let bill = live.first(where: { $0.origin == "job_completion" }) ?? live.first(where: { !$0.isDeposit }),
+              bill.status != "draft", bill.amountPaid > 0, due(bill) == 0 else { return false }
+        // Another invoice still in draft with lines on it (unbilled), or issued and owing (unpaid).
+        return !live.contains { other in
+            guard other.id != bill.id else { return false }
+            if other.status == "draft" { return !other.lines.isEmpty }
+            return (due(other) ?? 1) > 0 && other.status != "paid"
+        }
+    }
+
     static func due(_ invoice: InvoiceRecord) -> Int? {
         guard let total = paperLinesTotal(invoice.lines) else { return nil }
         return max(0, total - invoice.amountPaid)
+    }
+}
+
+// MARK: Nothing locked by stage
+
+extension TechJobFlow {
+    /// The money moves the bar keeps one tap away at every stage, beside its one next step: what
+    /// is owed, then the estimate to show the customer, or a new estimate when there is none to
+    /// show. Whatever the bar's own step already is, is left out. A canceled job offers nothing.
+    static func sideSteps(status: String, primary: TechJobStep?, estimates: [EstimateRecord]?,
+                          invoices: [InvoiceRecord]?, can: TechJobAbilities) -> [TechJobStep] {
+        guard status != "canceled" else { return [] }
+        var steps: [TechJobStep] = []
+        if can.viewInvoice, can.collectPayment, let invoices,
+           let owed = invoices.first(where: { $0.status == "issued" && (due($0) ?? 0) > 0 }), let amount = due(owed) {
+            steps.append(.collect(invoiceID: owed.id, due: amount, currency: owed.currency))
+        }
+        if let estimates {
+            if estimates.contains(where: { $0.status == "sent" && canShow($0, can: can) }) {
+                steps.append(.presentEstimates)
+            } else if let draft = estimates.first(where: { $0.status == "draft" && canShow($0, can: can) }) {
+                steps.append(.showEstimate(id: draft.id))
+            } else if can.createEstimate, !["scheduled", "dispatched", "en_route"].contains(status) {
+                // Before arriving nobody is pricing work; "+" still starts an estimate from there.
+                steps.append(.buildEstimate)
+            }
+        }
+        return steps.filter { $0 != primary }
+    }
+}
+
+extension TechJobStep {
+    /// The short words for a step riding beside the bar's commit ("Collect $340.00", "Show estimate").
+    var sideTitle: String {
+        switch self {
+        case .buildEstimate: "New estimate"
+        case .showEstimate, .presentEstimates: "Show estimate"
+        default: title()
+        }
+    }
+}
+
+/// One thing "Add to job" can offer (Paper 22's rows, plus the money moves a tech reaches for
+/// at any stage).
+enum JobAddKind: String, Equatable, CaseIterable {
+    case estimate, showEstimate, invoice, openInvoice, payment, plan, photo, checklist, note, contact
+}
+
+/// What "Add to job" offers. The server refuses none of these by job stage (only a canceled job
+/// is closed to them), so the stage never hides a row: only the role and what the job already has.
+enum JobAddOffer {
+    struct Inputs: Equatable {
+        var status = "scheduled"
+        var canCreateEstimate = false
+        /// The job has estimates and this person may hand them to the customer.
+        var canShowEstimates = false
+        /// No invoice on the job yet, and this person may make one.
+        var canCreateInvoice = false
+        /// The job has an invoice this person may open.
+        var canOpenInvoice = false
+        /// Something is owed on an issued invoice and this person may take the payment.
+        var canCollect = false
+        var canAddMedia = false
+        var canAddNote = false
+        var canAddContact = false
+        /// The workspace sells a maintenance plan, this person may change the customer, and the
+        /// customer isn't on one yet.
+        var canAddPlan = false
+    }
+
+    static func rows(_ inputs: Inputs) -> (billing: [JobAddKind], onTheJob: [JobAddKind]) {
+        var billing: [JobAddKind] = []
+        var onTheJob: [JobAddKind] = []
+        let open = inputs.status != "canceled"
+        if open {
+            if inputs.canCreateEstimate { billing.append(.estimate) }
+            if inputs.canShowEstimates { billing.append(.showEstimate) }
+            if inputs.canCreateInvoice { billing.append(.invoice) } else if inputs.canOpenInvoice { billing.append(.openInvoice) }
+            if inputs.canCollect { billing.append(.payment) }
+            if inputs.canAddPlan { billing.append(.plan) }
+            if inputs.canAddMedia { onTheJob.append(.photo) }
+            // A checklist can be started at any stage: guided mode only shows its tile while
+            // working, so this row is its door before and after.
+            onTheJob.append(.checklist)
+        }
+        // A note and a contact are records about the job and its customer; they stay on a canceled job.
+        if inputs.canAddNote { onTheJob.append(.note) }
+        if inputs.canAddContact { onTheJob.append(.contact) }
+        return (billing, onTheJob)
+    }
+}
+
+/// "Add to job › Maintenance plan": offered to someone who may change the customer, when the
+/// workspace sells at least one plan and the customer isn't already a member. Online only.
+enum JobAddPlan {
+    static func canOffer(canEditCustomer: Bool, plans: Int, isMember: Bool?, offline: Bool) -> Bool {
+        canEditCustomer && plans > 0 && isMember != true && !offline
+    }
+}
+
+/// When the visit's two "something is wrong" moves are offered.
+enum JobVisitGates {
+    /// Running late is a text about the arrival, so it is offered until the tech has arrived.
+    static func canSendRunningLate(status: String, hasSchedule: Bool) -> Bool {
+        hasSchedule && ["scheduled", "dispatched", "en_route"].contains(status)
+    }
+
+    /// Can't start records a follow-up for the office. The server takes one on any job that isn't
+    /// canceled; it only makes sense before the work has started.
+    static func canReportCantStart(status: String, canEditJob: Bool) -> Bool {
+        canEditJob && ["scheduled", "dispatched", "en_route", "arrived"].contains(status)
+    }
+}
+
+/// The office's description on the visit's cards: long words fold to a few lines with "Show more".
+enum JobDescriptionFold {
+    static let foldedLines = 4
+    /// Roughly what four lines hold on a phone; a line break counts as a line of its own.
+    static func isLong(_ text: String) -> Bool {
+        text.count > 180 || text.split(separator: "\n", omittingEmptySubsequences: false).count > foldedLines
     }
 }

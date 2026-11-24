@@ -76,6 +76,12 @@ struct PendingOrganizationFacts {
     func clearAll() { defaults.removeObject(forKey: storageKey) }
 }
 
+/// The last review settings loaded, shown offline. It belongs to the account that loaded it, so sign-out clears it.
+enum ReviewRequestsCache {
+    static let key = "thorbis.reviewRequests.lastLoaded.v1"
+    static func clear(_ defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key) }
+}
+
 @MainActor
 final class ReviewRequestsModel: ObservableObject {
     @Published var linkDraft = ""
@@ -93,7 +99,7 @@ final class ReviewRequestsModel: ObservableObject {
     private var flushing: Task<Void, Never>?
 
     private let pending: PendingOrganizationFacts
-    private let cacheKey = "thorbis.reviewRequests.lastLoaded.v1"
+    private let cacheKey = ReviewRequestsCache.key
 
     init(pending: PendingOrganizationFacts = .init()) { self.pending = pending }
 
@@ -251,81 +257,92 @@ struct ReviewRequestsView: View {
     private var canEdit: Bool { session.can("organization.settings.edit") }
 
     var body: some View {
-        Form {
-            if let error = model.loadError {
-                Section { InlineProblem(message: error) }
-            }
-            Section {
-                Toggle(isOn: $model.askForReviews) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Ask for reviews").font(Theme.font(15))
-                        Text(model.summary).font(Theme.font(13)).foregroundStyle(Theme.muted)
+        ScrollView {
+            // As Notification rules (Paper 96): the title in 34 Bold, one muted line, then cards
+            // on the canvas with their 13 Semibold labels.
+            VStack(alignment: .leading, spacing: 0) {
+                PaperPageTitle(title: "Review requests", subtitle: "One text after an invoice is paid", columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 16)
+                if let error = model.loadError {
+                    InlineProblem(message: error).padding(.horizontal, 4).padding(.bottom, 12)
+                }
+                PaperCard {
+                    Toggle(isOn: $model.askForReviews) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Ask for reviews").font(Theme.font(16, weight: .medium))
+                            Text(model.summary).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .tint(Theme.brand)
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 9)
+                    .frame(minHeight: 56)
+                    if let error = model.switchError {
+                        InlineProblem(message: error)
+                            .padding(.horizontal, PaperCardMetrics.inset).padding(.bottom, 12)
                     }
                 }
-                .tint(Theme.markAccent)
-                if let error = model.switchError {
-                    InlineProblem(message: error).font(Theme.font(13))
-                }
-            } footer: {
-                Text("When an invoice is paid in full, Thorbis texts the customer your review link once. Only with their SMS consent, between 8 AM and 8 PM their time, and never twice in 90 days.")
-            }
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    TextField("https://g.page/r/yourbusiness/review", text: $model.linkDraft)
-                        .font(Theme.font(15))
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .focused($editingLink)
-                        .onChange(of: model.linkDraft) { _, _ in model.linkError = nil }
-                        .accessibilityLabel("Review link")
-                    if let error = model.linkError {
-                        InlineProblem(message: error).font(Theme.font(13))
+                note("When an invoice is paid in full, Thorbis texts the customer your review link once. Only with their SMS consent, between 8 AM and 8 PM their time, and never twice in 90 days.")
+                    .padding(.bottom, 20)
+                PaperSection("Review link", count: nil) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("https://g.page/r/yourbusiness/review", text: $model.linkDraft)
+                            .font(Theme.font(16))
+                            .keyboardType(.URL)
+                            .textContentType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($editingLink)
+                            .onChange(of: model.linkDraft) { _, _ in model.linkError = nil }
+                            .accessibilityLabel("Review link")
+                        if let error = model.linkError {
+                            InlineProblem(message: error)
+                        }
                     }
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                    .frame(minHeight: 56)
                 }
-                .padding(.vertical, 4)
-            } header: {
-                Text("Review link")
-            } footer: {
-                Text("Your Google, Yelp or Facebook review page.")
-            }
-            if model.waitingToSync {
-                Section {
+                note("Your Google, Yelp or Facebook review page.")
+                    .padding(.bottom, 20)
+                if model.waitingToSync {
                     Label("Saved on this phone. Sends when you're back online.", systemImage: "icloud.and.arrow.up")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4).padding(.bottom, 20)
+                }
+                if model.loaded, model.askForReviews, let link = ReviewLink.validated(model.linkDraft) {
+                    // Paper F6A: the text as the customer's phone shows it, the link in the brand's words colour.
+                    PaperSection("What customers get", count: nil) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Thanks for choosing \(session.activeOrganization?.name ?? "us"). Mind leaving us a review?")
+                                .font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                            Text(link).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
+                        }
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                        .background(Theme.fill, in: UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: 6,
+                                                                           bottomTrailingRadius: 18, topTrailingRadius: 18,
+                                                                           style: .continuous))
+                        .frame(maxWidth: 300, alignment: .leading)
+                        .padding(PaperCardMetrics.inset)
+                    }
                 }
             }
-            if model.loaded, model.askForReviews, let link = ReviewLink.validated(model.linkDraft) {
-                Section {
-                    Text("Thanks for choosing \(session.activeOrganization?.name ?? "us"). Mind leaving us a review? \(link)")
-                        .font(Theme.font(15))
-                        .textSelection(.enabled)
-                } header: { Text("What customers get") }
-            }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 32)
+            .disabled(!canEdit || !model.loaded)
         }
-        .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.background)
-        .disabled(!canEdit || !model.loaded)
-        .navigationTitle("Review requests")
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if canEdit {
-                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
-                    if model.saving {
-                        ProgressView()
-                    } else {
-                        Button("Save") {
-                            editingLink = false
-                            Task {
-                                if await model.save(api: api, actorID: session.user?.id,
-                                                    organizationID: session.activeOrganization?.id) {
-                                    saved += 1
-                                }
-                            }
+        .safeAreaInset(edge: .bottom) {
+            // The commit is the brand pill at the foot, there once something changed.
+            if canEdit, model.dirty || model.saving {
+                PaperActionBar(title: "Save", busy: model.saving) {
+                    editingLink = false
+                    Task {
+                        if await model.save(api: api, actorID: session.user?.id,
+                                            organizationID: session.activeOrganization?.id) {
+                            saved += 1
                         }
-                        .disabled(!model.dirty)
                     }
                 }
             }
@@ -334,5 +351,12 @@ struct ReviewRequestsView: View {
         .task(id: session.isOffline) {
             await model.load(api: api, actorID: session.user?.id, organizationID: session.activeOrganization?.id)
         }
+    }
+
+    /// The quiet line under a card: 13 muted, lined up with the section labels.
+    private func note(_ text: String) -> some View {
+        Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4).padding(.top, 8)
     }
 }

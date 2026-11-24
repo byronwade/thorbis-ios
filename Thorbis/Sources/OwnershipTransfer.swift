@@ -12,7 +12,7 @@ struct TransferredOwnership: Decodable, Equatable {
 extension APIClient {
     func transferOwnership(to member: RoleMember, reason: String) async throws -> TransferredOwnership {
         struct Body: Encodable { let reason: String }
-        let encodedID = member.member.memberId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? member.member.memberId
+        let encodedID = try Self.pathSegment(member.member.memberId)
         return try await send("POST", "/v1/organization/role-members/\(encodedID)/transfer-ownership", body: Body(reason: reason))
     }
 }
@@ -49,23 +49,20 @@ private struct TransferOwnershipPrompt: ViewModifier {
     let onError: (String) -> Void
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
-    @State private var reason = ""
 
     func body(content: Content) -> some View {
-        content.alert(
-            member.map { "Make \($0.member.displayName) the owner?" } ?? "Transfer ownership?",
-            isPresented: Binding(get: { member != nil }, set: { if !$0 { member = nil; reason = "" } }),
-            presenting: member
-        ) { target in
-            TextField(OwnershipTransferRules.defaultReason, text: $reason)
-            Button("Transfer", role: .destructive) {
-                let typed = reason
+        // The reason is optional: left empty, `OwnershipTransferRules.reason` sends the default.
+        content.thorbisConfirm(
+            item: $member,
+            title: { target in "Make \(target.member.displayName) the owner?" },
+            message: { target in "\(target.member.displayName) can do everything, including billing and closing the account. You stay on as an admin." },
+            reason: ThorbisConfirmReason(label: "Reason", placeholder: OwnershipTransferRules.defaultReason,
+                                         identifier: "transfer-ownership-reason"),
+            actionTitle: "Transfer", role: .destructive,
+            action: { target, typed in
                 Task { await transfer(target, typed: typed) }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { target in
-            Text("\(target.member.displayName) can do everything, including billing and closing the account. You stay on as an admin.")
-        }
+        )
     }
 
     private func transfer(_ target: RoleMember, typed: String) async {
