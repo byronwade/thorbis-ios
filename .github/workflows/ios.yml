@@ -31,8 +31,8 @@ jobs:
         run: |
           python3 scripts/ui_test_shards.py --shards 6 --check
           python3 scripts/ui_test_shards.py --tablet --shards 2 --check
-      - name: Test the guard, the shard planner, the cancelled-tap rule and the hold sampler
-        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests scripts.tests.test_ci_hold_sampler
+      - name: Test the guard, the shard planner and the cancelled-tap rule
+        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests
       - name: Check every text colour against the grounds it sits on
         run: python3 scripts/tests/contrast.py
 
@@ -42,11 +42,7 @@ jobs:
   # tests run from the same build in the `ui` shards below.
   build:
     runs-on: macos-15
-    # BYR-1841: a pull request labelled ci-optimized-build when it is pushed builds with the
-    # optimiser on (see the build step), and an optimising build once held a runner for 28 minutes
-    # (run 45166212892). The label is read here and in the build step because this limit cannot
-    # read env.
-    timeout-minutes: ${{ contains(github.event.pull_request.labels.*.name, 'ci-optimized-build') && 90 || 45 }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
@@ -64,50 +60,14 @@ jobs:
         # Signed to run locally (ad hoc, no team or profile): an unsigned test host has no keychain
         # access in the simulator (errSecMissingEntitlement, -34018), and the price book's denial
         # marker lives in the keychain.
-        #
-        # Evidence for BYR-1841, not a setting to keep: with the ci-optimized-build label on the pull
-        # request when it is pushed, this Debug build also turns the optimiser on, whole module as in
-        # Release. DEBUG stays defined and testability stays on, so the unit tests and the UI shards
-        # run on it without changes, though assert() is compiled out. Take the label off once the
-        # run has started, so the next push is an ordinary build.
-        env:
-          OPTIMIZED_BUILD: ${{ contains(github.event.pull_request.labels.*.name, 'ci-optimized-build') }}
         run: |
           simulator_id=$(scripts/ci-simulator-id.sh)
-          # The default shell is macOS's bash 3.2 with -e and without -u, and an empty "$@" adds
-          # nothing, so the unlabelled command is the ordinary one.
-          set --
-          if [[ "$OPTIMIZED_BUILD" == "true" ]]; then
-            set -- SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule
-            echo "::notice title=Optimised build (BYR-1841)::Build: Debug configuration with the optimiser on (SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule) from the ci-optimized-build label. Not an ordinary run."
-          fi
           xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
             -clonedSourcePackagesDirPath "${{ runner.temp }}/SourcePackages" \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
-            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= "$@" build-for-testing
-          if [[ "$OPTIMIZED_BUILD" == "true" ]]; then
-            # Proof from the binary, not from the settings asked for: an optimised Swift build holds
-            # many generic specializations and an unoptimised one almost none. Under -O the app is
-            # expected to be one binary, as in Release, with no Thorbis.debug.dylib. Nothing here can
-            # fail the step.
-            echo "Optimised build step so far, simulator lookup included: ${SECONDS}s"
-            app="${{ runner.temp }}/ThorbisDerivedData/Build/Products/Debug-iphonesimulator/Thorbis.app"
-            if [[ ! -d "$app" ]]; then
-              echo "::warning title=Optimised build (BYR-1841)::Thorbis.app was not found where the build puts it, so the binary could not be checked"
-            elif [[ -e "$app/Thorbis.debug.dylib" ]]; then
-              echo "::warning title=Optimised build (BYR-1841)::Thorbis.app still has Thorbis.debug.dylib"
-            else
-              echo "Thorbis.app has no Thorbis.debug.dylib, as in Release"
-            fi
-            for bin in "$app/Thorbis" "$app/Thorbis.debug.dylib"; do
-              if [[ -f "$bin" ]]; then
-                count=$(xcrun nm "$bin" 2>/dev/null | xcrun swift-demangle | grep -c 'generic specialization' || true)
-                echo "$(basename "$bin"): ${count:-0} generic specialization symbols"
-              fi
-            done
-          fi
+            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= build-for-testing
       - name: Unit tests
         run: |
           simulator_id=$(scripts/ci-simulator-id.sh)
@@ -261,14 +221,6 @@ jobs:
           echo "Busiest processes:"
           ps -Ao pcpu,comm -r | head -n 6 || true
       - name: Run this shard's UI tests
-        # Evidence for BYR-1841, not a test: scripts/ci_hold_sampler.py samples the app's stack when
-        # its main thread has been held for 5 s. Its log stream starts at the default level and
-        # steps up to info, then debug, only after 300 s with no request line. It does not change
-        # how a test passes or fails, or which test is run once more. It adds some load: a
-        # filtered log stream for the first run, and a 3 s sample in a hold already 5 s long. It
-        # does not watch a test run once more by itself. Remove it once BYR-1841 has its stack.
-        env:
-          THORBIS_HOLD_SAMPLES: ${{ runner.temp }}/hold-samples
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
@@ -300,15 +252,6 @@ jobs:
         with:
           name: ios-ui-test-reruns-${{ matrix.shard }}
           path: ${{ runner.temp }}/ui-test-reruns
-          if-no-files-found: ignore
-          retention-days: 14
-      # BYR-1841: the hold sampler's summary and any stack samples it took.
-      - name: Save hold samples
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ui-hold-samples-${{ matrix.shard }}
-          path: ${{ runner.temp }}/hold-samples
           if-no-files-found: ignore
           retention-days: 14
 
@@ -412,10 +355,6 @@ jobs:
           echo "Busiest processes:"
           ps -Ao pcpu,comm -r | head -n 6 || true
       - name: Run this shard's iPad UI tests
-        # As on the iPhone: stack samples of long main-thread holds for BYR-1841. It does not change
-        # how a test passes or fails, or which test is run once more; it adds the same load.
-        env:
-          THORBIS_HOLD_SAMPLES: ${{ runner.temp }}/hold-samples
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
@@ -443,14 +382,6 @@ jobs:
         with:
           name: ios-ipad-ui-test-reruns-${{ matrix.shard }}
           path: ${{ runner.temp }}/ui-test-reruns
-          if-no-files-found: ignore
-          retention-days: 14
-      - name: Save hold samples
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ipad-ui-hold-samples-${{ matrix.shard }}
-          path: ${{ runner.temp }}/hold-samples
           if-no-files-found: ignore
           retention-days: 14
 
