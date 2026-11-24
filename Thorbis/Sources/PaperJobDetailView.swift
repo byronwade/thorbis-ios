@@ -3036,9 +3036,10 @@ struct JobDetailView: View {
     /// record's own dates) follow them here.
     private func atAddressScreen(_ job: JobRecord) -> some View {
         // The job's own site only: the visits here are the customer's, not visits at their address.
-        JobAtAddressView(job: job, street: street(job), visits: visits, visitsLoaded: visitsLoaded, locations: customerLocations) {
+        let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
+        return JobAtAddressView(job: job, street: street(job), visits: visits, visitsLoaded: visitsLoaded,
+                                locations: customerLocations, locationsLoaded: placesCurrent) {
             if session.can("customer.view", feature: "core_crm") {
-                let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
                                            loaded: placesCurrent, failed: locationsFailed,
                                            headerStreet: headerStreet(job) ?? job.title, accountAddress: fallbackAddress(job)?.address,

@@ -18,9 +18,14 @@ final class EstimateDraftAvailabilityUITests: XCTestCase {
         XCTAssertFalse(save.isEnabled, "Nothing to save before an edit")
         title.tap()
         title.typeText(" updated")
-        XCTAssertTrue((title.value as? String)?.contains(" updated") == true)
+        // The field's value and Save draft catch up a beat after the last key on a slow runner.
+        let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (title.value as? String)?.contains(" updated") == true
+        }, object: title)
+        XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 10), .completed, "The edit stays in the field")
         XCTAssertFalse(app.staticTexts[oldLimit].exists)
-        XCTAssertTrue(save.isEnabled, "An edited draft can be saved")
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "An edited draft can be saved")
     }
 
     /// The catalog sheet no longer repeats a limit that is gone.

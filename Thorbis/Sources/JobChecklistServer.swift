@@ -391,6 +391,8 @@ enum ChecklistProblem: Equatable {
 
 enum ChecklistRules {
     static let onPhoneWords = "Saved on this phone. It will send when you\u{2019}re back online."
+    /// Someone finished the run before this phone's answers reached it: they are kept, not lost.
+    static let keptWords = "This checklist was finished before your answers were sent. They\u{2019}re still on this phone."
     static let titleLimit = 120, labelLimit = 200, unitLimit = 16, itemLimit = 60, textLimit = 2000
     static let numberLimit = 1e12
 
@@ -616,8 +618,10 @@ final class JobChecklistModel: ObservableObject {
     var entries: [ChecklistEntry] {
         let known = runs.map { run -> ChecklistEntry in
             let draft = drafts.first { run.isCalled($0.runID) }
+            // A finished run shows what the server holds; answers kept after it was finished
+            // elsewhere stay on the phone, apart, until the person copies or lets go of them.
             return ChecklistEntry(id: run.id, template: run.template,
-                                  answers: ChecklistRules.shown(run.template, run: run, unsent: draft?.unsent ?? [:]),
+                                  answers: ChecklistRules.shown(run.template, run: run, unsent: run.isCompleted ? [:] : draft?.unsent ?? [:]),
                                   completed: run.isCompleted, completedAt: run.completedAt.flatMap(Self.date),
                                   completedBy: run.completedByUserId.map(who), startedBy: run.startedByUserId.map(who),
                                   startedAt: Self.date(run.startedAt),
@@ -745,6 +749,28 @@ final class JobChecklistModel: ObservableObject {
         persist()
     }
 
+    /// Answers this phone kept for a run someone else finished first, one line per item, to copy.
+    func keptText(_ reference: String) -> String? {
+        guard run(reference)?.isCompleted == true, let draft = draft(reference), !draft.unsent.isEmpty else { return nil }
+        let lines = draft.template.items.compactMap { item -> String? in
+            guard let answer = draft.unsent[item.id] else { return nil }
+            let text = answer.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = text.isEmpty ? (answer.done ? "Done" : "Not done") : [text, item.unit].compactMap { $0 }.joined(separator: " ")
+            return "\(item.label): \(value)"
+        }
+        return lines.isEmpty ? nil : ([draft.template.title] + lines).joined(separator: "\n")
+    }
+
+    /// Lets go of answers this phone kept for a run someone else finished first. Only on the
+    /// person's word: a finished run is never taken as a receipt for them.
+    func discardKept(_ reference: String) {
+        guard run(reference)?.isCompleted == true, let index = draftIndex(reference, creating: false) else { return }
+        let key = drafts[index].runID
+        timers[key]?.cancel()
+        drafts.remove(at: index); notes[key] = nil
+        persist()
+    }
+
     enum FinishResult: Equatable {
         case finished
         /// No signal: it finishes by itself when the phone is back online.
@@ -762,7 +788,11 @@ final class JobChecklistModel: ObservableObject {
         persist()
         timers[key]?.cancel()
         await flush(api: api, only: key)
-        if run(reference)?.isCompleted == true || run(key)?.isCompleted == true { return .finished }
+        if run(reference)?.isCompleted == true || run(key)?.isCompleted == true {
+            // Finished elsewhere first, with answers of this person's the server never got.
+            if drafts.contains(where: { $0.runID == key }) { return .problem(notes[key] ?? ChecklistRules.keptWords) }
+            return .finished
+        }
         if let index = drafts.firstIndex(where: { $0.runID == key }) {
             if let note = notes[key], note != ChecklistRules.onPhoneWords {
                 // Refused: the answers stay, but it is not left trying to finish behind the person's back.
@@ -826,8 +856,15 @@ final class JobChecklistModel: ObservableObject {
             if run(key) == nil, !reloaded, await reloadRuns(api: api) { reloaded = true; continue }
             guard let run = run(key) else { notes[key] = ChecklistProblem.gone.words(); return }
             if run.isCompleted {
-                if !draft.unsent.isEmpty && !draft.finishing { notes[key] = ChecklistProblem.completed.words() }
-                drafts.removeAll { $0.runID == key }; persist()
+                // Nothing of this person's is missing from the finished run: let go of it.
+                if ChecklistRules.changes(draft.unsent, onto: run).isEmpty {
+                    drafts.removeAll { $0.runID == key }; persist()
+                    return
+                }
+                // Someone finished it before these answers were sent. A finished run is not a
+                // receipt for them: they stay on this phone until the person copies or lets go.
+                write { $0.finishing = false }
+                notes[key] = ChecklistRules.keptWords
                 return
             }
             let sent = draft.unsent
