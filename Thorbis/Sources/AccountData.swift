@@ -136,7 +136,7 @@ struct AccountAndDataView: View {
                 // Paper 67 also draws Two-step verification and Download my data; the server has
                 // neither yet, so they are left out rather than shown as dead rows.
                 AccountGroup(title: "Your data") {
-                    NavigationLink { PrivacyPermissionsView().thorbisBackButton() } label: {
+                    NavigationLink { PrivacyPermissionsView(payments: PushNotifications.receivesPaymentAlerts(session)).thorbisBackButton() } label: {
                         AccountRow(glyph: .acctPerson, title: "Privacy and permissions", subtitle: "What we collect and why")
                     }
                     .buttonStyle(RowPressStyle())

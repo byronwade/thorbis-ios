@@ -445,7 +445,7 @@ struct JoinTeamFlow: View {
                 .font(Theme.font(17)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 14)
-            JoinCard { JoinNotificationsRow() }
+            JoinCard { JoinNotificationsRow(payments: PushNotifications.receivesPaymentAlerts(session)) }
                 .padding(.top, 28)
             Text("You can change these any time in Settings.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -1149,6 +1149,8 @@ private struct JoinFactRow: View {
 
 /// 05C's Notifications row: Turn on asks iOS once; after that it says what iOS has.
 private struct JoinNotificationsRow: View {
+    /// Whether the person could be sent Payment received (from the session after joining).
+    let payments: Bool
     @State private var status: UNAuthorizationStatus?
 
     var body: some View {
@@ -1161,7 +1163,7 @@ private struct JoinNotificationsRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text("Notifications").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                Text("New jobs and changes").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                Text(AlertWords.joinSummary(payments: payments)).font(Theme.font(14)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             trailing
@@ -1192,7 +1194,7 @@ private struct JoinNotificationsRow: View {
     private func turnOn() async {
         // Paper 71: the explainer first; its commit shows the system prompt. "Maybe later"
         // leaves the row as it was.
-        guard await PermissionPrimerPresenter.ask(.notifications, automatic: false) else {
+        guard await PermissionPrimerPresenter.ask(payments ? .notificationsWithPayments : .notifications, automatic: false) else {
             await refresh()
             return
         }
