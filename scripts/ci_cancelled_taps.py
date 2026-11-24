@@ -260,7 +260,7 @@ def read_run(rows):
             if running is not None:
                 raise Refused(f"{running['name']} started and never finished.")
             running = {"name": value, "outcome": None, "began": [], "took": None, "steps": [],
-                       "first_error": None, "steps_before_error": None}
+                       "first_error": None, "steps_before_error": None, "errors": 0}
         elif kind in ("passed", "failed", "skipped"):
             name, _, took = value.partition(" ")
             if running is None or running["name"] != name:
@@ -278,6 +278,8 @@ def read_run(rows):
             running["steps"].append((float(offset), text))
         elif kind == "error":
             name, _, message = value.partition(" ")
+            if name == running["name"]:
+                running["errors"] += 1
             if name == running["name"] and running["first_error"] is None:
                 running["first_error"] = message
                 running["steps_before_error"] = list(running["steps"])
@@ -291,10 +293,12 @@ def read_run(rows):
     if len(parts) != 3:
         raise Refused(f"xcodebuild's summary could not be read ({summaries[-1]!r}).")
     executed, failures, unexpected = (int(part) for part in parts)
-    failed = [test for test in tests if test["outcome"] == "failed"]
-    if executed != len(tests) or failures != len(failed):
+    # xcodebuild counts failure records, not failed tests: a test that fails a wait and then a
+    # later step counts twice. Compare it with the error lines recorded under the tests.
+    recorded = sum(test["errors"] for test in tests)
+    if executed != len(tests) or failures != recorded:
         raise Refused(f"xcodebuild counted {executed} tests and {failures} failures; the log shows "
-                      f"{len(tests)} and {len(failed)}.")
+                      f"{len(tests)} and {recorded}.")
     if unexpected:
         raise Refused(f"xcodebuild counted {unexpected} unexpected failures (a crash or a thrown "
                       "error, not a failed wait).")

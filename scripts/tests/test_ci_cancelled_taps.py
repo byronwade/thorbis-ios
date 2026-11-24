@@ -59,7 +59,7 @@ def session(*cases, executed=None, failures=None, unexpected=0, sessions=1):
         rows += rows_of_case
         kinds = [kind for _, kind, _ in rows_of_case]
         ended += any(kind in ("passed", "failed", "skipped") for kind in kinds)
-        failed += "failed" in kinds
+        failed += kinds.count("error")
     rows.append((9999.0, "executed", f"{ended if executed is None else executed} "
                                      f"{failed if failures is None else failures} {unexpected}"))
     return rows
@@ -111,8 +111,10 @@ class DecideTests(unittest.TestCase):
         rows.append((1.0, "error", f"{B} XCTAssertEqual failed: (\"3\") is not equal to (\"4\")"))
         rows += [(1.0, "step", f"{offset} {text}") for offset, text in STEPS[2:]]
         rows += [(1.0, "error", f"{B} XCTAssertTrue failed"), (1.0, "failed", f"{B} 29.788")]
-        rows.append((9999.0, "executed", "1 1 0"))
-        self.assertEqual(taps.decide(rows, [at(1, TAP)])[0], [])
+        rows.append((9999.0, "executed", "1 2 0"))
+        again, reasons = taps.decide(rows, [at(1, TAP)])
+        self.assertEqual(again, [])
+        self.assertIn("This failure stands", reasons[0])
 
     def test_an_error_line_of_another_test_is_not_this_ones(self):
         rows = [(0.0, "session", "started")] + case(B, None, 1, steps=STEPS[:2])
@@ -205,6 +207,18 @@ class DecideTests(unittest.TestCase):
         rows = session(case(B, "failed", 1))
         rows[-1] = (9999.0, "executed", "1 1")
         self.assertEqual(taps.decide(rows, [at(1, TAP)])[0], [])
+
+    def test_xcodebuild_counts_failures_not_failed_tests(self):
+        # Run 45325427169, iPad shard 2: one test failed its wait and then a later tap, so
+        # xcodebuild counted two failures for one failed test.
+        rows = case(B, "failed", 1)
+        rows.insert(-1, (1.0, "error", f"{B} Failed to not hittable: Button, identifier: 'header-filter'"))
+        self.assertEqual(taps.decide(session(rows), [at(1, TAP)])[0], [B])
+        for failures in (1, 3):     # a failure message the log lost, or one it never had
+            with self.subTest(failures=failures):
+                again, reasons = taps.decide(session(rows, failures=failures), [at(1, TAP)])
+                self.assertEqual(again, [])
+                self.assertIn("xcodebuild counted", reasons[0])
 
     def test_a_failed_run_with_no_failed_test_is_not_rerun(self):
         again, reasons = taps.decide(session(case(A, "passed", 0)), [at(0, TAP)])
