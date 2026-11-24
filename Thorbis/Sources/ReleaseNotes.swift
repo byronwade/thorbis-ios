@@ -21,6 +21,15 @@ enum ReleaseNotes {
 
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-24-refused-refunds",
+            date: "2026-11-24",
+            highlights: [
+                .init(symbol: "arrow.uturn.backward.circle", title: "Refused refunds say why",
+                      detail: "A refused refund says why, and goes back to a draft when Thorbis can tell no money moved."),
+                .init(symbol: "questionmark.circle", title: "Send an unconfirmed refund again",
+                      detail: "Send an unconfirmed refund again, or discard a cash or check one once Payments shows it wasn\u{2019}t refunded."),
+            ]),
+        ReleaseNote(
             id: "2026-11-24-photo-send-now",
             date: "2026-11-24",
             highlights: [

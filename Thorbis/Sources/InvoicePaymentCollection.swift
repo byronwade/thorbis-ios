@@ -1136,6 +1136,7 @@ private struct InvoicePaymentRefundForm: View {
 private struct InvoicePaymentRefundStatusPanel: View {
     @ObservedObject var model: InvoicePaymentRefundModel
     let onRefundCompleted: () async -> Void
+    @State private var confirmDiscard = false
 
     /// Pending is not success: the state as a word, what is known, and the way to check. No tinted box.
     var body: some View {
@@ -1148,7 +1149,9 @@ private struct InvoicePaymentRefundStatusPanel: View {
                     ErrorBanner(message: error)
                 }
 
-                PrimaryButton(title: "Check refund status", busy: model.isSubmitting) {
+                // Unconfirmed sends the same refund again; pending and reconciliation ask after it.
+                PrimaryButton(title: intent.state == .uncertain ? "Send refund again" : "Check refund status",
+                              busy: model.isSubmitting) {
                     Task {
                         if await model.checkRefundStatus() {
                             await onRefundCompleted()
@@ -1156,8 +1159,27 @@ private struct InvoicePaymentRefundStatusPanel: View {
                     }
                 }
                 .disabled(!model.canCheckRefundStatus)
+
+                // Offered only once a fresh read shows the payment still recorded and not refunded.
+                if intent.state == .uncertain, model.canDiscardUnconfirmed {
+                    Button("Discard refund", role: .destructive) { confirmDiscard = true }
+                        .font(Theme.font(13, weight: .medium))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .disabled(model.isSubmitting)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .task(id: model.unconfirmedReadKey) {
+                guard model.unconfirmedReadKey != nil else { return }
+                if await model.readPaymentAfterUnconfirmedRefund() {
+                    // Not tied to this view: it goes away once the refund is confirmed.
+                    Task { await onRefundCompleted() }
+                }
+            }
+            .thorbisConfirm("Discard this refund?",
+                            message: "Payments shows this payment as not refunded. This removes the saved reason from this phone.",
+                            isPresented: $confirmDiscard,
+                            actions: [ThorbisConfirmAction("Discard", role: .destructive) { model.discardSavedIntent() }])
         }
     }
 
@@ -1184,7 +1206,7 @@ private struct InvoicePaymentRefundStatusPanel: View {
         case .draft: "The reason is saved securely on this device."
         case .pending: "The refund has been accepted and is still processing. Check again to refresh its status."
         case .reconciliationRequired: "Thorbis needs to reconcile the refund before it can be confirmed. Check again to refresh its status."
-        case .uncertain: "The last request did not confirm whether the refund completed. Check status using the same saved reason."
+        case .uncertain: "The last request didn\u{2019}t confirm whether the refund went through. Sending again uses the same reason, so Thorbis treats it as the same refund."
         }
     }
 }
