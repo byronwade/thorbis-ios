@@ -378,7 +378,7 @@ struct PaymentsSetupView: View {
         do {
             let link = try await api.startMerchantOnboarding()
             guard let url = link.safeURL else {
-                error = "Stripe sent a link this app won't open. Try again from the web app."
+                error = "Stripe sent a link this app won't open. Try again."
                 return
             }
             hosted = url

@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Paper 90 "Payouts": what Stripe holds for the company and what it has sent to the bank, from
-/// `GET /v1/organization/money-availability`. Read-only: payouts are managed on the web.
+/// `GET /v1/organization/money-availability`. Read-only: nothing here changes a payout, and no
+/// web page does either yet (BYR-1654), so the page does not send anyone to one.
 struct PayoutsPage: View {
     let snapshot: MoneyAvailability
     let company: String
@@ -43,7 +44,7 @@ struct PayoutsPage: View {
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 }
-                Text("Payouts are managed on the web.")
+                Text("Stripe sends these payouts. They can't be changed here.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 16)
