@@ -21,6 +21,13 @@ enum ReleaseNotes {
 
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-24-photo-send-now",
+            date: "2026-11-24",
+            highlights: [
+                .init(symbol: "arrow.up.circle", title: "Send now works after you reconnect",
+                      detail: "Getting signal back or coming back to the app while photos send no longer leaves Send now greyed out."),
+            ]),
+        ReleaseNote(
             id: "2026-11-24-money-to-the-cent",
             date: "2026-11-24",
             highlights: [
