@@ -128,7 +128,7 @@ struct MoneyOverviewView: View {
         let pair = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
         return VStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Outstanding AR").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                Text("Outstanding").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                 // 44 Bold; one line, shrinking before it would clip on a small phone.
                 Text(money(outstanding, currency: "USD"))
                     .font(Theme.display()).tracking(Theme.displayTracking())

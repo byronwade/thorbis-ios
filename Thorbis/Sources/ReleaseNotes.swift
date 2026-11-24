@@ -21,6 +21,14 @@ enum ReleaseNotes {
 
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-24-money-to-the-cent",
+            date: "2026-11-24",
+            highlights: [
+                .init(symbol: "dollarsign.circle", title: "Balances show every cent",
+                      detail: "Money and Home show what\u{2019}s owed and collected to the cent, as the web does, never rounded up."),
+            ],
+            fixes: 3),
+        ReleaseNote(
             id: "2026-11-23-member-discount",
             date: "2026-11-23",
             highlights: [

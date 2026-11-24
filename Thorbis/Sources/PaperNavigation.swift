@@ -598,8 +598,7 @@ struct RootView: View {
             }
             return .unread
         case .money:
-            guard let due = dayMoney.totalDue, due > 0 else { return nil }
-            return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
+            return PlaceCount.due(dayMoney.totalDue)
         default: return nil
         }
     }

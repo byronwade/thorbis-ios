@@ -119,12 +119,6 @@ struct HomeAmounts {
     var text: String {
         totals.keys.sorted().map { money(totals[$0] ?? 0, currency: $0) }.joined(separator: " + ")
     }
-    /// Paper's dashboards print whole dollars ("$7,330").
-    var wholeText: String {
-        totals.keys.sorted().map { key in
-            (Double(totals[key] ?? 0) / 100).formatted(.currency(code: key).precision(.fractionLength(0)))
-        }.joined(separator: " + ")
-    }
 }
 
 struct OwnerHomeView: View {
@@ -279,7 +273,7 @@ struct OwnerHomeView: View {
                     }
                     HStack(alignment: .bottom, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(wholeMoney(totals.now))
+                            Text(money(totals.now, currency: "USD"))
                                 .font(Theme.display()).tracking(Theme.displayTracking())
                                 .foregroundStyle(Theme.foreground)
                                 .lineLimit(1).minimumScaleFactor(0.5)
@@ -305,11 +299,6 @@ struct OwnerHomeView: View {
         }
     }
 
-    /// Paper prints dashboard money in whole dollars ("$142,300").
-    private func wholeMoney(_ cents: Int, currency: String = "USD") -> String {
-        (Double(cents) / 100).formatted(.currency(code: currency).precision(.fractionLength(0)))
-    }
-
     private func ownerTiles(_ period: DashboardPeriod) -> [AnyView] {
         var tiles: [AnyView] = []
         let range = period.range()
@@ -317,7 +306,7 @@ struct OwnerHomeView: View {
         if canInvoices, loaded, let ticket = DashboardBooks.averageTicket(invoices, in: range.current) {
             let before = range.before.flatMap { DashboardBooks.averageTicket(invoices, in: $0) }
             tiles.append(AnyView(NavigationLink(value: PaperRoute.revenue) {
-                DashboardTile(label: "Avg ticket", value: wholeMoney(ticket),
+                DashboardTile(label: "Avg ticket", value: money(ticket, currency: "USD"),
                               delta: .percent(now: ticket, before: before, versus: versus))
             }.buttonStyle(PressStyle()).accessibilityHint("Opens revenue")))
         }
@@ -350,7 +339,7 @@ struct OwnerHomeView: View {
             NavigationLink(value: period == .today ? PaperRoute.homeList(.invoicedToday) : PaperRoute.revenue) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Revenue \(period.suffix)").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    Text(single ? wholeMoney(now, currency: total.totals.keys.first ?? "USD") : total.text)
+                    Text(single ? money(now, currency: total.totals.keys.first ?? "USD") : total.text)
                         .font(Theme.display()).tracking(Theme.displayTracking())
                         .foregroundStyle(Theme.foreground)
                         .lineLimit(1).minimumScaleFactor(0.5)
@@ -446,7 +435,7 @@ struct OwnerHomeView: View {
         JobFiltering.date(raw).map { Calendar.current.isDateInToday($0) } ?? false
     }
 
-    /// Paper 52's Money card: Outstanding (AR) and Collected today, the open balance beside the
+    /// Paper 52's Money card: Outstanding and Collected today, the open balance beside the
     /// label. Payroll due is not drawn: the server keeps no payroll. Each row opens its records.
     @ViewBuilder private var moneyToday: some View {
         let unpaid = NeedsAttention.unpaid(invoices)
@@ -457,13 +446,13 @@ struct OwnerHomeView: View {
                     PaperListRow(title: "Reading invoices…")
                 } else {
                     NavigationLink(value: PaperRoute.homeList(.unpaid)) {
-                        DashboardAmountRow(title: "Outstanding (AR)", amount: owed.isEmpty ? wholeMoney(0) : owed.wholeText)
+                        DashboardAmountRow(title: "Outstanding", amount: owed.isEmpty ? money(0, currency: "USD") : owed.text)
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityHint("Lists unpaid invoices")
                     if let collectedToday {
                         Button { showPayments = true } label: {
-                            DashboardAmountRow(title: "Collected today", amount: wholeMoney(collectedToday), divider: true)
+                            DashboardAmountRow(title: "Collected today", amount: money(collectedToday, currency: "USD"), divider: true)
                         }
                         .buttonStyle(RowPressStyle())
                         .accessibilityHint("Opens payments")
@@ -472,7 +461,7 @@ struct OwnerHomeView: View {
             }
         } accessory: {
             if loaded && !owed.isEmpty {
-                Text("\(owed.wholeText) open").font(Theme.font(13))
+                Text("\(owed.text) open").font(Theme.font(13))
             }
         }
         .accessibilityIdentifier("home-money")
@@ -529,7 +518,7 @@ struct OwnerHomeView: View {
                 let owed = unpaid.reduce(into: HomeAmounts()) { $0.add($1.1, $1.0.currency) }
                 rows.append(NeedItem(id: "unpaid", glyph: .alertClock, tint: Theme.warning,
                                      title: "\(PaperCount.text(unpaid.count)) invoice\(unpaid.count == 1 ? "" : "s") unpaid",
-                                     subtitle: "\(owed.wholeText)\(oldest(unpaid.first?.0.issuedAt))",
+                                     subtitle: "\(owed.text)\(oldest(unpaid.first?.0.issuedAt))",
                                      action: "Review", route: .homeList(.unpaid)))
             }
             if !stale.isEmpty {
