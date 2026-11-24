@@ -309,26 +309,58 @@ struct OfficeSlotBookSheet: View {
 
     private func book() {
         guard !busy else { return }
-        guard let request = OfficeSlotRules.bookRequest(for: review, start: start, minutes: minutes) else {
+        guard let window = OfficeSlotRules.plannedWindow(start: start, minutes: minutes) else {
             problem = "Pick a length of a day or less."
             return
         }
+        // The queue keeps the attempt, so a sheet opened again after no answer sends the same id.
+        var attempt = queue.bookingAttempts.attempt(for: review.id)
+        guard let request = attempt.request(decisionVersion: review.decisionVersion, window: window) else {
+            problem = attempt.words
+            return
+        }
+        queue.bookingAttempts.keep(attempt, for: review.id)
+        let sent = attempt
         busy = true
         problem = nil
         Task {
             defer { busy = false }
             do {
                 let window = try await queue.book(review, request: request, api: api)
-                let when = OfficeSlotRules.windowLabel(window) ?? "the time you picked"
-                onDone("Booked: \(review.serviceNeed), \(when)")
-                dismiss()
-            } catch is CancellationError {
+                settle(sent, .booked)
+                booked(window)
             } catch {
-                problem = Self.words(for: error, doing: "book this follow-up")
-                // A conflict means the row changed under us; read the queue again behind the sheet.
+                // A cancelled or unanswered request may still have booked it: the queue keeps the id.
+                let answer = OfficeSlotBookingAttempt.answer(for: error)
+                let words = settle(sent, answer)
+                if answer == .booked {
+                    // Thorbis answered 201 but the body could not be read: it booked the window sent.
+                    booked(request.plannedWindow)
+                } else {
+                    problem = words
+                }
+                // Read the queue again behind the sheet: the row may have changed or gone.
                 await queue.load(api: api, identity: OfficeSlotQueue.identity(session))
             }
         }
+    }
+
+    /// Settles the request in flight on a copy of the attempt it was sent from, and puts it back.
+    @discardableResult
+    private func settle(_ sent: OfficeSlotBookingAttempt, _ answer: OfficeSlotBookingAttempt.Answer) -> String? {
+        var settled = sent
+        let words = settled.settle(answer, label: Self.label)
+        queue.bookingAttempts.keep(settled, for: review.id)
+        return words
+    }
+
+    private func booked(_ window: OfficeSlotWindow) {
+        onDone("Booked: \(review.serviceNeed), \(Self.label(window))")
+        dismiss()
+    }
+
+    private static func label(_ window: OfficeSlotWindow) -> String {
+        OfficeSlotRules.windowLabel(window) ?? "the time you picked"
     }
 
     private func close(_ reasonCode: String) {
@@ -341,20 +373,13 @@ struct OfficeSlotBookSheet: View {
                 try await queue.resolve(review, reasonCode: reasonCode, api: api)
                 onDone("Closed without a visit: \(review.serviceNeed)")
                 dismiss()
-            } catch is CancellationError {
             } catch {
-                problem = Self.words(for: error, doing: "close this follow-up")
+                // A close whose answer was lost may have landed; a refusal after it finds the row gone.
+                let answer = OfficeSlotCloseWords.answer(for: error)
                 await queue.load(api: api, identity: OfficeSlotQueue.identity(session))
+                let stillWaiting = queue.problem != nil || queue.reviews.contains { $0.id == review.id }
+                problem = OfficeSlotCloseWords.words(answer, stillWaiting: stillWaiting)
             }
         }
-    }
-
-    /// The server's own sentence for a refusal (no opening, already booked, changed since it was
-    /// read), with what was being tried in front.
-    static func words(for error: Error, doing: String) -> String {
-        if let problem = error as? Problem, problem.status == 409 {
-            return "Could not \(doing): \(problem.detail ?? problem.title ?? "it changed on the server"). The list has been read again."
-        }
-        return "Could not \(doing). \(error.localizedDescription)"
     }
 }

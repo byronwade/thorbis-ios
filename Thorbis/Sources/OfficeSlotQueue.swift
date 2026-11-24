@@ -91,7 +91,8 @@ struct OfficeSlotPage: Decodable {
 /// POST …/book (bookOfficeReviewAppointmentInputSchema; the path supplies officeReviewId).
 struct OfficeSlotBookRequest: Encodable, Equatable {
     let expectedDecisionVersion: Int
-    /// A new booking intent for this attempt; the server refuses the review's own intent id.
+    /// The booking intent: one per follow-up, kept by the queue for every try (OfficeSlotBookingAttempts).
+    /// The server refuses the review's own intent id.
     let intentId: String
     let plannedWindow: OfficeSlotWindow
 }
@@ -239,6 +240,10 @@ final class OfficeSlotQueue: ObservableObject {
     @Published private(set) var loaded = false
     @Published private(set) var loading = false
     @Published var problem: String?
+    /// The booking id of each follow-up, kept across Schedule sheets while this queue's screen is
+    /// shown, and dropped when the workspace or the sign-in changes. Nothing on screen reads it, so
+    /// it is not published.
+    var bookingAttempts = OfficeSlotBookingAttempts()
     private var identity = ""
 
     static func identity(_ session: SessionController) -> String {
@@ -254,6 +259,7 @@ final class OfficeSlotQueue: ObservableObject {
         if identity != self.identity {
             self.identity = identity
             reviews = []; loaded = false; problem = nil
+            bookingAttempts.removeAll()
         }
         #if DEBUG
         if PaperPreview.enabled {
