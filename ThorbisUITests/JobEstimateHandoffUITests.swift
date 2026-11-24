@@ -1255,6 +1255,42 @@ final class JobEstimateHandoffUITests: XCTestCase {
         }
         XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 1)
     }
+    /// BYR-1844: the first approval's answer is held until Back is tapped, so it lands during the slide.
+    /// The run ended at the tap: no signature is registered and nothing is approved for estimate 2 after it.
+    func testAnswerLandingDuringTheBackSlideSendsNothingMore() throws {
+        let app = open(["--paper-preview-handoff-hold-first-approval-post", "--paper-preview-handoff-hide-controls"])
+        reachSignTogether(app); try approveTogether(app)
+        let firstRow = app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"]
+        let inFlight = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Approving"), object: firstRow)
+        XCTAssertEqual(XCTWaiter.wait(for: [inFlight], timeout: 5), .completed, "The first approval must be running")
+        var sent = false
+        for _ in 0..<20 where !sent {
+            sent = ((try? receipt(app))?["approvals"] as? [[String: Any]])?.count == 1
+            if !sent { _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Wait for the approval to go out")], timeout: 0.5) }
+        }
+        XCTAssertTrue(sent, "The first approval must be in flight before leaving")
+        XCTAssertTrue(firstRow.label.contains("Approving"), "The held answer must not have landed before leaving")
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let again = app.buttons["customer-view-approve-estimates"]
+        XCTAssertTrue(again.waitForExistence(timeout: 15))
+        let requests = try receipt(app)["requests"] as? [[String: String]] ?? []
+        let released = try XCTUnwrap(requests.firstIndex { $0["method"] == "RELEASE" }, "The Back tap must let the held answer go")
+        XCTAssertEqual(requests[released]["query"], "run-stopped", "Back must stop the run before the held answer lands")
+        let after = requests[(released + 1)...].filter {
+            $0["method"] == "POST" && (($0["path"] ?? "").hasSuffix("/media") || ($0["path"] ?? "").hasSuffix("/approve"))
+        }
+        XCTAssertEqual(after.map { $0["path"] ?? "" }, [], "No signature registration and no approval after Back")
+        again.tap()
+        let summary = app.staticTexts["handoff-results-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 15), "A sent approval must end in a visible state")
+        XCTAssertTrue(summary.label.contains("1 approved") || summary.label.contains("needs confirmation"), summary.label)
+        XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists, "Never offered for a fresh blind resend")
+        let proof = try receipt(app)
+        let posts = (proof["requests"] as? [[String: String]] ?? []).filter { $0["method"] == "POST" && ($0["path"] ?? "").hasSuffix("/approve") }
+        XCTAssertEqual(posts.map { $0["path"] ?? "" }, ["/v1/estimates/00000000-0000-4000-8000-000000008101/approve"])
+        XCTAssertEqual((proof["registrationClientIDs"] as? [String])?.count, 1, "Only the first estimate's signature was registered")
+        XCTAssertEqual((proof["approvals"] as? [[String: Any]])?.count, 1)
+    }
     func testOneSignatureAtLargestTextKeepsShortCommit() throws {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         reachSignTogether(app)

@@ -12,7 +12,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     static let b = "00000000-0000-4000-8000-000000008102"
     static let c = "00000000-0000-4000-8000-000000008103"
     static let d = "00000000-0000-4000-8000-000000008104"
-    struct Response { let status: Int; let payload: Any; var error: URLError? = nil; var delay: Double = 0 }
+    struct Response { let status: Int; let payload: Any; var error: URLError? = nil; var delay: Double = 0; var hold = false }
     private let lock = NSRecursiveLock()
     private var approved: [String: [String: Any]] = [:]
     private var acceptances: [String: [String: Any]] = [:]
@@ -35,6 +35,8 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private var removedFirst = false
     private var slowed = false
     private var slowedPost = false
+    private var heldPost = false
+    private var heldReply: (@Sendable () -> Void)?
     private var mintFailed = false
     private var flags: [String] { ProcessInfo.processInfo.arguments }
     private var org: String { workspaceChanged ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID }
@@ -45,7 +47,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         }
         return flags.contains("--paper-preview-handoff-third-sent") ? [Self.a, Self.b, Self.c] : flags.contains("--paper-preview-handoff-all-statuses") ? [Self.a, Self.b, Self.c, Self.d] : [Self.a,Self.b]
     }
-    func reset() { lock.withLock { approved = [:]; acceptances = [:]; assets = [:]; clients = [:]; bytes = [:]; attempts = []; requests = []; lost = false; workspaceChanged = false; sessionEnded = false; choosingWorkspace = false; unlocks = 0; interruptMembership = false; rejectMembership = false; interruptUpload = false; changedRevision = false; changedFirstRevision = false; removedFirst = false; unlockAllowed = !flags.contains("--paper-preview-handoff-denied-unlock") } }
+    func reset() { lock.withLock { approved = [:]; acceptances = [:]; assets = [:]; clients = [:]; bytes = [:]; attempts = []; requests = []; lost = false; workspaceChanged = false; sessionEnded = false; choosingWorkspace = false; unlocks = 0; interruptMembership = false; rejectMembership = false; interruptUpload = false; changedRevision = false; changedFirstRevision = false; removedFirst = false; heldPost = false; heldReply = nil; unlockAllowed = !flags.contains("--paper-preview-handoff-denied-unlock") } }
     func changeWorkspace() { lock.withLock { workspaceChanged = true } }
     func endSession() { lock.withLock { sessionEnded = true } }
     func chooseWorkspace() { lock.withLock { choosingWorkspace = true } }
@@ -58,6 +60,18 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     func reviseFirst() { lock.withLock { changedFirstRevision = true } }
     func removeFirst() { lock.withLock { removedFirst = true } }
     func reviseSecond() { lock.withLock { changedRevision = true } }
+    func hold(_ deliver: @escaping @Sendable () -> Void) { lock.withLock { heldReply = deliver } }
+    /// Delivers the held approval answer once, and marks in the ledger where it was let go and whether
+    /// the run had already stopped at that moment.
+    func releaseHeldApproval(runStopped: Bool) {
+        let deliver: (@Sendable () -> Void)? = lock.withLock {
+            guard let held = heldReply else { return nil }
+            heldReply = nil
+            requests.append(["method": "RELEASE", "path": "held-approval-answer", "query": runStopped ? "run-stopped" : "run-live"])
+            return held
+        }
+        deliver?()
+    }
     var receipt: String { lock.withLock {
         let value: [String: Any] = ["requests": requests, "approvals": attempts, "confirmedIDs": approved.keys.sorted(), "registrationClientIDs": clients.keys.sorted(), "confirmedMediaIDs": assets.keys.filter { assets[$0]?["uploadState"] as? String == "stored" }.sorted(), "ownerAuthenticationAttempts": unlocks]
         return String(data: try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), encoding: .utf8)!
@@ -186,6 +200,10 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
             // `--paper-preview-handoff-slow-first-approval-post`: the first approval is recorded, its answer waits 8 s.
             if flags.contains("--paper-preview-handoff-slow-first-approval-post"), !slowedPost, request.httpMethod == "POST",
                request.url?.path.hasSuffix("/approve") == true { slowedPost = true; value.delay = 8 }
+            // `--paper-preview-handoff-hold-first-approval-post` (BYR-1844): the first approval is recorded and its
+            // answer waits, with no timer, until the Back tap lets it go. It then lands during the slide.
+            if flags.contains("--paper-preview-handoff-hold-first-approval-post"), !heldPost, request.httpMethod == "POST",
+               request.url?.path.hasSuffix("/approve") == true { heldPost = true; value.hold = true }
         }
         return value
     }

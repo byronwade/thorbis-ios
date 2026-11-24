@@ -103,4 +103,24 @@ final class JobEstimateBatchApprovalTests: XCTestCase {
         XCTAssertEqual(calls, ["a"])
         XCTAssertEqual(batch.states["b"], .notAttempted)
     }
+
+    /// BYR-1844: discard() while the first approval is out, then its answer lands. This re-checks
+    /// discard() on the post-answer branch (`!stillCurrent()`); it does not exercise leaveBatch(), which
+    /// the UI test testAnswerLandingDuringTheBackSlideSendsNothingMore covers. The first stays approved;
+    /// nothing after it starts, and nothing can be retried.
+    func testLeavingWhileTheFirstAnswerIsOutStopsTheNextWhenTheAnswerLandsAfter() async {
+        let batch = JobEstimateBatchApproval(order: ["a", "b", "c"], capture: capture)
+        var calls: [String] = []
+        await batch.run(stillCurrent: { batch.capture != nil }) { key, _ in
+            calls.append(key)
+            batch.discard()      // what leaveBatch() does, while a's request is out
+            return .approved     // a's answer lands after the tap, during the slide
+        }
+        XCTAssertEqual(calls, ["a"])
+        XCTAssertEqual(batch.states["a"], .approved)
+        XCTAssertEqual(batch.states["b"], .notAttempted)
+        XCTAssertEqual(batch.states["c"], .notAttempted)
+        XCTAssertNil(batch.capture)
+        XCTAssertFalse(batch.canRetry)
+    }
 }

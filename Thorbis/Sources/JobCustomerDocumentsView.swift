@@ -215,7 +215,14 @@ struct JobCustomerDocumentsView: View {
                 customerHandBackState(withAction: true)
             }
         }
-        .thorbisDestination(isPresented: $approving) {
+        .thorbisDestination(isPresented: $approving, willGoBack: {
+            // BYR-1844: Back stops an approve-together run at the tap, not when the slide has ended.
+            handoff?.leaveBatch()
+            #if DEBUG
+            // Test fixture only: an approval answer held for this moment lands now, during the slide.
+            JobEstimateHandoffPreview.shared.releaseHeldApproval(runStopped: handoff?.batch.map { $0.capture == nil } ?? false)
+            #endif
+        }) {
             // The handoff guards itself: a changed session or access shows its own hand-back screen.
             if let handoff {
                 JobEstimateHandoffView(model: handoff, handBack: beginHandBack)

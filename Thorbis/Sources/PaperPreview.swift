@@ -1004,7 +1004,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if let body { self.client?.urlProtocol(self, didLoad: body) }
                 self.client?.urlProtocolDidFinishLoading(self)
             }
-            if response.delay > 0 { DispatchQueue.global().asyncAfter(deadline: .now() + response.delay, execute: deliver) } else { deliver() }
+            if response.hold { JobEstimateHandoffPreview.shared.hold(deliver) }
+            else if response.delay > 0 { DispatchQueue.global().asyncAfter(deadline: .now() + response.delay, execute: deliver) } else { deliver() }
             return
         }
         if PaperPreview.isSavedWorkPreview, !["GET", "HEAD"].contains(request.httpMethod ?? "GET") {

@@ -874,6 +874,13 @@ extension JobEstimateHandoffModel {
         batch?.discard(); batch = nil; batchSubscription = nil
     }
 
+    /// BYR-1844: the customer tapped Back on this screen. batchLive is false from now on, so the run
+    /// stops before the next estimate, and before this estimate's approval request if it has not gone
+    /// out yet. A signature upload already started may still finish. An approval already on its way is
+    /// not cancelled here; it ends as before (approved, or "needs confirmation" when onDisappear's
+    /// endBatch cancels it).
+    func leaveBatch() { batch?.discard() }
+
     /// Starts (or retries) the run once; a second tap while it runs does nothing.
     func startBatchRun() {
         guard let batch, batchTask == nil, !batch.running, batch.capture != nil else { return }
