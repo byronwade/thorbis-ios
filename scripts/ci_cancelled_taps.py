@@ -100,6 +100,10 @@ AFTER_NEXT = 0.5
 # A first failure that says any of these is the app's or the runner's, never a lost tap.
 NOT_A_LOST_TAP = ("crash", "launch", "terminate", "lost connection", "not running", "exception",
                   "unexpected", "signal")
+# Lines XCTest writes among a test's steps that are its own notices, not steps the test took. The
+# second is what it says after waiting 60 s for the app's animations to finish, which can happen
+# inside a tap: the tap is still the step, and the wait after it is still the next one.
+NOT_A_STEP = ("Collecting debug information", "App animations complete notification not received")
 # Any line of that log that names backboardd, with the message after the subsystem. A message
 # can span lines; in compact style only its first line carries a time.
 STAMPED = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d")
@@ -318,7 +322,7 @@ def lost_tap(test, events):
     if any(word in message.lower() for word in NOT_A_LOST_TAP):
         return None, f"{name}: its first failure is not a wait ({message[:160]}). This failure stands."
     steps = [step for step in test["steps_before_error"]
-             if not step[1].startswith("Collecting debug information")]
+             if not step[1].startswith(NOT_A_STEP)]
     if len(steps) < 2:
         return None, f"{name}: fewer than two steps came before its first failure. This failure stands."
     (tapped_at, tap), (waited_at, wait) = steps[-2], steps[-1]
@@ -339,7 +343,7 @@ def lost_tap(test, events):
 def chord_steps(test):
     """The test's steps before its first failure, and whether it failed on the wait after a chord."""
     steps = [step for step in test["steps_before_error"] or ()
-             if not step[1].startswith("Collecting debug information")]
+             if not step[1].startswith(NOT_A_STEP)]
     shaped = len(steps) >= 2 and CHORD.match(steps[-2][1]) is not None and steps[-1][1].startswith("Waiting ")
     return steps, shaped
 

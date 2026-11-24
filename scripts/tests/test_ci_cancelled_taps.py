@@ -220,6 +220,34 @@ class DecideTests(unittest.TestCase):
                 self.assertEqual(again, [])
                 self.assertIn("xcodebuild counted", reasons[0])
 
+    def test_xctests_notice_that_the_app_never_went_idle_is_not_a_step(self):
+        # Run 45325427169, shard 5: inside one tap XCTest waited 60 s twice for the app's animations
+        # to finish and wrote a notice each time. It sent the tap between the two notices, backboardd
+        # logged the cancelled tap there, and the wait that failed came next.
+        notice = "App animations complete notification not received, will attempt to continue."
+        steps = (
+            (36.87, 'Tap "close-line" Button'),
+            (96.90, notice),
+            (157.85, notice),
+            (157.88, 'Waiting 5.0s for "invoice-line-price-310D7268" TextField to not exist'),
+            (163.39, "Collecting debug information to assist test failure triage"),
+        )
+        rows = session(case(B, "failed", 1, took=171.678, steps=steps))
+        again, reasons = taps.decide(rows, [at(1, 97.554)])
+        self.assertEqual(again, [B])
+        self.assertIn("the simulator cancelled the tap at t = 36.87s", reasons[0])
+        # The notices change nothing else: with no cancelled tap from the tap to the wait, it stands.
+        for events in ([at(1, 30.0)], [at(1, 160.0)]):
+            with self.subTest(events=events):
+                again, reasons = taps.decide(rows, events)
+                self.assertEqual(again, [])
+                self.assertIn("no cancelled tap in the simulator's log at its last tap", reasons[0])
+        # And a notice is not a wait: a tap followed only by notices is not "the wait right after a tap".
+        rows = session(case(B, "failed", 1, took=171.678, steps=steps[:3]))
+        again, reasons = taps.decide(rows, [at(1, 97.554)])
+        self.assertEqual(again, [])
+        self.assertIn("This failure stands", reasons[0])
+
     def test_a_failed_run_with_no_failed_test_is_not_rerun(self):
         again, reasons = taps.decide(session(case(A, "passed", 0)), [at(0, TAP)])
         self.assertEqual(again, [])
@@ -319,6 +347,13 @@ class LostChordTests(unittest.TestCase):
         again, reasons = taps.decide(session(chord_case()), [])
         self.assertEqual(again, [])
         self.assertIn("connections from the app", reasons[0])
+
+    def test_the_never_idle_notice_between_a_chord_and_its_wait_is_not_a_step(self):
+        notice = (17.40, "App animations complete notification not received, will attempt to continue.")
+        steps = CHORD_STEPS[:7] + (notice,) + CHORD_STEPS[7:]
+        again, reasons = taps.decide(session(chord_case(steps=steps)), [], keys=chord_keys())
+        self.assertEqual(again, [K])
+        self.assertIn("did not deliver the key chord it failed on", reasons[0])
 
     def test_a_chord_that_reached_the_app_stands(self):
         # The app was handed ⌘K as a command, matched or not: whatever happened next is the app's.
