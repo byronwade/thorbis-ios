@@ -136,4 +136,15 @@ final class MemberOverrideRulesTests: XCTestCase {
         XCTAssertEqual(grants[2]["capability"] as? String, "job.assign")
         XCTAssertEqual(grants[2]["scope"] as? String, "team")
     }
+
+    func testARefusalWhileAnExpiryIsBeingRecordedHasItsOwnWords() {
+        let pending = Problem(title: "Conflict", status: 409,
+                              detail: "permission override expiry is still being recorded; reload and try again",
+                              code: "permission_override_expiry_pending", category: "conflict")
+        XCTAssertEqual(MemberOverrideRules.refusal(pending), MemberOverrideRules.expiryPendingNote)
+        let stale = Problem(title: "Conflict", status: 409, detail: "the override changed; reload", code: "stale_version", category: "conflict")
+        XCTAssertNil(MemberOverrideRules.refusal(stale))
+        XCTAssertNil(MemberOverrideRules.refusal(Problem(title: "Conflict", status: 409, detail: nil)))
+        XCTAssertNil(MemberOverrideRules.refusal(URLError(.timedOut)))
+    }
 }

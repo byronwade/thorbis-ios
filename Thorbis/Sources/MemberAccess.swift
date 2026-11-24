@@ -239,6 +239,15 @@ enum MemberOverrideRules {
     /// In place of Role / Allow / Never for a permission set on the web.
     static let lockedNote = "Has a limit or a block set on the web. Change it there."
 
+    /// Said when a save is refused because earlier extra access ended moments ago and the server
+    /// has not recorded that end yet (409 "permission_override_expiry_pending").
+    static let expiryPendingNote = "This person\u{2019}s earlier extra access just ended and is still being recorded. Try again shortly."
+
+    /// The one refused save with words of its own; nil leaves the server's reason to be shown.
+    static func refusal(_ error: Error) -> String? {
+        (error as? Problem)?.code == "permission_override_expiry_pending" ? expiryPendingNote : nil
+    }
+
     /// The loaded policy, split into what the phone edits and what it keeps as it is.
     struct Loaded {
         var choices: [String: Choice] = [:]
@@ -450,7 +459,8 @@ struct MemberOverridesView: View {
         } catch is CancellationError {
         } catch {
             key.settle(after: error)
-            self.error = error.isConnectivityFailure ? "Changing access needs a connection." : error.localizedDescription
+            self.error = error.isConnectivityFailure ? "Changing access needs a connection."
+                : MemberOverrideRules.refusal(error) ?? error.localizedDescription
         }
     }
 }
