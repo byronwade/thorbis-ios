@@ -27,7 +27,7 @@ enum ReleaseNotes {
                 .init(symbol: "percent", title: "Percent off follows the plan",
                       detail: "A membership\u{2019}s percent off comes from its plan; only an owner or admin can set a different one."),
             ],
-            fixes: 3),
+            fixes: 9),
         ReleaseNote(
             id: "2026-11-23-at-address-kept-answers",
             date: "2026-11-23",

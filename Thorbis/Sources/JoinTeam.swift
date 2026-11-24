@@ -25,6 +25,8 @@ import UserNotifications
 enum InvitationLink {
     /// The web page the invitation email links to (TanStack `ACCEPT_INVITATION_PATH`).
     static let webPath = "/accept-invitation"
+    /// Where the web app is mounted on its site (TanStack `APP_BASE_PATH`); the root is the public site.
+    static let webAppBase = "/app"
 
     static func id(from url: URL) -> String? {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -64,11 +66,13 @@ enum InvitationLink {
         return ok ? value : nil
     }
 
-    /// Where the confirm-email link returns to: the web invitation page for this id, or nowhere
-    /// (Better Auth's own confirmation answer) without one.
-    static func verificationCallback(for id: String?) -> String? {
-        guard let id, validated(id) != nil else { return nil }
-        return "\(webPath)?id=\(id)"
+    /// Where the confirm-email link returns to, under the web app's base as the web page builds it
+    /// ("/app/accept-invitation?id=…"). Without an id, the web app's own start page: left out, Better
+    /// Auth would send the browser to "/", the public site.
+    static func verificationCallback(for id: String?) -> String {
+        guard let id, validated(id) != nil else { return webAppBase + "/" }
+        // A validated id is letters, digits, "-" and "_", which the web's encodeURIComponent keeps.
+        return "\(webAppBase)\(webPath)?id=\(id)"
     }
 }
 
@@ -81,7 +85,8 @@ struct InvitationDetails: Decodable, Equatable {
     let organizationName: String
     let inviterEmail: String?
     let email: String
-    let role: String
+    /// The server's column allows none; shown as `InvitationWords.role(nil)`.
+    let role: String?
     let expiresAt: String?
 }
 
@@ -89,7 +94,7 @@ struct InvitationDetails: Decodable, Equatable {
 struct UserInvitation: Decodable, Identifiable, Equatable {
     let id: String
     let email: String
-    let role: String
+    let role: String?
     let organizationId: String
     let organizationName: String?
     let status: String
@@ -146,8 +151,17 @@ enum InvitationRefusal: Equatable {
 
 /// Words for an invitation's role and dates.
 enum InvitationWords {
-    static func role(_ role: String) -> String {
-        TeamInvitation.roles.first { $0.id == role }?.label ?? role.statusLabel
+    /// Said for an invitation that carries no role.
+    static let noRole = "Team member"
+
+    static func role(_ role: String?) -> String {
+        guard let role = role?.trimmingCharacters(in: .whitespacesAndNewlines), !role.isEmpty else { return noRole }
+        return TeamInvitation.roles.first { $0.id == role }?.label ?? role.statusLabel
+    }
+
+    /// Whether the invitation names a role, so a sentence can say "as a Technician".
+    static func hasRole(_ role: String?) -> Bool {
+        !(role?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
     static func date(_ raw: String?) -> Date? { JobFiltering.date(raw) }
@@ -191,8 +205,7 @@ extension APIClient {
     }
 
     func sendInvitationVerificationEmail(email: String, invitationID: String?) async throws {
-        // A nil callbackURL is left out of the body.
-        struct Body: Encodable { let email: String; let callbackURL: String? }
+        struct Body: Encodable { let email: String; let callbackURL: String }
         let _: EmptyResponse = try await send("POST", "/api/auth/send-verification-email",
                                               body: Body(email: email, callbackURL: InvitationLink.verificationCallback(for: invitationID)),
                                               authed: false)
@@ -364,9 +377,11 @@ struct JoinTeamFlow: View {
 
     private func invitationLead(_ invitation: InvitationDetails) -> Text {
         let who = Text(invitation.inviterEmail ?? "Your team")
-        return who + Text(" invited you to ")
+        let lead = who + Text(" invited you to ")
             + Text(invitation.organizationName).foregroundStyle(Theme.foreground).fontWeight(.semibold)
-            + Text(" as a ")
+        // With no role the sentence ends at the company; the Role row below still says "Team member".
+        guard InvitationWords.hasRole(invitation.role) else { return lead + Text(".") }
+        return lead + Text(" as a ")
             + Text(InvitationWords.role(invitation.role)).foregroundStyle(Theme.foreground).fontWeight(.semibold)
             + Text(".")
     }
@@ -963,7 +978,7 @@ struct JoinWorkspaceView: View {
 
     private func sendVerification() async {
         guard let address = session.user?.email else { return }
-        // The confirm link returns to the invitation page; without a pasted id, to the plain page.
+        // The confirm link returns to the invitation page; without a pasted id, to the web app's start page.
         do {
             try await api.sendInvitationVerificationEmail(email: address, invitationID: pastedID)
             verificationSent = true

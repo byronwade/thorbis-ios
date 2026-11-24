@@ -59,7 +59,7 @@ struct PayoutsPage: View {
         let label = snapshot.balances.count > 1 ? "Available balance \u{00B7} \(balance.currency)" : "Available balance"
         return VStack(alignment: .leading, spacing: 0) {
             Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
-            Text(money(balance.available, currency: balance.currency))
+            Text(MoneyAvailability.amountText(balance.available, currency: balance.currency))
                 .font(Theme.font(40, weight: .bold)).tracking(-1.2).monospacedDigit()
                 .foregroundStyle(Theme.foreground)
                 .lineLimit(1).minimumScaleFactor(0.6)
@@ -70,7 +70,7 @@ struct PayoutsPage: View {
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(money(next?.amount ?? balance.pending, currency: balance.currency))
+                Text(MoneyAvailability.amountText(next?.amount ?? balance.pending, currency: balance.currency))
                     .font(Theme.font(15, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
             }
             .padding(.top, 12)
@@ -99,7 +99,7 @@ struct PayoutsPage: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
-                Text(money(payout.amount, currency: payout.currency))
+                Text(MoneyAvailability.amountText(payout.amount, currency: payout.currency))
                     .font(Theme.font(16, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
                 Text(state.word).font(Theme.font(14)).foregroundStyle(state.tint)
             }

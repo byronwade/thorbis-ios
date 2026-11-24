@@ -43,12 +43,13 @@ struct JobNoticeStatus: Decodable, Identifiable, Hashable {
 }
 
 extension APIClient {
-    func jobNotices(_ jobID: String) async throws -> (admission: String?, items: [JobNoticeStatus]) {
-        struct Page: Decodable { let admission: String?; let items: [JobNoticeStatus] }
+    /// The newest 100 notices. `more` is true when the server has older ones past this page.
+    func jobNotices(_ jobID: String) async throws -> (admission: String?, items: [JobNoticeStatus], more: Bool) {
+        struct Page: Decodable { let admission: String?; let items: [JobNoticeStatus]; let nextCursor: String? }
         let key = try Self.pathSegment(jobID)
         let page: Page = try await send("GET", "/v1/jobs/\(key)/notices",
                                         queryItems: [URLQueryItem(name: "limit", value: "100")])
-        return (page.admission, page.items)
+        return (page.admission, page.items, page.nextCursor != nil)
     }
 }
 

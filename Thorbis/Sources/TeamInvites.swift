@@ -30,6 +30,16 @@ private struct InvitationPage: Decodable { let items: [TeamInvitation]; let next
 
 extension APIClient {
     func pendingInvitations(requireComplete: Bool = false, whileCurrent: (() -> Bool)? = nil) async throws -> [TeamInvitation] {
+        try await invitationPages(requireComplete: requireComplete, whileCurrent: whileCurrent).items
+    }
+
+    /// The open invitations up to `cap`, and whether the server still had a page the loop did not
+    /// read, so the Team screen can say its list is not the whole set.
+    func openInvitations(cap: Int = 500) async throws -> (items: [TeamInvitation], more: Bool) {
+        try await invitationPages(requireComplete: false, whileCurrent: nil, cap: cap)
+    }
+
+    private func invitationPages(requireComplete: Bool, whileCurrent: (() -> Bool)?, cap: Int = 500) async throws -> (items: [TeamInvitation], more: Bool) {
         var items: [TeamInvitation] = []
         var cursor: String?
         var seen: Set<String> = []
@@ -42,7 +52,7 @@ extension APIClient {
             }
             pages += 1
             items += requireComplete ? page.items.filter { $0.status == "pending" } : page.items
-            if requireComplete && !items.isEmpty { return items }
+            if requireComplete && !items.isEmpty { return (items, page.nextCursor != nil) }
             if let next = page.nextCursor, requireComplete {
                 guard pages < 500, seen.insert(next).inserted, items.count < 500 else {
                     throw Problem(title: "Incomplete invitations", status: nil, detail: "Could not check every invitation.")
@@ -52,8 +62,9 @@ extension APIClient {
             // A cursor seen before means the server is going in circles; stop with what we have.
             if let next = page.nextCursor, !requireComplete, !seen.insert(next).inserted { break }
             cursor = page.nextCursor
-        } while cursor != nil && items.count < 500 && pages < 500
-        return items
+        } while cursor != nil && items.count < cap && pages < 500
+        // Every stop above leaves `cursor` set while the server still had a page to give.
+        return (items, cursor != nil)
     }
 
     func invite(email: String, role: String) async throws -> TeamInvitation {

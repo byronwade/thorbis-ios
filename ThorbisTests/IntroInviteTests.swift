@@ -237,9 +237,9 @@ final class IntroInviteTests: XCTestCase {
     }
 
     func testVerificationReturnsToTheInvitationPage() {
-        XCTAssertEqual(InvitationLink.verificationCallback(for: invitationID), "/accept-invitation?id=\(invitationID)")
-        XCTAssertNil(InvitationLink.verificationCallback(for: nil))
-        XCTAssertNil(InvitationLink.verificationCallback(for: ""))
+        XCTAssertEqual(InvitationLink.verificationCallback(for: invitationID), "/app/accept-invitation?id=\(invitationID)")
+        XCTAssertEqual(InvitationLink.verificationCallback(for: nil), "/app/")
+        XCTAssertEqual(InvitationLink.verificationCallback(for: ""), "/app/")
     }
 
     // MARK: Refusals

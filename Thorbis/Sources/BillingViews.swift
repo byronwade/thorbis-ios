@@ -42,7 +42,9 @@ struct BillingScheduleCommandResult: Decodable {
 }
 
 extension APIClient {
-    func billingSchedules() async throws -> [BillingSchedule] {
+    /// Reads schedules page by page up to `cap`. `more` is true when the server still had a page
+    /// the loop did not read, so the list can say it is not the whole set.
+    func billingSchedules(cap: Int = 2_000) async throws -> (items: [BillingSchedule], more: Bool) {
         var items: [BillingSchedule] = []
         var cursor: String?
         var seen: Set<String> = []
@@ -50,10 +52,11 @@ extension APIClient {
             let page: Items<BillingSchedule> = try await send("GET", "/v1/billing-schedules", cursor: cursor)
             items += page.items
             // A cursor the server already handed out means it is going in circles; stop with what we have.
-            guard let next = page.nextCursor, seen.insert(next).inserted else { break }
+            guard let next = page.nextCursor else { return (items, false) }
+            guard seen.insert(next).inserted else { return (items, true) }
             cursor = next
-        } while items.count < 2_000 && seen.count < 200
-        return items
+        } while items.count < cap && seen.count < 200
+        return (items, true)
     }
 
     func billingSchedule(_ id: String) async throws -> BillingScheduleProgress {
@@ -84,6 +87,8 @@ struct BillingSchedulesView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @State private var schedules: [BillingSchedule] = []
+    /// The server had more schedules than the app read.
+    @State private var more = false
     @State private var loading = true
     @State private var error: String?
 
@@ -110,6 +115,13 @@ struct BillingSchedulesView: View {
                         .buttonStyle(RowPressStyle())
                     }
                 }
+                if more && !schedules.isEmpty {
+                    Text(PartialList.note(shown: schedules.count, of: "schedules"))
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, ListRoom.gutter).padding(.top, 12)
+                        .accessibilityIdentifier("billing-schedules-partial")
+                }
                 if !loading && schedules.isEmpty && error == nil {
                     ListRoomEmpty(glyph: .money, title: "No billing schedules",
                                   message: "A schedule starts when a job is billed in stages or takes a deposit.")
@@ -132,7 +144,8 @@ struct BillingSchedulesView: View {
         do {
             let loaded = try await api.billingSchedules()
             guard session.generation == generation else { return }
-            schedules = loaded.sorted { $0.createdAt > $1.createdAt }
+            schedules = loaded.items.sorted { $0.createdAt > $1.createdAt }
+            more = loaded.more
             error = nil
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }

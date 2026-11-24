@@ -173,7 +173,11 @@ struct SetupWizardView: View {
     /// True while Continue is working, so a double tap can't finish two steps.
     @State private var advancing = false
     @State private var priceItems: [PriceBookListItem] = []
+    /// The price book has rows past the first page the wizard read.
+    @State private var priceMore = false
     @State private var invites: [TeamInvitation] = []
+    /// The server had more open invitations than the wizard read.
+    @State private var invitesMore = false
     @State private var addingItem = false
     @State private var inviting = false
     @State private var showStripe = false
@@ -269,7 +273,11 @@ struct SetupWizardView: View {
             SetupProgress.save(next, organizationID: session.activeOrganization?.id)
             Task {
                 if next == .services { await loadItems() }
-                if next == .team { invites = (try? await api.pendingInvitations()) ?? [] }
+                if next == .team {
+                    let open = try? await api.openInvitations()
+                    invites = open?.items ?? []
+                    invitesMore = open?.more ?? false
+                }
             }
         }
     }
@@ -475,7 +483,7 @@ struct SetupWizardView: View {
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(priceItems.isEmpty ? "Add your first service" : "Add another service")
-                groupLabel("Your price book", trailing: priceItems.isEmpty ? nil : "\(priceItems.count)")
+                groupLabel("Your price book", trailing: priceItems.isEmpty ? nil : SetupPriceBookCount.total(priceItems.count, more: priceMore))
                 PaperCard {
                     if priceItems.isEmpty {
                         Text("Nothing in your price book yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
@@ -504,8 +512,8 @@ struct SetupWizardView: View {
                         }
                     }
                 }
-                if priceItems.count > 8 {
-                    Text("+ \(priceItems.count - 8) more in your price book · edit any price")
+                if let line = SetupPriceBookCount.moreLine(count: priceItems.count, shown: 8, more: priceMore) {
+                    Text(line)
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 4).padding(.top, 10)
                 }
@@ -516,7 +524,7 @@ struct SetupWizardView: View {
             // the row opens the invite sheet.)
             VStack(alignment: .leading, spacing: 0) {
                 if !invites.isEmpty {
-                    groupLabel("Invited", trailing: "\(invites.count)").padding(.top, -24)
+                    groupLabel("Invited", trailing: SetupPriceBookCount.total(invites.count, more: invitesMore)).padding(.top, -24)
                     PaperCard {
                         ForEach(Array(invites.enumerated()), id: \.element.id) { index, invite in
                             if index > 0 { WellDivider() }
@@ -524,6 +532,11 @@ struct SetupWizardView: View {
                         }
                     }
                     .padding(.bottom, 10)
+                    if invitesMore {
+                        Text(PartialList.note(shown: invites.count, of: "invitations"))
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 4).padding(.bottom, 10)
+                    }
                 }
                 addRow(invites.isEmpty ? "Invite a teammate" : "Add another teammate") { inviting = true }
                 note(invites.isEmpty ? "You choose each person’s role when you invite them. Change roles and permissions anytime from Business settings."
@@ -820,12 +833,28 @@ struct SetupWizardView: View {
     }
 
     private func loadItems() async {
+        // One page is enough to show the first rows; when the server has more, the count says "at least".
         guard let page = try? await api.priceBookItems(limit: 50) else { return }
         priceItems = page.items.filter { $0.archivedAt == nil }
+        priceMore = page.nextCursor != nil
     }
 
     private func loadPayments() async {
         if (try? await api.merchantReadiness())?.chargesReady == true { finished.insert(.payments) }
+    }
+}
+
+/// The Services step's price book counts. The wizard reads one page, so when the server has more
+/// rows the numbers are a floor, not the total.
+enum SetupPriceBookCount {
+    /// The count beside "Your price book": "12", or "50+" when more rows exist.
+    static func total(_ count: Int, more: Bool) -> String { more ? "\(count)+" : "\(count)" }
+
+    /// The line under the first `shown` rows, or nil when every row is already on screen.
+    static func moreLine(count: Int, shown: Int, more: Bool) -> String? {
+        let extra = count - shown
+        if more { return extra > 0 ? "+ at least \(extra) more in your price book · edit any price" : "+ more in your price book · edit any price" }
+        return extra > 0 ? "+ \(extra) more in your price book · edit any price" : nil
     }
 }
 

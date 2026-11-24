@@ -49,8 +49,9 @@ struct OrganizationRole: Codable, Identifiable, Hashable {
 
 extension APIClient {
     func organizationRoles() async throws -> [OrganizationRole] {
-        let page: Items<OrganizationRole> = try await send("GET", "/v1/organization/roles")
-        return page.items.sorted { $0.revision.name.localizedCaseInsensitiveCompare($1.revision.name) == .orderedAscending }
+        // The server pages roles (50 by default, newest first): read every page so the oldest roles can be picked too.
+        let roles: [OrganizationRole] = try await allPages("/v1/organization/roles")
+        return roles.sorted { $0.revision.name.localizedCaseInsensitiveCompare($1.revision.name) == .orderedAscending }
     }
 
     /// Moves a member onto a custom role. The member comes from the route; the versions make a
@@ -118,6 +119,8 @@ struct TeamView: View {
     @State private var createRoleKey = RetryKey<String>()
     @State private var editingRoleID: String?
     @State private var invitations: [TeamInvitation] = []
+    /// The server had more open invitations than the app read.
+    @State private var invitationsMore = false
     @State private var inviting = false
     @State private var notice: String?
     @State private var removing: RoleMember?
@@ -213,6 +216,7 @@ struct TeamView: View {
                         }
                     }
                     .paperCardMargin().padding(.top, 22)
+                    if invitationsMore { TeamFootnote(PartialList.note(shown: invitations.count, of: "invitations")) }
                 }
                 // Team additions (people not yet in Thorbis) and the team's goals are the team's own
                 // pages: they open from here, not from the menu or Business settings.
@@ -347,7 +351,10 @@ struct TeamView: View {
             guard session.generation == generation else { return }
             members = loaded
             if canManage { customRoles = (try? await api.organizationRoles()) ?? customRoles }
-            if canInvite { invitations = (try? await api.pendingInvitations()) ?? invitations }
+            if canInvite, let open = try? await api.openInvitations() {
+                invitations = open.items
+                invitationsMore = open.more
+            }
             error = nil
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }

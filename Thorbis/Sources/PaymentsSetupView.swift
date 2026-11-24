@@ -100,6 +100,32 @@ struct MoneyAvailability: Decodable, Equatable {
     let balances: [Balance]
     let payouts: [Payout]
     let attention: Attention?
+
+    /// Stripe's balance and payout amounts are in the currency's smallest unit, and the server
+    /// passes them through unchanged. Stripe's own lists decide how many decimal places that unit
+    /// has: yen and the others below have none, dinars and the like have three, everything else two
+    /// (Icelandic krona and Ugandan shillings too, which Stripe still sends in hundredths).
+    private static let zeroDecimal: Set<String> = [
+        "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "VND", "VUV", "XAF", "XOF", "XPF",
+    ]
+    private static let threeDecimal: Set<String> = ["BHD", "JOD", "KWD", "OMR", "TND"]
+
+    static func minorUnitDigits(_ currency: String) -> Int {
+        let code = currency.uppercased()
+        if zeroDecimal.contains(code) { return 0 }
+        if threeDecimal.contains(code) { return 3 }
+        return 2
+    }
+
+    /// One balance or payout amount as the phone shows it: 1000 JPY is "¥1,000", 1000 USD is
+    /// "$10.00", 1000 KWD is one dinar. Two-decimal currencies read exactly as `money` writes them.
+    static func amountText(_ minorUnits: Int, currency: String) -> String {
+        let digits = minorUnitDigits(currency)
+        guard digits != 2 else { return money(minorUnits, currency: currency) }
+        var divisor: Decimal = 1
+        for _ in 0..<digits { divisor *= 10 }
+        return (Decimal(minorUnits) / divisor).formatted(.currency(code: currency))
+    }
 }
 
 extension APIClient {
@@ -284,7 +310,7 @@ struct PaymentsSetupView: View {
                             }
                             Text(payout.title).font(Theme.font(16, weight: .medium))
                             Spacer()
-                            Text(money(payout.amount, currency: payout.currency))
+                            Text(MoneyAvailability.amountText(payout.amount, currency: payout.currency))
                                 .font(Theme.monoFont(16, weight: .semibold)).moneyStyle(.row)
                         }
                         Text(payout.explanation).font(Theme.font(14)).foregroundStyle(Theme.muted)
@@ -302,7 +328,7 @@ struct PaymentsSetupView: View {
             Text(title).font(Theme.font(16, weight: .medium))
             Spacer()
             // Paper: a money row's figure in 16 Semibold tabular beside its 16 Medium label.
-            Text(money(amount, currency: currency)).font(Theme.monoFont(16, weight: .semibold)).moneyStyle(.row)
+            Text(MoneyAvailability.amountText(amount, currency: currency)).font(Theme.monoFont(16, weight: .semibold)).moneyStyle(.row)
                 .foregroundStyle(amount < 0 ? Theme.warning : Theme.foreground)
         }
         .padding(.horizontal, PaperCardMetrics.inset)

@@ -40,6 +40,37 @@ extension APIClient {
     }
 }
 
+/// What the assign sheet says when the server refuses an assignment with a 409. POST
+/// /v1/jobs/{id}/assign answers 409 two ways (domains/jobs commands.ts assignJob): code
+/// "dispatch_changed" when the job's tech changed since the sheet loaded it, and no code with
+/// "cannot assign job in status completed|canceled" when the job is closed.
+enum JobAssignmentRefusal {
+    static let assignmentChanged = "This job's assignment changed. Review the latest assignment before saving."
+    static let completed = "This job is completed, so it can\u{2019}t be assigned."
+    static let canceled = "This job was canceled, so it can\u{2019}t be assigned."
+
+    static func message(for problem: Problem) -> String {
+        if problem.code == "dispatch_changed" { return assignmentChanged }
+        if problem.code == nil {
+            switch problem.detail?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            case "cannot assign job in status completed"?: return completed
+            case "cannot assign job in status canceled"?: return canceled
+            default: break
+            }
+        }
+        // Any other refusal: the server's own reason, as the rest of this screen shows one.
+        return problem.localizedDescription
+    }
+
+    /// The dispatch board moves a job through the same route. It keeps its own words for a tech
+    /// someone else changed, and says the same as the sheet for a closed job.
+    static let boardChanged = "Someone changed this job's tech meanwhile. Pull to refresh and try again."
+
+    static func boardMessage(for problem: Problem) -> String {
+        problem.code == "dispatch_changed" ? boardChanged : message(for: problem)
+    }
+}
+
 /// Paper 53A's radio: a 22pt ring that fills brand when chosen.
 private struct AssigneeRadio: View {
     let selected: Bool
@@ -290,7 +321,7 @@ struct JobAssignmentView: View {
         } catch is CancellationError {
         } catch let problem as Problem where problem.status == 409 {
             guard generation == session.generation else { return }
-            error = "This job's assignment changed. Review the latest assignment before saving."
+            error = JobAssignmentRefusal.message(for: problem)
             await load(keepError: true)
         } catch {
             guard generation == session.generation else { return }
