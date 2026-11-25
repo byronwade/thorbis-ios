@@ -27,7 +27,7 @@ enum ReleaseNotes {
                 .init(symbol: "calendar.badge.clock", title: "Book a follow-up again to check",
                       detail: "When Thorbis doesn\u{2019}t answer a booking, Book visit again checks it and never books it twice."),
             ],
-            fixes: 1),
+            fixes: 3),
         ReleaseNote(
             id: "2026-11-24-refused-refunds",
             date: "2026-11-24",

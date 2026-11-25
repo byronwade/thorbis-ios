@@ -332,15 +332,25 @@ struct OfficeSlotBookSheet: View {
             } catch {
                 // A cancelled or unanswered request may still have booked it: the queue keeps the id.
                 let answer = OfficeSlotBookingAttempt.answer(for: error)
-                let words = settle(sent, answer)
+                var settled = sent
+                settled.settle(answer, label: Self.label)
+                let kept = queue.bookingAttempts.keep(settled, for: review.id)
                 if answer == .booked {
                     // Thorbis answered 201 but the body could not be read: it booked the window sent.
                     booked(request.plannedWindow)
-                } else {
-                    problem = words
+                } else if kept, case .refused = answer, settled.needsCheck {
+                    // Once the job changed, every try with this id is refused even when the first
+                    // one booked, so read the follow-up itself, once for this refusal.
+                    let read: OfficeSlotBookingAttempt.ReviewCheck
+                    do { read = .read(try await api.officeSlotReview(review.id)) } catch { read = .unread }
+                    settled.check(read, reviewId: review.id)
+                    queue.bookingAttempts.keep(settled, for: review.id)
                 }
                 // Read the queue again behind the sheet: the row may have changed or gone.
-                await queue.load(api: api, identity: OfficeSlotQueue.identity(session))
+                let listRead = await queue.reread(api: api, identity: OfficeSlotQueue.identity(session))
+                settled.noteReread(listRead: listRead)
+                queue.bookingAttempts.keep(settled, for: review.id)
+                if answer != .booked { problem = settled.words }
             }
         }
     }
@@ -376,9 +386,9 @@ struct OfficeSlotBookSheet: View {
             } catch {
                 // A close whose answer was lost may have landed; a refusal after it finds the row gone.
                 let answer = OfficeSlotCloseWords.answer(for: error)
-                await queue.load(api: api, identity: OfficeSlotQueue.identity(session))
-                let stillWaiting = queue.problem != nil || queue.reviews.contains { $0.id == review.id }
-                problem = OfficeSlotCloseWords.words(answer, stillWaiting: stillWaiting)
+                let listRead = await queue.reread(api: api, identity: OfficeSlotQueue.identity(session))
+                let stillWaiting = !listRead || queue.reviews.contains { $0.id == review.id }
+                problem = OfficeSlotCloseWords.words(answer, stillWaiting: stillWaiting, listRead: listRead)
             }
         }
     }

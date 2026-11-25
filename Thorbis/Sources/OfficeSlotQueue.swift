@@ -14,8 +14,9 @@ struct OfficeSlotWindow: Codable, Equatable, Sendable {
     let endsAt: String
 }
 
-/// One open office review (the server's openOfficeReviewSchema). Only what the phone shows or
-/// must send back is read; the booking evidence fields are left alone.
+/// One office review (the server's officeReviewSchema): an open one from the queue, or one read on
+/// its own, which may be closed. Only what the phone shows, must send back or checks is read; the
+/// booking evidence fields are left alone.
 struct OfficeSlotReview: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let sourceJobId: String
@@ -33,12 +34,16 @@ struct OfficeSlotReview: Decodable, Identifiable, Equatable, Sendable {
     let decisionVersion: Int
     let status: String
     let createdAt: String?
+    /// How a closed review was closed (resolution.kind): "appointment" once it was booked,
+    /// "no_action" once it was closed without a visit. Nil while it is open.
+    let resolutionKind: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, sourceJobId, customerId, locationId, requestedWindow, timeZone, serviceNeed
-        case resourceRequirement, reasonCode, decisionVersion, status, createdAt
+        case resourceRequirement, reasonCode, decisionVersion, status, createdAt, resolution
     }
     private struct Requirement: Decodable { let technicianId: String? }
+    private struct Resolution: Decodable { let kind: String? }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -54,20 +59,34 @@ struct OfficeSlotReview: Decodable, Identifiable, Equatable, Sendable {
         reasonCode = (try? values.decodeIfPresent(String.self, forKey: .reasonCode)) ?? ""
         status = (try? values.decodeIfPresent(String.self, forKey: .status)) ?? "open"
         createdAt = try? values.decodeIfPresent(String.self, forKey: .createdAt)
+        resolutionKind = (try? values.decodeIfPresent(Resolution.self, forKey: .resolution))?.kind
     }
 
     init(id: String, sourceJobId: String, customerId: String? = nil, locationId: String? = nil,
          requestedWindow: OfficeSlotWindow? = nil, timeZone: String? = nil, serviceNeed: String,
          technicianId: String? = nil, reasonCode: String = "capacity_unavailable", decisionVersion: Int = 1,
-         status: String = "open", createdAt: String? = nil) {
+         status: String = "open", createdAt: String? = nil, resolutionKind: String? = nil) {
         self.id = id; self.sourceJobId = sourceJobId; self.customerId = customerId; self.locationId = locationId
         self.requestedWindow = requestedWindow; self.timeZone = timeZone; self.serviceNeed = serviceNeed
         self.technicianId = technicianId; self.reasonCode = reasonCode; self.decisionVersion = decisionVersion
-        self.status = status; self.createdAt = createdAt
+        self.status = status; self.createdAt = createdAt; self.resolutionKind = resolutionKind
     }
 
     /// The source job's number as the app writes it everywhere ("JOB-2214").
     var jobRef: String { "JOB-" + String(sourceJobId.suffix(4)).uppercased() }
+}
+
+/// One review read on its own (GET …/{id}). Stricter than a queue row: the server always sends a
+/// status, so a body without a string status is not counted as open; it is a read that failed.
+struct OfficeSlotReviewRead: Decodable {
+    let review: OfficeSlotReview
+
+    private enum CodingKeys: String, CodingKey { case status }
+
+    init(from decoder: Decoder) throws {
+        _ = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .status)
+        review = try OfficeSlotReview(from: decoder)
+    }
 }
 
 /// A page of the queue. A row the phone cannot read is skipped, not the whole queue.
@@ -221,6 +240,14 @@ extension APIClient {
         return all
     }
 
+    /// One follow-up as it stands now, open or closed (GET …/{id}), always from the server. The
+    /// Schedule sheet reads it once after a refused try that followed one with no answer.
+    /// A body without a status throws (OfficeSlotReviewRead), so it counts as unread, not open.
+    func officeSlotReview(_ id: String) async throws -> OfficeSlotReview {
+        let read: OfficeSlotReviewRead = try await send("GET", try officeReviewPath(id, ""), requireFresh: true)
+        return read.review
+    }
+
     func bookOfficeSlot(_ id: String, request: OfficeSlotBookRequest) async throws -> OfficeSlotBooked {
         try await send("POST", try officeReviewPath(id, "/book"), body: request)
     }
@@ -256,6 +283,13 @@ final class OfficeSlotQueue: ObservableObject {
     }
 
     func load(api: APIClient, identity: String) async {
+        _ = await reread(api: api, identity: identity)
+    }
+
+    /// Reads the list, as `load` does. True only when this read brought the list back for this
+    /// identity, so words after an answer say "The list has been read again." only when it was.
+    @discardableResult
+    func reread(api: APIClient, identity: String) async -> Bool {
         if identity != self.identity {
             self.identity = identity
             reviews = []; loaded = false; problem = nil
@@ -265,22 +299,25 @@ final class OfficeSlotQueue: ObservableObject {
         if PaperPreview.enabled {
             if !loaded { reviews = OfficeSlotPreview.reviews }
             loaded = true
-            return
+            return true
         }
         #endif
         loading = true
         defer { loading = false }
         do {
             let listed = try await api.officeSlotReviews()
-            guard identity == self.identity else { return }
+            guard identity == self.identity else { return false }
             // Oldest first: the follow-up that has waited longest leads.
             reviews = listed.filter { $0.status == "open" }.sorted { ($0.createdAt ?? "") < ($1.createdAt ?? "") }
             loaded = true
             problem = nil
+            return true
         } catch is CancellationError {
+            return false
         } catch {
-            guard identity == self.identity else { return }
+            guard identity == self.identity else { return false }
             problem = "Could not load the follow-ups waiting for a slot. \(error.localizedDescription)"
+            return false
         }
     }
 

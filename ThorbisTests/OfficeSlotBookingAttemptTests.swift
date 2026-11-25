@@ -154,6 +154,154 @@ final class OfficeSlotBookingAttemptTests: XCTestCase {
         XCTAssertEqual(a.phase, .unconfirmed(first: two))
     }
 
+    // A refusal while unconfirmed reads the follow-up once (BYR-1878): once the job was reassigned,
+    // moved or canceled, every try with this id is refused even when the first one booked.
+    private let reviewId = "018f0000-0000-7000-8000-000000000066"
+    private let jobChanged = "office review job facts are no longer current"
+    private func review(_ status: String, _ kind: String? = nil, id: String? = nil) -> OfficeSlotReview {
+        OfficeSlotReview(id: id ?? reviewId, sourceJobId: "018f0000-0000-7000-8000-000000002214", serviceNeed: "Capacitor check",
+                         status: status, resolutionKind: kind)
+    }
+    private func refusedAfterNoAnswer() -> OfficeSlotBookingAttempt {
+        var a = attempt()
+        _ = a.request(decisionVersion: 2, window: two)
+        a.settle(.noAnswer, label: label)
+        _ = a.request(decisionVersion: 2, window: two)
+        a.settle(.refused(jobChanged), label: label)
+        return a
+    }
+    private var refusedWords: String {
+        "Thorbis turned down this try: \(jobChanged). Your first try, for 2 PM, may still have gone through. Tap Book visit again to check."
+    }
+
+    func testARefusalWhileUnconfirmedNeedsOneCheckAndNothingElseDoes() {
+        XCTAssertTrue(refusedAfterNoAnswer().needsCheck)
+        var a = attempt()
+        XCTAssertFalse(a.needsCheck)
+        _ = a.request(decisionVersion: 2, window: two)
+        a.settle(.noAnswer, label: label)
+        _ = a.request(decisionVersion: 2, window: two)
+        // While a request is in flight there is nothing to check.
+        XCTAssertFalse(a.needsCheck)
+        var booked = refusedAfterNoAnswer()
+        booked.check(.read(review("superseded", "appointment")), reviewId: reviewId)
+        XCTAssertFalse(booked.needsCheck)
+    }
+
+    func testACheckThatFindsItBookedSaysAlreadyBookedNamesNoTimeAndSendsNothing() {
+        var a = refusedAfterNoAnswer()
+        a.check(.read(review("superseded", "appointment")), reviewId: reviewId)
+        XCTAssertEqual(a.phase, .alreadyBooked)
+        XCTAssertEqual(a.words, alreadyBooked)
+        XCTAssertFalse((a.words ?? "").contains("2 PM"))
+        XCTAssertTrue(a.isDone)
+        XCTAssertNil(a.request(decisionVersion: 2, window: two))
+        XCTAssertEqual(a.words, alreadyBooked)
+    }
+
+    func testACheckThatFindsItClosedSaysClosedAndSendsNothing() {
+        var a = refusedAfterNoAnswer()
+        a.check(.read(review("resolved", "no_action")), reviewId: reviewId)
+        XCTAssertEqual(a.phase, .closed)
+        XCTAssertEqual(a.words, "This follow-up was closed without a visit. The list has been read again.")
+        XCTAssertEqual(a.words, OfficeSlotBookingAttempt.checkedClosedMessage)
+        XCTAssertTrue(a.isDone)
+        XCTAssertNil(a.request(decisionVersion: 2, window: two))
+        // Nothing can be in flight once it is closed, so a stray settle changes nothing.
+        XCTAssertNil(a.settle(.noAnswer, label: label))
+        XCTAssertEqual(a.phase, .closed)
+    }
+
+    func testACheckThatFindsItStillOpenKeepsTheRefusalWords() {
+        var a = refusedAfterNoAnswer()
+        a.check(.read(review("open")), reviewId: reviewId)
+        XCTAssertEqual(a.phase, .unconfirmed(first: two))
+        XCTAssertEqual(a.words, refusedWords)
+        // The same id is sent again on the next tap.
+        XCTAssertEqual(a.request(decisionVersion: 2, window: two)?.intentId, id)
+    }
+
+    func testACheckThatCannotReadTheFollowUpSaysSoAndStaysUnconfirmed() {
+        let unread = "\(refusedWords) The follow-up couldn\u{2019}t be read to check."
+        // 403, 404 or no answer.
+        var a = refusedAfterNoAnswer()
+        a.check(.unread, reviewId: reviewId)
+        XCTAssertEqual(a.phase, .unconfirmed(first: two))
+        XCTAssertEqual(a.words, unread)
+        // An answer about another review.
+        var b = refusedAfterNoAnswer()
+        b.check(.read(review("superseded", "appointment", id: "018f0000-0000-7000-8000-000000000099")), reviewId: reviewId)
+        XCTAssertEqual(b.phase, .unconfirmed(first: two))
+        XCTAssertEqual(b.words, unread)
+        // A closed review whose resolution could not be read says nothing about how it was closed.
+        var c = refusedAfterNoAnswer()
+        c.check(.read(review("superseded")), reviewId: reviewId)
+        XCTAssertEqual(c.phase, .unconfirmed(first: two))
+        XCTAssertEqual(c.words, unread)
+        XCTAssertEqual(c.request(decisionVersion: 2, window: two)?.intentId, id)
+    }
+
+    func testCheckingTheSameRefusalTwiceSaysCouldntReadOnce() {
+        let unread = "\(refusedWords) The follow-up couldn\u{2019}t be read to check."
+        var a = refusedAfterNoAnswer()
+        a.check(.unread, reviewId: reviewId)
+        a.check(.unread, reviewId: reviewId)
+        XCTAssertEqual(a.words, unread)
+        // The next refusal starts from its own words and is checked afresh.
+        _ = a.request(decisionVersion: 2, window: two)
+        a.settle(.refused(jobChanged), label: label)
+        XCTAssertEqual(a.words, refusedWords)
+        a.check(.unread, reviewId: reviewId)
+        XCTAssertEqual(a.words, unread)
+    }
+
+    func testACheckChangesNothingUnlessUnconfirmed() {
+        var fresh = attempt()
+        _ = fresh.request(decisionVersion: 2, window: two)
+        fresh.settle(.refused(jobChanged), label: label)
+        let before = fresh
+        fresh.check(.read(review("superseded", "appointment")), reviewId: reviewId)
+        XCTAssertEqual(fresh, before)
+        var used = attempt()
+        _ = used.request(decisionVersion: 2, window: two)
+        used.settle(.alreadyUsed, label: label)
+        used.check(.read(review("resolved", "no_action")), reviewId: reviewId)
+        XCTAssertEqual(used.phase, .alreadyBooked)
+        XCTAssertEqual(used.words, alreadyBooked)
+    }
+
+    func testTheWordsSayTheListWasReadAgainOnlyWhenItWas() {
+        var a = attempt()
+        _ = a.request(decisionVersion: 2, window: two)
+        a.settle(.refused("appointment capacity is unavailable for this office review"), label: label)
+        var read = a
+        read.noteReread(listRead: true)
+        XCTAssertEqual(read.words, "Could not book this follow-up: appointment capacity is unavailable for this office review. The list has been read again.")
+        a.noteReread(listRead: false)
+        XCTAssertEqual(a.words, "Could not book this follow-up: appointment capacity is unavailable for this office review. The list couldn\u{2019}t be read again.")
+        var closed = refusedAfterNoAnswer()
+        closed.check(.read(review("resolved", "no_action")), reviewId: reviewId)
+        closed.noteReread(listRead: false)
+        XCTAssertEqual(closed.words, "This follow-up was closed without a visit. The list couldn\u{2019}t be read again.")
+        // Words that never said the list was read stay as they are.
+        var unconfirmed = refusedAfterNoAnswer()
+        unconfirmed.noteReread(listRead: false)
+        XCTAssertEqual(unconfirmed.words, refusedWords)
+        XCTAssertEqual(OfficeSlotBookingAttempt.wordsAfterReread(OfficeSlotBookingAttempt.noAnswerMessage, listRead: false),
+                       OfficeSlotBookingAttempt.noAnswerMessage)
+    }
+
+    func testTheStoreSaysWhetherItKeptTheAttempt() {
+        var store = OfficeSlotBookingAttempts()
+        var a = store.attempt(for: "review-1")
+        _ = a.request(decisionVersion: 2, window: two)
+        XCTAssertTrue(store.keep(a, for: "review-1"))
+        store.removeAll()
+        // A late answer for a store that was cleared is not put back, so nothing is read for it.
+        a.settle(.noAnswer, label: label)
+        XCTAssertFalse(store.keep(a, for: "review-1"))
+    }
+
     func testOnceAlreadyBookedNothingMoreIsSent() {
         var a = attempt()
         _ = a.request(decisionVersion: 2, window: two)
@@ -213,5 +361,8 @@ final class OfficeSlotBookingAttemptTests: XCTestCase {
                        "This follow-up is no longer waiting. The list has been read again.")
         XCTAssertEqual(OfficeSlotCloseWords.words(.refused("office review job is no longer current"), stillWaiting: true),
                        "Could not close this follow-up: office review job is no longer current. The list has been read again.")
+        XCTAssertEqual(OfficeSlotCloseWords.words(.refused("office review job is no longer current"), stillWaiting: true, listRead: false),
+                       "Could not close this follow-up: office review job is no longer current. The list couldn\u{2019}t be read again.")
+        XCTAssertEqual(OfficeSlotCloseWords.words(.noAnswer, stillWaiting: true, listRead: false), OfficeSlotCloseWords.noAnswerMessage)
     }
 }

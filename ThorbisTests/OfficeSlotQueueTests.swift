@@ -44,6 +44,37 @@ final class OfficeSlotQueueTests: XCTestCase {
         XCTAssertEqual(review.timeZone, "America/Los_Angeles")
     }
 
+    func testDecodesOneReviewReadOnItsOwnOpenOrClosed() throws {
+        // GET /v1/scheduling/office-reviews/{id} answers officeReviewSchema: open, or closed with its resolution.
+        let open = try decode(OfficeSlotReview.self, reviewJSON)
+        XCTAssertEqual(open.status, "open")
+        XCTAssertNil(open.resolutionKind)
+        let closedFields = #","resolvedByUserId":"018f0000-0000-7000-8000-000000000003","resolvedAt":"2026-09-01T12:01:00.000Z"}"#
+        let bookedJSON = reviewJSON.replacingOccurrences(of: #""status":"open"}"#, with:
+            #""status":"superseded","resolution":{"kind":"appointment","appointmentId":"018f0000-0000-7000-8000-000000000068"}"# + closedFields)
+        let booked = try decode(OfficeSlotReview.self, bookedJSON)
+        XCTAssertEqual(booked.id, "018f0000-0000-7000-8000-000000000066")
+        XCTAssertEqual(booked.status, "superseded")
+        XCTAssertEqual(booked.resolutionKind, "appointment")
+        let closedJSON = reviewJSON.replacingOccurrences(of: #""status":"open"}"#, with:
+            #""status":"resolved","resolution":{"kind":"no_action","reasonCode":"customer_declined"}"# + closedFields)
+        let closed = try decode(OfficeSlotReview.self, closedJSON)
+        XCTAssertEqual(closed.status, "resolved")
+        XCTAssertEqual(closed.resolutionKind, "no_action")
+    }
+
+    func testOneReviewReadOnItsOwnNeedsAStatus() throws {
+        // The single read must not count a body without a status as open: that read failed.
+        XCTAssertEqual(try decode(OfficeSlotReviewRead.self, reviewJSON).review.status, "open")
+        let noStatus = reviewJSON.replacingOccurrences(of: #","status":"open"}"#, with: "}")
+        XCTAssertNotEqual(noStatus, reviewJSON)
+        XCTAssertThrowsError(try decode(OfficeSlotReviewRead.self, noStatus))
+        let numberStatus = reviewJSON.replacingOccurrences(of: #""status":"open"}"#, with: #""status":5}"#)
+        XCTAssertThrowsError(try decode(OfficeSlotReviewRead.self, numberStatus))
+        // A queue row stays lenient, as before.
+        XCTAssertEqual(try decode(OfficeSlotReview.self, noStatus).status, "open")
+    }
+
     func testARowWithoutADecisionVersionIsSkipped() throws {
         // Without the version the phone could not book or close it, so it is not offered.
         let page = try decode(OfficeSlotPage.self, #"""
