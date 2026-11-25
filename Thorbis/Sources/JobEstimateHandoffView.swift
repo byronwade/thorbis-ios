@@ -230,6 +230,9 @@ struct JobEstimateHandoffView: View {
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
+        #if DEBUG
+        let _ = FirstOpenProbe.count(.handoff)
+        #endif
         Group {
             if model.isCurrent {
                 ScrollView {
@@ -245,7 +248,12 @@ struct JobEstimateHandoffView: View {
                 }
                 .accessibilityIdentifier("job-estimate-handoff")
                 .safeAreaInset(edge: .bottom) {
-                    footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                    footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        footerHeight = $0
+                        #if DEBUG
+                        FirstOpenProbe.footer(Double($0))
+                        #endif
+                    }
                 }
             } else {
                 VStack(spacing: 20) {
@@ -265,6 +273,7 @@ struct JobEstimateHandoffView: View {
         // running when something is pushed stops then, as it stopped before when the page left.
         .task(id: coveredByDestination) {
             #if DEBUG
+            FirstOpenProbe.mark(.c)
             NSLog("%@", "[pop-gesture] keyed task started covered=\(coveredByDestination)")
             #endif
             guard !coveredByDestination else { return }
@@ -273,7 +282,7 @@ struct JobEstimateHandoffView: View {
         #if DEBUG
         // BYR-1842, DEBUG only: when this page appears, leaves and is uncovered, read in the app log
         // beside the pop probe's lines and the task's line above. They change nothing on screen.
-        .onAppear { NSLog("%@", "[pop-gesture] overview appeared covered=\(coveredByDestination)") }
+        .onAppear { FirstOpenProbe.mark(.b); NSLog("%@", "[pop-gesture] overview appeared covered=\(coveredByDestination)") }
         .onDisappear { NSLog("%@", "[pop-gesture] overview disappeared covered=\(coveredByDestination)") }
         .onChange(of: coveredByDestination) { _, covered in NSLog("%@", "[pop-gesture] overview covered=\(covered)") }
         #endif
@@ -1039,6 +1048,9 @@ struct JobEstimateProtectedOwner: View {
     /// Set after the technician unlocked while the customer's details have changes to review.
     @State private var reviewingDetails: CustomerViewExit?
     var body: some View {
+        #if DEBUG
+        let _ = FirstOpenProbe.count(.owner)
+        #endif
         Group {
             if let exit = reviewingDetails, let details = presenter.details, model.isCurrentJob,
                session.can("customer.edit", feature: "core_crm") {

@@ -97,6 +97,9 @@ struct JobCustomerDocumentsView: View {
     private var canEditDetails: Bool { details != nil && session.can("customer.edit", feature: "core_crm") }
 
     var body: some View {
+        #if DEBUG
+        let _ = FirstOpenProbe.count(.documents)
+        #endif
         Group {
             if currentWorkspace {
                 ScrollView {
@@ -263,7 +266,12 @@ struct JobCustomerDocumentsView: View {
         switch start {
         case .home: break
         case .estimates:
-            if canViewEstimates, handoff != nil { withTransaction(instant) { approving = true } }
+            if canViewEstimates, handoff != nil {
+                #if DEBUG
+                FirstOpenProbe.mark(.a)
+                #endif
+                withTransaction(instant) { approving = true }
+            }
         case .estimate(let id):
             // Opens on this estimate in the job's book; "Review and sign" is one tap away.
             await openEstimate(id)
@@ -344,7 +352,12 @@ struct JobCustomerDocumentsView: View {
     @ViewBuilder private var approveEstimates: some View {
         if handoff != nil, let estimates, estimates.records.contains(where: { $0.status == "sent" }) {
             CustomerPresentationCommit(title: "Review estimates", enabled: openingID == nil, busy: false,
-                                       type: CustomerType(nil)) { approving = true }
+                                       type: CustomerType(nil)) {
+                #if DEBUG
+                FirstOpenProbe.mark(.aButton)
+                #endif
+                approving = true
+            }
                 .accessibilityIdentifier("customer-view-approve-estimates")
         }
     }

@@ -289,6 +289,9 @@ struct JobDetailView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = FirstOpenProbe.count(.jobDetail)
+        #endif
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
             SavedCopyNote(savedAt: api.savedCopyDate("/v1/jobs/\(jobId)"))
