@@ -3,8 +3,8 @@ import UIKit
 
 // The job screen's pieces (v2, Linear's issue detail on design.thorbis.com tokens): each section is
 // a grouped well under a 13 Medium label with its count, rows separated by space (no lines); status
-// as a word with its mark; quiet circles; the on-site toolkit; invoice lines with two-decimal money;
-// and a quiet activity timeline (no rail).
+// as a word with its mark; quiet circles; invoice lines with two-decimal money; and a quiet activity
+// timeline (no rail).
 
 extension ContainerValues {
     /// Set on a row inside a `JobPanel` to leave out the hairline under it (a caption that belongs
@@ -373,47 +373,6 @@ struct JobSectionRowLayout: Layout {
             subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
             x += width + spacing
         }
-    }
-}
-
-/// One tool on the on-site grid: an 84pt well tile, glyph over word.
-struct JobToolTile: View {
-    let title: String
-    let symbol: String
-    var enabled = true
-    var hint: String? = nil
-    let action: () -> Void
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// OnSite.dc.html: a 22pt glyph that grows with Dynamic Type.
-    @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 22
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: min(glyph, 32), weight: .regular))
-                    .foregroundStyle(Theme.foreground)
-                    .frame(height: min(glyph, 32) + 4)
-                // The word wraps to a second line rather than shrinking (three, then two columns
-                // as text grows keep it whole); at accessibility sizes it takes the lines it needs.
-                Text(title)
-                    .font(Theme.font(13, weight: .medium))
-                    .foregroundStyle(Theme.foreground)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 4).padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 84)
-            .panelBackground(cornerRadius: Theme.cardRadius)
-            .opacity(enabled ? 1 : 0.45)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .disabled(!enabled)
-        .accessibilityLabel(title)
-        .accessibilityHint(hint ?? "")
-        .accessibilityIdentifier("job-tool-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
     }
 }
 

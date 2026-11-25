@@ -4,7 +4,7 @@ import XCTest
 final class JobOnsiteCustomerShortcutUITests: XCTestCase {
     private func open(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-scroll-toolkit", "--paper-preview-owner-auth", "approved"] + extra
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"] + extra
         app.launch()
         return app
     }

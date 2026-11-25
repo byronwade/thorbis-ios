@@ -170,9 +170,6 @@ struct JobDetailView: View {
     @State private var showCantStart = false
     /// Paper 21K / 21T "Cancel job": Wrap up opens straight on its cancel confirm.
     @State private var wrapUpCancels = false
-    /// Paper F8 "Full job details" and 21K "At this address": bumped to scroll Overview to `detailsScrollTarget`.
-    @State private var detailsScroll = 0
-    @State private var detailsScrollTarget = "job-property-history"
     @State private var cantStartNote: String?
     @State private var handoff: DeviceHandoff?
     /// The first page of the visit's photos (the strip on Overview, thumbnails in Activity).
@@ -361,20 +358,12 @@ struct JobDetailView: View {
                         guard tabsPinned else { return }
                         proxy.scrollTo("job-sections", anchor: .top)
                     }
-                    // Paper F8 "Full job details" / 21K "At this address": the menu asks for a place on Overview.
-                    .onChange(of: detailsScroll) {
-                        withMotion(.snappy) { proxy.scrollTo(detailsScrollTarget, anchor: UnitPoint(x: 0.5, y: 0.14)) }
-                    }
                     #if DEBUG
-                    // `--paper-preview-scroll-history`: screenshots start at "At this address".
+                    // `--paper-preview-scroll-wrapup`: screenshots start at "Before you wrap up" and what's on the invoice.
                     .task {
                         guard PaperPreview.enabled else { return }
                         let args = ProcessInfo.processInfo.arguments
-                        // `--paper-preview-scroll-toolkit`: screenshots start at the on-site toolkit.
-                        let target = args.contains("--paper-preview-scroll-history") ? "job-property-history"
-                            : args.contains("--paper-preview-scroll-toolkit") ? "job-toolkit"
-                            // `--paper-preview-scroll-wrapup`: at "Before you wrap up" and what's on the invoice.
-                            : args.contains("--paper-preview-scroll-wrapup") ? "job-wrap-up" : nil
+                        let target = args.contains("--paper-preview-scroll-wrapup") ? "job-wrap-up" : nil
                         // `--paper-preview-scroll center|bottom`: the job loads after the scroll view
                         // appears, so the app-wide default anchor never moves it; scroll once it has.
                         if target == nil, let anchor = PaperPreview.scrollAnchor {
@@ -1215,18 +1204,6 @@ struct JobDetailView: View {
         guard inField(job) else { return nil }
         return ThorbisMenuItem("Full job details", icon: "doc.text", subtitle: "Overview, money and activity") {
             withMotion(.snappy) { fieldModeOpen = false; selectedTab = "Overview" }
-        }
-    }
-
-    /// Opens Overview (when another section shows) and scrolls it to one of its sections.
-    private func showOnOverview(_ target: String) {
-        detailsScrollTarget = target
-        guard shownJobSection != "Overview" else { detailsScroll += 1; return }
-        selectJobSection("Overview")
-        // Each section has a scroll view of its own; scroll once Overview's has appeared.
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(450))
-            detailsScroll += 1
         }
     }
 
@@ -3734,46 +3711,6 @@ struct JobDetailView: View {
         }
     }
 
-    // MARK: On site (OnSite.dc.html)
-
-    /// Everything a technician reaches for at the house, one tap each. Capture tools open the
-    /// job's media screen straight into the camera, scanner or measure; the rest open their screens.
-    private func toolkit(_ job: JobRecord, working: Bool = false) -> some View {
-        let canCapture = session.can("job.edit", feature: "jobs")
-        // Four across at standard sizes; three once words like "Return visit" stop fitting a quarter
-        // of the row; two at accessibility sizes so every word stays whole.
-        let columns = typeSize.isAccessibilitySize ? 2 : typeSize >= .xLarge ? 3 : 4
-        return VStack(alignment: .leading, spacing: 8) {
-        JobPanelLabel(title: "Tools")
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: columns), spacing: 8) {
-            // Paper F4: with the work started, Photo, the note, parts and the checklist are the
-            // capture tiles above (`captureTiles`), so they aren't repeated here.
-            if !working {
-                JobToolTile(title: "Photo", symbol: "camera", enabled: canCapture && UIImagePickerController.isSourceTypeAvailable(.camera),
-                            hint: "Opens the camera and adds the photo to this job") { openCapture(.camera(stage: nil)) }
-                JobToolTile(title: "Note", symbol: "square.and.pencil", enabled: session.can("job.note", feature: "jobs"),
-                            hint: "Type or dictate a note") { openNoteTool() }
-            }
-            JobToolTile(title: "Measure", symbol: "ruler", enabled: canCapture && SiteMeasure.isSupported,
-                        hint: "Measure with the camera and add it as a photo") { openCapture(.measure) }
-            // The equipment data plate; the document scanner stays in Photos' add-a-document menu.
-            JobToolTile(title: "Scan tag", symbol: "barcode.viewfinder", enabled: canCapture,
-                        hint: "Reads the equipment's data plate into the customer's equipment") { showScan = true }
-            if !working {
-                JobToolTile(title: "Checklist", symbol: "checklist", hint: "Opens this visit's checklist") { showChecklist = true }
-                JobToolTile(title: "Add part", symbol: "shippingbox", enabled: canAddPart,
-                            hint: "Adds price book items to the job's draft invoice") { Task { await addPart() } }
-            }
-            JobToolTile(title: "Estimate", symbol: "doc.text",
-                        enabled: canBuildEstimate || session.can("estimate.view", feature: "estimates"),
-                        hint: jobEstimates.isEmpty ? "Builds an estimate" : "Opens the job's estimates") { openEstimateTool() }
-            JobToolTile(title: "Return visit", symbol: "calendar.badge.plus", enabled: session.can("job.edit", feature: "jobs"),
-                        hint: "Asks the office to book a return visit") { followUpKind = .officeScheduling; showFollowUps = true }
-        }
-        .accessibilityIdentifier("job-toolkit")
-        }
-    }
-
     // MARK: Working (Paper F4)
 
     /// Paper F4 "Working (capture)": the on-site timer with Pause, the four capture tiles, then
@@ -4194,11 +4131,6 @@ struct JobDetailView: View {
         if created.status == "draft" { partsInvoice = created } else { documentInvoiceID = created.id }
     }
 
-    private func openEstimateTool() {
-        if jobEstimates.isEmpty && canBuildEstimate { buildEstimate() }
-        else { withMotion(.snappy) { selectedTab = "Money" } }
-    }
-
     private func detailsGroup(_ job: JobRecord) -> some View {
         JobPanel(dividers: false) {
         VStack(alignment: .leading, spacing: 0) {
@@ -4382,42 +4314,6 @@ struct JobDetailView: View {
         guard job.id == jobId, job.organizationId == session.activeOrganization?.id else { return nil }
         return JobDocumentScope(jobID: job.id, organizationID: job.organizationId,
                                 customerID: job.customerId, originEstimateID: job.estimateId)
-    }
-
-    private func overviewDirectPaymentStep(_ job: JobRecord) -> TechJobStep? {
-        guard session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
-              session.can("invoice.payment.create", feature: "payments"),
-              overviewInvoicesAuthority?.isCurrent(api: api, session: session) == true,
-              documentGeneration == session.generation, let scope = scope(for: job),
-              let read = invoiceRead, read.scope == scope, read.unavailableIDs.isEmpty else { return nil }
-        return JobInvoiceDirectPayment.singleStep(invoices: read.records, scope: scope, freshIDs: read.freshIDs,
-                                                  isComplete: read.isComplete, canCollect: true)
-    }
-
-    private func collectOverviewInvoice(_ displayedStep: TechJobStep) async {
-        guard case .collect = displayedStep, !overviewPaymentRefreshing, let job, overviewDirectPaymentStep(job) == displayedStep,
-              let expectedScope = scope(for: job),
-              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
-        overviewPaymentRefreshing = true
-        var handedOff = false
-        defer { if !handedOff { overviewPaymentRefreshing = false } }
-        let generation = session.generation
-        let navigationRevision = overviewNavigationRevision
-        let current: @MainActor () -> Bool = {
-            !Task.isCancelled && selectedTab == "Overview" && overviewNavigationRevision == navigationRevision &&
-            authority.isCurrent(api: api, session: session) && session.generation == generation &&
-            self.job.flatMap { scope(for: $0) } == expectedScope
-        }
-        let published = await documents.loadInvoices(scope: expectedScope, api: api, isCurrent: current)
-        guard current() else { return }
-        guard published else { withMotion(.snappy) { selectedTab = "Money" }; return }
-        overviewInvoicesAuthority = authority
-        guard let job = self.job, overviewDirectPaymentStep(job) == displayedStep else {
-            withMotion(.snappy) { selectedTab = "Money" }
-            return
-        }
-        handedOff = true
-        run(displayedStep, current: current) { overviewPaymentRefreshing = false }
     }
 
     private func overviewDocumentIsCurrent(_ route: OverviewJobDocumentRoute) -> Bool {
