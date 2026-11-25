@@ -303,6 +303,108 @@ class MoreSheetRowTests(unittest.TestCase):
                 self.assertEqual(taps.decide(rows, [event])[0], [])
 
 
+# Run 45558161330 (head 8894c9b7), phone shard 3: the simulator cancelled the "saved-work-done" tap
+# (backboardd logged "unknown digitizer" 33.677 s into the test, its only such line in the shard),
+# and the test failed in waitForSchedule(), an XCTWaiter wait on a predicate. XCTest logs that wait
+# as one "Checking `Expect predicate ...`" step a second, with no "Waiting" step to mark where a
+# wait begins. These are the test's steps as stamp noted them, from the earlier summary tap on.
+E = "ThorbisUITests/SavedWorkReviewUITests/testUncachedJobBackAndNestedBannerReturnUseSameSheet"
+CHECK = 'Checking `Expect predicate `hittable == 1` for object "schedule-title" StaticText`'
+DONE_STEPS = (
+    (29.03, 'Waiting 10.0s for "saved-work-review" ScrollView to not exist'),
+    (30.22, "Get all elements bound by index for: Elements matching predicate '\"saved-work-summary\" IN identifiers'"),
+    (30.31, 'Find the "saved-work-summary" Button'),
+    (30.46, 'Find the "saved-work-summary" Button'),
+    (30.58, 'Tap "saved-work-summary" Button'),
+    (31.67, 'Checking existence of `"Saved on this phone" NavigationBar`'),
+    (31.90, 'Waiting 5.0s for "Saved on this phone" NavigationBar to exist'),
+    (32.99, 'Find the "saved-work-done" Button'),
+    (33.07, "Find the Target Application 'com.thorbis.field'"),
+    (33.30, "Added attachment named 'Nested job banner returns to same review'"),
+    (33.47, "Added attachment named 'Full screen Nested job banner returns to same review'"),
+    (33.47, 'Tap "saved-work-done" Button'),
+    (34.97, CHECK),
+    (35.97, CHECK),
+    (36.97, CHECK),
+    (37.97, CHECK),
+    (38.95, CHECK),
+)
+DONE_TAP = 33.677
+DONE_ERROR = "XCTAssertTrue failed - Leaving the review returns to Schedule"
+
+
+def done_case(steps=DONE_STEPS, index=1):
+    return case(E, "failed", index, took=46.430, steps=steps, error=DONE_ERROR)
+
+
+class XCTWaiterWaitTests(unittest.TestCase):
+    """A failure on an XCTWaiter predicate wait after a tap stands, even with the simulator's line.
+
+    Its record cannot show that the checks are one wait: a wait that passed, then a second wait on
+    the same predicate that failed, writes the same steps, each about a second after the last.
+    """
+
+    def test_the_xctwaiter_wait_after_the_cancelled_done_tap_stands(self):
+        again, reasons = taps.decide(session(case(A, "passed", 0), done_case()), [at(1, DONE_TAP)])
+        self.assertEqual(again, [])
+        self.assertIn("it did not fail on the wait right after a tap", reasons[0])
+        self.assertIn("This failure stands", reasons[0])
+        self.assertIn("Not every failed test", reasons[-1])
+
+    def test_a_passed_wait_then_a_failed_wait_on_the_same_predicate_stands_the_same_way(self):
+        # The wait after the tap passed at its check at 34.97 s, and the next one began at once; its
+        # first check came 1.05 s after the one that passed, within the spacing of one wait's checks.
+        # With one check only, it could still be a wait that passed and a failure after it.
+        merged = DONE_STEPS[:12] + tuple((offset, CHECK) for offset in (34.97, 36.02, 37.02, 38.02, 39.02, 40.00))
+        for steps in (merged, DONE_STEPS[:13]):
+            with self.subTest(checks=len(steps) - 12):
+                again, reasons = taps.decide(session(done_case(steps)), [at(1, DONE_TAP)])
+                self.assertEqual(again, [])
+                self.assertIn("it did not fail on the wait right after a tap", reasons[0])
+
+    def test_a_block_predicate_that_acts_at_each_check_stands(self):
+        block = "Checking `Expect predicate `BLOCKPREDICATE(0x600000c2a0d0)` for object Target Application 'com.thorbis.field'`"
+        steps = DONE_STEPS[:12] + tuple((offset, block) for offset in (34.97, 35.97, 36.97, 37.97, 38.97))
+        self.assertEqual(taps.decide(session(done_case(steps)), [at(1, DONE_TAP)])[0], [])
+
+    def test_the_same_tap_followed_by_a_waiting_step_is_run_again(self):
+        # The wait the rule does recognise: the same tap, then a "Waiting" step that failed.
+        steps = DONE_STEPS[:12] + ((33.97, 'Waiting 5.0s for "saved-work-review" ScrollView to not exist'),)
+        again, reasons = taps.decide(session(done_case(steps)), [at(1, DONE_TAP)])
+        self.assertEqual(again, [E])
+        self.assertIn('cancelled the tap at t = 33.47s (Tap "saved-work-done" Button)', reasons[0])
+
+    def test_stamp_notes_the_checks_of_an_xctwaiter_wait_and_not_those_inside_a_waiting_step(self):
+        # Lines in the form xcodebuild printed them in that shard.
+        text = (
+            "Test Suite 'Selected tests' started at 2026-11-25 06:39:46.000.\n"
+            "Test Case '-[ThorbisUITests.SavedWorkReviewUITests testUncachedJobBackAndNestedBannerReturnUseSameSheet]' started.\n"
+            "    t =     0.00s Start Test at 2026-11-25 06:54:08.918\n"
+            '    t =    31.90s Waiting 5.0s for "Saved on this phone" NavigationBar to exist\n'
+            '    t =    32.91s     Checking `Expect predicate `existsNoRetry == 1` for object "Saved on this phone" NavigationBar`\n'
+            '    t =    32.91s         Checking existence of `"Saved on this phone" NavigationBar`\n'
+            '    t =    33.47s Tap "saved-work-done" Button\n'
+            "    t =    33.64s     Synthesize event\n"
+            f"    t =    34.97s {CHECK}\n"
+            '    t =    34.97s     Find the "schedule-title" StaticText\n'
+            f"    t =    35.97s {CHECK}\n"
+            "/Users/runner/work/thorbis-ios/thorbis-ios/ThorbisUITests/SavedWorkReviewUITests.swift:111: error: "
+            "-[ThorbisUITests.SavedWorkReviewUITests testUncachedJobBackAndNestedBannerReturnUseSameSheet] : "
+            f"{DONE_ERROR}\n"
+            "    t =    39.81s Tear Down\n"
+            "Test Case '-[ThorbisUITests.SavedWorkReviewUITests testUncachedJobBackAndNestedBannerReturnUseSameSheet]' "
+            "failed (46.430 seconds).\n"
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            times = os.path.join(folder, "times.tsv")
+            subprocess.run([sys.executable, str(TOOL), "stamp", times], input=text.encode(), capture_output=True,
+                           check=True, timeout=30)
+            steps = [value for _, kind, value in taps.read_times(times) if kind == "step"]
+        self.assertEqual(steps, ['31.90 Waiting 5.0s for "Saved on this phone" NavigationBar to exist',
+                                 '33.47 Tap "saved-work-done" Button', f"34.97 {CHECK}", f"35.97 {CHECK}",
+                                 "39.81 Tear Down"])
+
+
 # The shape of the failure in run 45148171838, iPad shard 2 (app pid 15145, SpringBoard 1558): two
 # presses of ⌘K, each sent to the app as a bare 'k' before it had registered its key commands, the
 # registration 0.17 s after the second, and the wait that failed. Offsets are from the test's start.

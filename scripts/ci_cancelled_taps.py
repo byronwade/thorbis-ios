@@ -18,7 +18,14 @@ as far as XCTest's own record of the test shows it:
   - the error falls within a second of a "Tap" step, on XCTest's own clock (the test's
     "Start Test at" time plus the step's offset), before the next step began;
   - the next step is a "Waiting ..." step, and it is the one that failed: no other step comes
-    between it and the test's first failure;
+    between it and the test's first failure. A wait made with XCTWaiter on a predicate does not
+    count. XCTest writes no "Waiting ..." step for it, only a "Checking `Expect predicate `...`"
+    step each time it checks, about once a second, and nothing that marks where the wait begins
+    or ends. In run 45558161330, shard 3, the checks of one wait came 0.92 to 1.07 s apart, and a
+    wait's first check came about a second after it began. So a wait that passed, followed by a
+    wait on the same predicate that failed, can write the same steps as one wait that failed, and
+    that record cannot show that the test failed on the wait right after its tap. Such a failure
+    stands;
   - that first failure does not speak of a crash, a launch, a termination, a lost connection,
     an exception or anything unexpected, and xcodebuild counted no unexpected failure.
 
