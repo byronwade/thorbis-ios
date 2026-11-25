@@ -139,7 +139,10 @@ jobs:
     needs: build
     runs-on: macos-15
     # Shards are balanced by test count, not time; the first run's slowest shards passed an hour.
-    timeout-minutes: 90
+    # 120, not 90: phone shard 1 took 87 minutes on run 45609288937, three short of the old limit,
+    # and a job that runs out of time loses its results. Shards are split by test count, not by
+    # time (BYR-1897).
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -287,7 +290,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       # BYR-1896: these run after the tests, every re-run and the uploads above, so they cannot change a
-      # test's result or its evidence. Each starts only when the job has time for it (80 of its 90 min).
+      # test's result or its evidence. Each starts only when the job has time for it (it must end by the 80th minute).
       - name: Load experiment (BYR-1896), 3 of 4, still applied, and the stored log against the stream
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -358,7 +361,10 @@ jobs:
     needs: [build, ipad-scope]
     if: needs.ipad-scope.outputs.run == 'true'
     runs-on: macos-15
-    timeout-minutes: 90
+    # 120, not 90: phone shard 1 took 87 minutes on run 45609288937, three short of the old limit,
+    # and a job that runs out of time loses its results. Shards are split by test count, not by
+    # time (BYR-1897).
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -482,7 +488,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       # BYR-1896: these run after the tests, every re-run and the uploads above, so they cannot change a
-      # test's result or its evidence. Each starts only when the job has time for it (80 of its 90 min).
+      # test's result or its evidence. Each starts only when the job has time for it (it must end by the 80th minute).
       - name: Load experiment (BYR-1896), 3 of 4, still applied, and the stored log against the stream
         if: ${{ !cancelled() }}
         continue-on-error: true
