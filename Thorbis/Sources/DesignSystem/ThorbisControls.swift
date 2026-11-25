@@ -271,14 +271,21 @@ struct ThorbisConfirmCard: View {
         ThorbisConfirmShell {
             ThorbisConfirmWords(title: title, message: message, destructiveVerb: destructive?.title)
         } buttons: {
+            // Each choice pill is keyed by its words, not by `ThorbisConfirmAction.id`. The presenting
+            // view rebuilds `actions`, with a fresh UUID per action, every time its body runs. Keyed by
+            // that UUID, each re-render would give the pill a new identity, which is the likely reason a
+            // CI run saw the Discard element replaced while the card stayed up. Callers must give each
+            // choice in one card different words; equal titles would give ForEach duplicate ids. A
+            // change between one and several choices, or into an accessibility type size, still swaps
+            // the stack below and rebuilds every pill.
             if sideBySide {
                 HStack(spacing: 10) {
                     cancelButton
-                    ForEach(actions) { action in choiceButton(action) }
+                    ForEach(actions, id: \.title) { action in choiceButton(action) }
                 }
             } else {
                 VStack(spacing: 10) {
-                    ForEach(actions) { action in choiceButton(action) }
+                    ForEach(actions, id: \.title) { action in choiceButton(action) }
                     cancelButton
                 }
             }
@@ -407,7 +414,10 @@ struct ThorbisFieldsConfirmCard: View {
         ThorbisConfirmShell {
             VStack(spacing: 10) {
                 ThorbisConfirmWords(title: title, message: message, destructiveVerb: nil)
-                ForEach(fields) { field in
+                // Keyed by label for the same reason as the choice pills above: the caller builds
+                // `fields` afresh, with a new UUID each, whenever its body runs, and its body can run
+                // on every character typed. Labels in one card must differ.
+                ForEach(fields, id: \.label) { field in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(field.label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                             .padding(.horizontal, 4)
