@@ -21,6 +21,16 @@ enum ReleaseNotes {
 
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-25-follow-up-queue-problems",
+            date: "2026-11-25",
+            highlights: [
+                .init(symbol: "exclamationmark.triangle", title: "Waiting follow-ups say what went wrong",
+                      detail: "If the follow-ups waiting for a slot can\u{2019}t load, Unscheduled says why instead of showing nothing."),
+                .init(symbol: "calendar.badge.clock", title: "Check a booking at the time you picked",
+                      detail: "After no answer, Schedule opens on the time and length you first sent, so Book visit checks that one."),
+            ],
+            fixes: 2),
+        ReleaseNote(
             id: "2026-11-25-favorites-stay-saved",
             date: "2026-11-25",
             highlights: [

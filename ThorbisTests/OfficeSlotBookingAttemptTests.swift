@@ -154,8 +154,10 @@ final class OfficeSlotBookingAttemptTests: XCTestCase {
         XCTAssertEqual(a.phase, .unconfirmed(first: two))
     }
 
-    // A refusal while unconfirmed reads the follow-up once (BYR-1878): once the job was reassigned,
-    // moved or canceled, every try with this id is refused even when the first one booked.
+    // A refusal while unconfirmed reads the follow-up once: the refusal may have come before the
+    // server looked for the booking the first try made. On the server deployed now that includes
+    // any change to the job; after the replay change (BYR-1878) an exact retry is answered with the
+    // booking, and only the rights, the version, a close or a missing job still come first.
     private let reviewId = "018f0000-0000-7000-8000-000000000066"
     private let jobChanged = "office review job facts are no longer current"
     private func review(_ status: String, _ kind: String? = nil, id: String? = nil) -> OfficeSlotReview {
@@ -268,6 +270,112 @@ final class OfficeSlotBookingAttemptTests: XCTestCase {
         used.check(.read(review("resolved", "no_action")), reviewId: reviewId)
         XCTAssertEqual(used.phase, .alreadyBooked)
         XCTAssertEqual(used.words, alreadyBooked)
+    }
+
+    func testACheckThatFindsItClosedSaysTheFollowUpOnTheJobIsStillOpen() {
+        // The web's words for the same state (office-review-dialog.tsx): closing without a visit
+        // leaves the job's follow-up open, so the sheet says where to resolve it.
+        var a = refusedAfterNoAnswer()
+        a.check(.read(review("resolved", "no_action")), reviewId: reviewId)
+        XCTAssertEqual(a.sheetWords,
+                       "This follow-up was closed without a visit. The list has been read again. The follow-up on the job is still open. Resolve it on the job.")
+        a.noteReread(listRead: false)
+        XCTAssertEqual(a.sheetWords,
+                       "This follow-up was closed without a visit. The list couldn\u{2019}t be read again. The follow-up on the job is still open. Resolve it on the job.")
+        // Every other state shows its words as they are.
+        var booked = refusedAfterNoAnswer()
+        booked.check(.read(review("superseded", "appointment")), reviewId: reviewId)
+        XCTAssertEqual(booked.sheetWords, alreadyBooked)
+        XCTAssertEqual(refusedAfterNoAnswer().sheetWords, refusedWords)
+        XCTAssertNil(attempt().sheetWords)
+        // While a request is in flight the last answer's words are not this try's.
+        var sending = refusedAfterNoAnswer()
+        _ = sending.request(decisionVersion: 2, window: two)
+        XCTAssertNil(sending.sheetWords)
+    }
+
+    // The Schedule sheet opened again after no answer (the web's officeReviewDialogPlan).
+    private let askedReview = OfficeSlotReview(
+        id: "018f0000-0000-7000-8000-000000000066", sourceJobId: "018f0000-0000-7000-8000-000000002214",
+        requestedWindow: OfficeSlotWindow(startsAt: "2026-11-26T09:00:00.000Z", endsAt: "2026-11-26T10:00:00.000Z"),
+        serviceNeed: "Capacitor check")
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+    private let now = ISO8601DateFormatter().date(from: "2026-11-25T12:10:00Z")!
+
+    func testASheetOpenedAgainAfterNoAnswerStartsOnTheFirstTrysTimeAndLength() throws {
+        var store = OfficeSlotBookingAttempts()
+        var first = store.attempt(for: askedReview.id)
+        // A fresh attempt opens where the follow-up asks: its own time and length.
+        let asked = first.openingPlan(for: askedReview, now: now, calendar: utc)
+        XCTAssertEqual(asked.start, ISO8601DateFormatter().date(from: "2026-11-26T09:00:00Z"))
+        XCTAssertEqual(asked.minutes, 60)
+        // Book 2 PM for two hours; no answer.
+        let sent = try XCTUnwrap(first.request(decisionVersion: 2, window: two))
+        store.keep(first, for: askedReview.id)
+        first.settle(.noAnswer, label: label)
+        store.keep(first, for: askedReview.id)
+        // Cancel, then Schedule again: the sheet opens on 2 PM and two hours, not the asked-for time.
+        var again = store.attempt(for: askedReview.id)
+        let plan = again.openingPlan(for: askedReview, now: now, calendar: utc)
+        XCTAssertEqual(plan.start, ISO8601DateFormatter().date(from: "2026-11-25T14:00:00Z"))
+        XCTAssertEqual(plan.minutes, 120)
+        XCTAssertEqual(again.sheetWords, OfficeSlotBookingAttempt.noAnswerMessage)
+        // So Book visit, untouched, sends exactly the first request: the same id and the same window.
+        let window = try XCTUnwrap(OfficeSlotRules.plannedWindow(start: plan.start, minutes: plan.minutes))
+        XCTAssertEqual(window, two)
+        XCTAssertEqual(again.request(decisionVersion: 2, window: window), sent)
+    }
+
+    func testTheFirstTrysTimeStaysAfterARefusalAndGoesOnceItIsSettled() {
+        // Refused while unconfirmed, and the read found it still open: still the first try's time.
+        var open = refusedAfterNoAnswer()
+        open.check(.read(review("open")), reviewId: reviewId)
+        XCTAssertEqual(open.openingPlan(for: askedReview, now: now, calendar: utc).start,
+                       ISO8601DateFormatter().date(from: "2026-11-25T14:00:00Z"))
+        // Already booked: nothing more is sent, so the sheet opens where the follow-up asks.
+        var booked = refusedAfterNoAnswer()
+        booked.check(.read(review("superseded", "appointment")), reviewId: reviewId)
+        XCTAssertEqual(booked.openingPlan(for: askedReview, now: now, calendar: utc).start,
+                       ISO8601DateFormatter().date(from: "2026-11-26T09:00:00Z"))
+        // A refused first try kept nothing to check.
+        var refused = attempt()
+        _ = refused.request(decisionVersion: 2, window: four)
+        refused.settle(.refused("appointment capacity is unavailable for this office review"), label: label)
+        XCTAssertEqual(refused.openingPlan(for: askedReview, now: now, calendar: utc).minutes, 60)
+        // A first try whose window can't be read falls back to the follow-up's own plan.
+        var unreadable = attempt()
+        _ = unreadable.request(decisionVersion: 2, window: OfficeSlotWindow(startsAt: "soon", endsAt: "later"))
+        unreadable.settle(.noAnswer, label: { _ in "the time you picked" })
+        XCTAssertEqual(unreadable.openingPlan(for: askedReview, now: now, calendar: utc).start,
+                       ISO8601DateFormatter().date(from: "2026-11-26T09:00:00Z"))
+    }
+
+    func testNoVisitNeededIsOffOnceTheFollowUpIsKnownBookedOrClosed() {
+        // Open while nothing is settled, after no answer and after a refusal.
+        XCTAssertTrue(attempt().offersNoVisit(busy: false, offline: false))
+        XCTAssertTrue(refusedAfterNoAnswer().offersNoVisit(busy: false, offline: false))
+        // Never while a request is out or offline.
+        XCTAssertFalse(attempt().offersNoVisit(busy: true, offline: false))
+        XCTAssertFalse(attempt().offersNoVisit(busy: false, offline: true))
+        // Already booked (by the server's answer or by the read) or closed: the server would only refuse.
+        var used = attempt()
+        _ = used.request(decisionVersion: 2, window: two)
+        used.settle(.alreadyUsed, label: label)
+        XCTAssertFalse(used.offersNoVisit(busy: false, offline: false))
+        var booked = refusedAfterNoAnswer()
+        booked.check(.read(review("superseded", "appointment")), reviewId: reviewId)
+        XCTAssertFalse(booked.offersNoVisit(busy: false, offline: false))
+        var closed = refusedAfterNoAnswer()
+        closed.check(.read(review("resolved", "no_action")), reviewId: reviewId)
+        XCTAssertFalse(closed.offersNoVisit(busy: false, offline: false))
+        var made = attempt()
+        _ = made.request(decisionVersion: 2, window: two)
+        made.settle(.booked, label: label)
+        XCTAssertFalse(made.offersNoVisit(busy: false, offline: false))
     }
 
     func testTheWordsSayTheListWasReadAgainOnlyWhenItWas() {

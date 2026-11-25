@@ -2,57 +2,10 @@ import SwiftUI
 
 // Paper 57F "Waiting for a slot" (and 20S, its rows on Jobs): the follow-ups the office has to
 // book by hand, each with a Schedule pill. Schedule books through the server, which checks the
-// technician is free; "No visit needed" closes the follow-up with a reason.
+// technician's other booked visits; "No visit needed" closes the follow-up with a reason.
 
-/// Paper 57F as its own place: the title, how many are waiting, then the queue.
-struct OfficeSlotQueueView: View {
-    @EnvironmentObject private var api: APIClient
-    @EnvironmentObject private var session: SessionController
-    @StateObject private var queue = OfficeSlotQueue()
-    @State private var roster: [String: String] = [:]
-
-    init() {}
-
-    private var allowed: Bool { OfficeSlotQueue.allowed(session) }
-    private var subtitle: String {
-        guard allowed else { return "Booking follow-ups" }
-        return queue.loaded ? OfficeSlotRules.countLabel(queue.reviews.count) : "Follow-ups the office books"
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Waiting for a slot", subtitle: subtitle)
-                OfflineBanner()
-                if !allowed {
-                    ListRoomEmpty(symbol: "lock", title: "Your role can\u{2019}t book follow-ups",
-                                  message: "Booking a follow-up needs the right to book follow-ups and to assign jobs. An owner or admin can change that.")
-                } else {
-                    OfficeSlotQueueList(queue: queue, roster: roster, standalone: true)
-                }
-            }
-            .padding(.bottom, 24)
-        }
-        .refreshable { await load() }
-        .background(Theme.canvas)
-        .toolbar(.hidden, for: .navigationBar)
-        .accessibilityIdentifier("slotqueue-root")
-        .task(id: "\(OfficeSlotQueue.identity(session))|\(session.isOffline)|\(allowed)") { await load() }
-        .task(id: "roster|\(session.generation)|\(session.isOffline)") {
-            guard session.can("job.view", feature: "jobs"), !session.isOffline,
-                  let people = try? await api.fieldAssignees() else { return }
-            roster = Dictionary(people.map { ($0.userId, $0.displayName) }, uniquingKeysWith: { first, _ in first })
-        }
-    }
-
-    private func load() async {
-        guard allowed, !session.isOffline else { return }
-        await queue.load(api: api, identity: OfficeSlotQueue.identity(session))
-    }
-}
-
-/// The queue inside another screen (Schedule's Unscheduled list): it loads itself and draws
-/// nothing for a role that cannot book, offline, or while nothing is waiting.
+/// The queue inside Schedule's Unscheduled list: it loads itself and draws nothing for a role that
+/// cannot book, or while nothing is waiting, and says when a read failed (OfficeSlotQueue.notice).
 struct OfficeSlotQueueSection: View {
     var roster: [String: String] = [:]
     @EnvironmentObject private var api: APIClient
@@ -63,7 +16,7 @@ struct OfficeSlotQueueSection: View {
 
     var body: some View {
         Group {
-            if allowed { OfficeSlotQueueList(queue: queue, roster: roster, standalone: false) }
+            if allowed { OfficeSlotQueueList(queue: queue, roster: roster) }
         }
         .task(id: "\(OfficeSlotQueue.identity(session))|\(session.isOffline)|\(allowed)") {
             guard allowed, !session.isOffline else { return }
@@ -77,9 +30,6 @@ struct OfficeSlotQueueSection: View {
 struct OfficeSlotQueueList: View {
     @ObservedObject var queue: OfficeSlotQueue
     let roster: [String: String]
-    /// On its own page the list also shows loading, empty and offline; inside Schedule it stays out
-    /// of the way until there is something to book.
-    let standalone: Bool
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
@@ -90,28 +40,30 @@ struct OfficeSlotQueueList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let problem = queue.problem, standalone || !queue.reviews.isEmpty {
-                ErrorBanner(message: problem, action: .init(title: "Try again") {
-                    await queue.load(api: api, identity: OfficeSlotQueue.identity(session))
-                })
+            // The queue decides when to speak and in which words (OfficeSlotQueue.notice).
+            if let notice = queue.notice(offline: session.isOffline) {
+                ErrorBanner(message: notice.message,
+                            symbol: notice.kind == .noAccess ? "lock" : "exclamationmark.triangle",
+                            tint: notice.kind == .noAccess ? Theme.muted : Theme.warning,
+                            action: notice.offersRetry ? ErrorBanner.Action(title: "Try again") {
+                                await queue.load(api: api, identity: OfficeSlotQueue.identity(session))
+                            } : nil)
             }
             if !queue.reviews.isEmpty || lastDone != nil {
-                if !standalone {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Waiting for a slot").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                            .accessibilityAddTraits(.isHeader)
-                        Spacer(minLength: 8)
-                        Text("\(queue.reviews.count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .accessibilityLabel(OfficeSlotRules.countLabel(queue.reviews.count))
-                    }
-                    .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 20).padding(.bottom, 8)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Waiting for a slot").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 8)
+                    Text("\(queue.reviews.count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .accessibilityLabel(OfficeSlotRules.countLabel(queue.reviews.count))
                 }
+                .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 20).padding(.bottom, 8)
                 if let lastDone {
                     Label(lastDone, systemImage: "checkmark.circle.fill")
                         .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.success)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, PaperCardMetrics.margin + 4)
-                        .padding(.top, standalone ? 18 : 0).padding(.bottom, 8)
+                        .padding(.bottom, 8)
                         .accessibilityIdentifier("slotqueue-done")
                 }
             }
@@ -124,27 +76,19 @@ struct OfficeSlotQueueList: View {
                 }
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 .paperCardMargin()
-                .padding(.top, standalone && lastDone == nil ? 18 : 0)
-                Text("Follow-ups the field asked for that could not be booked on their own. Schedule checks the technician is free before it books.")
+                Text(OfficeSlotRules.footer)
                     .font(Theme.font(13)).foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 12)
-            } else if standalone {
-                if session.isOffline && !queue.loaded {
-                    ListRoomEmpty(symbol: "wifi.slash", title: "This list needs a connection",
-                                  message: "The server checks each follow-up against the job as it stands now, so it isn\u{2019}t kept on this phone.")
-                } else if !queue.loaded && queue.problem == nil {
-                    ListRoomSkeleton(count: 3)
-                } else if queue.loaded {
-                    ListRoomEmpty(glyph: .calendar, title: "Nothing is waiting for a slot",
-                                  message: "A follow-up shows here when the field asks for one and it can\u{2019}t be booked on its own.")
-                }
             }
         }
         .sensoryFeedback(.success, trigger: doneCount)
         .sheet(item: $scheduling) { review in
             SheetSurface {
-                OfficeSlotBookSheet(queue: queue, review: review, customer: customer(review),
+                // The queue's attempt for this follow-up: a sheet opened again after no answer
+                // starts on the time that try was sent for, with the words it last showed.
+                OfficeSlotBookSheet(queue: queue, review: review, attempt: queue.bookingAttempts.attempt(for: review.id),
+                                    customer: customer(review),
                                     technician: review.technicianId.flatMap { roster[$0] }) { message in
                     lastDone = message
                     doneCount += 1
@@ -209,19 +153,24 @@ struct OfficeSlotBookSheet: View {
     @State private var busy = false
     @State private var problem: String?
     @State private var confirmClose = false
+    /// The last copy of this follow-up's attempt put back in the queue: what the sheet offers.
+    @State private var attempt: OfficeSlotBookingAttempt
 
     private static let lengths = [60, 120, 180, 240]
 
-    init(queue: OfficeSlotQueue, review: OfficeSlotReview, customer: String?, technician: String?,
-         onDone: @escaping (String) -> Void) {
+    /// - Parameter attempt: the queue's attempt for this follow-up (`OfficeSlotBookingAttempts`).
+    init(queue: OfficeSlotQueue, review: OfficeSlotReview, attempt: OfficeSlotBookingAttempt,
+         customer: String?, technician: String?, onDone: @escaping (String) -> Void) {
         self.queue = queue
         self.review = review
         self.customer = customer
         self.technician = technician
         self.onDone = onDone
-        let plan = OfficeSlotRules.defaultPlan(for: review)
+        let plan = attempt.openingPlan(for: review)
         _start = State(initialValue: plan.start)
         _minutes = State(initialValue: plan.minutes)
+        _problem = State(initialValue: attempt.sheetWords)
+        _attempt = State(initialValue: attempt)
     }
 
     private var subtitle: String { [customer, review.jobRef].compactMap { $0 }.joined(separator: " \u{00B7} ") }
@@ -276,7 +225,7 @@ struct OfficeSlotBookSheet: View {
                     .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
-            .disabled(busy || session.isOffline)
+            .disabled(!attempt.offersNoVisit(busy: busy, offline: session.isOffline))
             .accessibilityHint("Closes this follow-up without booking a visit")
             .accessibilityIdentifier("slotqueue-no-visit")
         }
@@ -314,13 +263,13 @@ struct OfficeSlotBookSheet: View {
             return
         }
         // The queue keeps the attempt, so a sheet opened again after no answer sends the same id.
-        var attempt = queue.bookingAttempts.attempt(for: review.id)
-        guard let request = attempt.request(decisionVersion: review.decisionVersion, window: window) else {
-            problem = attempt.words
+        var current = queue.bookingAttempts.attempt(for: review.id)
+        guard let request = current.request(decisionVersion: review.decisionVersion, window: window) else {
+            problem = current.sheetWords
             return
         }
-        queue.bookingAttempts.keep(attempt, for: review.id)
-        let sent = attempt
+        keep(current)
+        let sent = current
         busy = true
         problem = nil
         Task {
@@ -334,25 +283,37 @@ struct OfficeSlotBookSheet: View {
                 let answer = OfficeSlotBookingAttempt.answer(for: error)
                 var settled = sent
                 settled.settle(answer, label: Self.label)
-                let kept = queue.bookingAttempts.keep(settled, for: review.id)
+                let kept = keep(settled)
                 if answer == .booked {
                     // Thorbis answered 201 but the body could not be read: it booked the window sent.
                     booked(request.plannedWindow)
                 } else if kept, case .refused = answer, settled.needsCheck {
-                    // Once the job changed, every try with this id is refused even when the first
-                    // one booked, so read the follow-up itself, once for this refusal.
+                    // The refusal may have come before the server looked for the booking the first
+                    // try made (on the server deployed now, any change to the job refuses a retry
+                    // even when the first try booked; after the replay change, only the rights,
+                    // the version, a close, a missing job or a stale answer from the domain come
+                    // first; see OfficeSlotBookingAttempt), so read the follow-up
+                    // itself, once for this refusal.
                     let read: OfficeSlotBookingAttempt.ReviewCheck
                     do { read = .read(try await api.officeSlotReview(review.id)) } catch { read = .unread }
                     settled.check(read, reviewId: review.id)
-                    queue.bookingAttempts.keep(settled, for: review.id)
+                    keep(settled)
                 }
                 // Read the queue again behind the sheet: the row may have changed or gone.
                 let listRead = await queue.reread(api: api, identity: OfficeSlotQueue.identity(session))
                 settled.noteReread(listRead: listRead)
-                queue.bookingAttempts.keep(settled, for: review.id)
-                if answer != .booked { problem = settled.words }
+                keep(settled)
+                if answer != .booked { problem = settled.sheetWords }
             }
         }
+    }
+
+    /// Puts a changed copy of the attempt back in the queue, and shows it when the queue took it.
+    @discardableResult
+    private func keep(_ changed: OfficeSlotBookingAttempt) -> Bool {
+        let kept = queue.bookingAttempts.keep(changed, for: review.id)
+        if kept { attempt = changed }
+        return kept
     }
 
     /// Settles the request in flight on a copy of the attempt it was sent from, and puts it back.
@@ -360,7 +321,7 @@ struct OfficeSlotBookSheet: View {
     private func settle(_ sent: OfficeSlotBookingAttempt, _ answer: OfficeSlotBookingAttempt.Answer) -> String? {
         var settled = sent
         let words = settled.settle(answer, label: Self.label)
-        queue.bookingAttempts.keep(settled, for: review.id)
+        keep(settled)
         return words
     }
 
