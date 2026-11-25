@@ -13,7 +13,8 @@
 # for that one press. backboardd hands a ⌘ chord to the app as a key command only once the app
 # has registered its key commands with it, and on the iPad that registration now and then comes
 # only after the test has pressed twice. Until then it logs a cache miss and hands the app the
-# bare letter, so the test fails on a chord the app never received (BYR-1843).
+# bare letter, or, for a chord SpringBoard's own table holds, lets SpringBoard take it and sends
+# the app nothing, so the test fails on a chord the app never received (BYR-1843).
 #
 # What this does NOT do: retry failures. A failed test is run again only when ALL of these hold.
 #   - xcodebuild exited 65, its status for failed tests, and nothing else went wrong.
@@ -21,8 +22,10 @@
 #     own count of tests and failures matches the log, with no unexpected failure.
 #   - EVERY failed test failed on the wait right after a tap, its first failure speaks of no
 #     crash or launch, and backboardd logged that error at that tap; or it failed on the wait
-#     right after a key chord, backboardd sent every chord of the test to the app as a bare key
-#     before the app had registered any key commands, matched no command against the app, and
+#     right after a key chord, XCTest's record shows that wait ran out, and before the app had
+#     registered any key commands backboardd
+#     either sent every chord of the test to the app as a bare key or matched every one in
+#     SpringBoard's own table and sent the app nothing, matched no command against the app, and
 #     the app's first registration after the last chord lists that chord.
 #   - There are at most three of them, and the job has time left to run them.
 # Each is then run once, by itself. The step passes only if each of those runs shows that one
@@ -152,7 +155,7 @@ for test in $again; do
     exit "$status"
   fi
   if grep -qF "$test: the simulator did not deliver the key chord" "$evidence/decision.txt"; then
-    why="the simulator did not deliver the key chord it failed on (backboardd sent the app the bare key before the app had registered its key commands). BYR-1843."
+    why="the simulator did not deliver the key chord it failed on (backboardd sent the app only the bare key, or SpringBoard took the chord, before the app had registered its key commands; the decision says which). BYR-1843."
   else
     why="the simulator cancelled the tap it failed on (backboardd logged \"unknown digitizer\"). BYR-1835."
   fi
@@ -172,7 +175,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
     echo "### Tests run once more after a cancelled tap or a lost key chord"
     echo
-    echo "Each of these failed on the wait right after a tap the simulator cancelled (backboardd logged \"unknown digitizer\", BYR-1835) or right after a key chord it did not deliver (backboardd sent the app the bare key before the app had registered its key commands, BYR-1843), and passed when run once more by itself. The decision below says which. The first run's failure is in this shard's result bundle; the times, the log lines and each re-run are in this shard's re-run evidence."
+    echo "Each of these failed on the wait right after a tap the simulator cancelled (backboardd logged \"unknown digitizer\", BYR-1835) or right after a key chord it did not deliver (backboardd sent the app only the bare key, or SpringBoard took the chord, before the app had registered its key commands, BYR-1843), and passed when run once more by itself. The decision below says which. The first run's failure is in this shard's result bundle; the times, the log lines and each re-run are in this shard's re-run evidence."
     echo
     while IFS= read -r test; do echo "- \`$test\`"; done <<<"$again"
     echo
