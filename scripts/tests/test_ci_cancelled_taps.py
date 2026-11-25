@@ -263,6 +263,46 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(taps.decide(rows, [at(1, TAP)])[0], [B])
 
 
+# Run 45532660760, phone shard 5: the simulator cancelled the "Job actions" tap (backboardd logged
+# "unknown digitizer" 10.531 s into the test), so the More sheet never opened. The test's helper
+# tapped the sheet's Customer view row straight after, with no wait, and failed on that tap.
+MORE_STEPS = (
+    (0.04, "Set Up"),
+    (0.04, "Open com.thorbis.field"),
+    (7.34, 'Waiting 15.0s for "Job actions" Button to exist'),
+    (9.15, 'Tap "Job actions" Button'),
+)
+MORE_TAP = 10.531
+D = "ThorbisUITests/CustomerDocumentBookRecoveryUITests/testZeroIssuedRevisionWithARealLineRemainsReviewable"
+
+
+class MoreSheetRowTests(unittest.TestCase):
+    def test_a_row_tapped_straight_after_the_lost_more_tap_stands(self):
+        steps = MORE_STEPS + ((10.81, "Tap Button (First Match)"),
+                              (14.27, "Requesting snapshot of accessibility hierarchy for app with pid 13763"))
+        error = ("Failed to tap Button (First Match): No matches found for first query match sequence: "
+                 "`Descendants matching type Button` -> `Elements matching predicate 'label BEGINSWITH "
+                 "\"Customer view\"'`, given input App element pid: 13763")
+        rows = session(case(D, "failed", 1, took=15.056, steps=steps, error=error))
+        again, reasons = taps.decide(rows, [at(1, MORE_TAP)])
+        self.assertEqual(again, [])
+        self.assertIn("it did not fail on the wait right after a tap", reasons[0])
+
+    def test_the_wait_for_the_row_after_the_lost_more_tap_is_run_again(self):
+        # The same failure once the helper waits for the row before tapping it.
+        steps = MORE_STEPS + ((10.81, "Waiting 10.0s for Button (First Match) to exist"),
+                              (20.89, "Collecting debug information to assist test failure triage"))
+        error = "XCTAssertTrue failed - More shows Customer view once Job actions is tapped"
+        rows = session(case(D, "failed", 1, took=21.7, steps=steps, error=error))
+        again, reasons = taps.decide(rows, [at(1, MORE_TAP)])
+        self.assertEqual(again, [D])
+        self.assertIn('cancelled the tap at t = 9.15s (Tap "Job actions" Button)', reasons[0])
+        # Without the cancelled tap in that window it still stands.
+        for event in (at(1, 9.15 - 1.2), at(1, 10.81 + 0.7)):
+            with self.subTest(event=event):
+                self.assertEqual(taps.decide(rows, [event])[0], [])
+
+
 # The shape of the failure in run 45148171838, iPad shard 2 (app pid 15145, SpringBoard 1558): two
 # presses of ⌘K, each sent to the app as a bare 'k' before it had registered its key commands, the
 # registration 0.17 s after the second, and the wait that failed. Offsets are from the test's start.

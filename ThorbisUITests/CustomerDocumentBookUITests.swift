@@ -9,7 +9,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        thorbisTapCustomerViewMenuItem(app)
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
@@ -39,7 +39,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description", flag]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15)); app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        thorbisTapCustomerViewMenuItem(app)
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.waitForExistence(timeout: 5)); app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.tap()
@@ -63,7 +63,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description", flag]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15)); app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        thorbisTapCustomerViewMenuItem(app)
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.waitForExistence(timeout: 5)); app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.tap()
@@ -215,7 +215,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        thorbisTapCustomerViewMenuItem(app)
         let first = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         first.tap()
@@ -428,7 +428,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        thorbisTapCustomerViewMenuItem(app)
         let first = app.buttons["customer-estimate-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         first.tap()
@@ -461,7 +461,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["Job actions"].tap(); thorbisCustomerViewMenuItem(app).tap()
+        app.buttons["Job actions"].tap(); thorbisTapCustomerViewMenuItem(app)
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
         XCTAssertTrue(app.buttons["Choose a job document"].waitForExistence(timeout: 10))
@@ -512,7 +512,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-documents-status-change"]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["Job actions"].tap(); thorbisCustomerViewMenuItem(app).tap()
+        app.buttons["Job actions"].tap(); thorbisTapCustomerViewMenuItem(app)
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         return app
     }
@@ -531,7 +531,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         let actions = app.buttons["Job actions"]
         XCTAssertTrue(actions.waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        thorbisTapCustomerViewMenuItem(app)
         let first = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         first.tap()

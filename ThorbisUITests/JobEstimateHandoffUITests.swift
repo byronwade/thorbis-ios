@@ -46,6 +46,21 @@ func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Customer view")).firstMatch
 }
 
+/// Taps Customer view's row right after the job's More circle ("Job actions") was tapped: waits for
+/// the row to come up in the sheet, asserts it did, then taps it once. The wait is what lets CI tell
+/// a tap the simulator cancelled (BYR-1835) from a real failure: its re-run rule
+/// (scripts/ci_cancelled_taps.py) looks only at a "Waiting" step that fails right after a tap. Run
+/// 45532660760 lost the More tap, and the row tap that followed straight after it failed outside
+/// the rule. 10 s: the deadline the waits already on this row use, above the 8 s that one read has
+/// taken on a slow runner (b1f4a10f). A sheet that never opens, or opens without the row, still fails.
+@MainActor
+func thorbisTapCustomerViewMenuItem(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    let row = thorbisCustomerViewMenuItem(app)
+    XCTAssertTrue(row.waitForExistence(timeout: 10), "More shows Customer view once Job actions is tapped",
+                  file: file, line: line)
+    row.tap()
+}
+
 /// Opens the header's Share circle sheet (Paper 21), unless `row` is already there. In field mode
 /// (Paper F2 to F8) the bar has no Share circle and the field menu keeps these rows: opens More.
 @MainActor
