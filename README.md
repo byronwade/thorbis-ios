@@ -89,4 +89,19 @@ two threads at 35% each. 70% or more ("working") shows that the app's threads to
 30% or less ("waiting") shows that they used at most 0.3 s of CPU per second of the step, so for most
 of the step no thread of the app was running (each was waiting for a CPU or blocked), and only
 together with a high "host busy" (how busy the runner's CPUs were) does it point to a CPU shortage.
-It is evidence, not a test, and comes out once that question is answered.
+It is evidence, not a test, and comes out once that question is answered. In format 2 the record also
+names the simulator's other busy services and tells, for each diagnosticd and apsd, whether it runs on
+the host or in the simulator; the table then starts with a budget of the runner's busy CPU by service.
+
+For one run, the UI jobs also carry a runner load experiment (BYR-1896, `scripts/ci-load-experiment.sh`
+holds the plan). Phone shards 1 and 2 and iPad shard 1 are controls and change nothing. Phone shards 3
+and 6 turn the host's Spotlight indexing off before the tests (`sudo mdutil -i off` for `/` and for
+`/System/Volumes/Data`). Phone shards 4
+and 5 and iPad shard 2 boot the simulator's push daemon out after boot (`launchctl bootout
+system/com.apple.apsd` in the simulator). A treated shard runs no failed test once more: its failure
+stands, and the job log says what the rule would have run. After the tests and their evidence are
+saved, every shard that has time left checks the treatment is still in place, compares the
+simulator's stored log with the stream the re-run rule read (`scripts/ci_log_compare.py`), and then
+stops the host's diagnosticd and kills the simulator's to see what a new log stream still gets. These
+steps never fail the job, print every command with its output and exit status, and upload their files
+as `ios-ui-load-experiment-<shard>` (`ios-ipad-ui-load-experiment-<shard>` on the iPad).

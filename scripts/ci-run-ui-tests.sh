@@ -28,6 +28,8 @@
 #     SpringBoard's own table and sent the app nothing, matched no command against the app, and
 #     the app's first registration after the last chord lists that chord.
 #   - There are at most three of them, and the job has time left to run them.
+#   - While THORBIS_LOAD_SHARD is set (the runner load experiment, BYR-1896): the shard is one the
+#     experiment's plan names as a control. A treated shard, or one the plan cannot place, runs none.
 # Each is then run once, by itself. The step passes only if each of those runs shows that one
 # test passing. Anything else leaves the first run's failure standing. Every re-run is announced
 # as a warning on the job, with the reasons, and listed in the step summary.
@@ -108,6 +110,19 @@ finish() {
 }
 trap finish EXIT
 
+# BYR-1896, evidence and not a test: when THORBIS_LOG_COMPARE names a directory, the stream's lines and
+# its start and stop times are kept there, for a later step to compare with the simulator's stored log
+# (scripts/ci_log_compare.py). Nothing here changes the stream, the re-run rule or any exit status.
+log_compare=${THORBIS_LOG_COMPARE:-}
+if [[ -n "$log_compare" ]]; then
+  if mkdir -p "$log_compare" && echo "began $(date +%s)" >"$log_compare/window.txt"; then
+    :
+  else
+    echo "log compare: could not note the stream's start in $log_compare (exit $?)" >&2
+    log_compare=
+  fi
+fi
+
 # The lines, as they are logged. `cat` keeps the stream writing to a pipe: into a pipe it handed
 # over each line as it was logged (seen in run 45119132156), and into a file it may hold lines back.
 # The first clause is the one stop_watcher looks for; keep it first and keep its words.
@@ -151,6 +166,13 @@ stamped() { # <times file> <result bundle> <-only-testing:...>...
 stamped "$times" "$result_bundle" "$@"
 status=$ran
 stop_watcher
+if [[ -n "$log_compare" ]]; then
+  if echo "ended $(date +%s)" >>"$log_compare/window.txt" && cp "$taps" "$log_compare/stream.log"; then
+    :
+  else
+    echo "log compare: could not keep the stream's lines in $log_compare (exit $?)" >&2
+  fi
+fi
 
 # Say on every run whether that filter started. The log tool prints the filter it accepted as
 # its first line, so a filter it refused shows on a green run too, not only when a test failed.
@@ -181,6 +203,23 @@ if ((decided != 0)) || [[ -z "$again" ]]; then
   exit "$status"
 fi
 
+# BYR-1896, the runner load experiment (scripts/ci-load-experiment.sh). A treated shard changed the
+# simulator or the host before its tests, and whether the stream above still held every line is
+# checked only after this step. Two routes of the rule can accept on lost lines, so such a shard runs
+# no failed test once more: the failure stands, as it does when the stream wrote nothing. Only a shard
+# the plan names as a control ("none") keeps the rule. A plan that cannot be read holds it too.
+if [[ -n "${THORBIS_LOAD_SHARD:-}" ]]; then
+  load_word=$("$here/ci-load-experiment.sh" plan "$THORBIS_LOAD_SHARD") || load_word="not read, exit $?"
+  if [[ "$load_word" != none ]]; then
+    held="Load experiment (BYR-1896): this shard was treated ($load_word), so no failed test is run once more. The rule would have run: $(tr '\n' ' ' <<<"$again")"
+    echo "::warning::$held"
+    echo "$held" >>"$evidence/decision.txt"
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then echo "$held" >>"$GITHUB_STEP_SUMMARY"; fi
+    exit "$status"
+  fi
+  echo "Load experiment (BYR-1896): this shard is a control (plan none), so the re-run rule applies as always." >&2
+fi
+
 # The job stops at 90 minutes. A re-run started after 70 minutes of this script may not finish,
 # and a cancelled job would lose this decision from its summary, so the failure stands instead.
 count=0
@@ -188,6 +227,13 @@ for test in $again; do
   count=$((count + 1))
   if ((SECONDS > 4200)); then
     echo "::error::No time is left to run $test once more before the job's limit. The failure stands."
+    exit "$status"
+  fi
+  # BYR-1896: steps before this one take job time this script's clock does not see. When the job's own
+  # start is known (THORBIS_JOB_STARTED, from the load experiment's first step), 70 minutes of the job
+  # with 2 more for its set-up is the limit too. This can only refuse a re-run, never allow one.
+  if [[ "${THORBIS_JOB_STARTED:-}" =~ ^[0-9]+$ ]] && (($(date +%s) - THORBIS_JOB_STARTED + 120 > 4200)); then
+    echo "::error::No time is left in the job to run $test once more before its limit (70 minutes of the job have passed). The failure stands."
     exit "$status"
   fi
   if grep -qF "$test: the simulator did not deliver the key chord" "$evidence/decision.txt"; then

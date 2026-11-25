@@ -648,5 +648,99 @@ class RunUITestsTests(unittest.TestCase):
         self.assertNotIn("CPU load", result.stderr)
 
 
+    # The runner load experiment (BYR-1896, scripts/ci-load-experiment.sh): the stream's lines kept for a
+    # later compare, the re-runs held in a treated shard, and the job-time limit on a re-run.
+
+    def env_patch(self, **values):
+        clean = {key: "" for key in ("THORBIS_LOG_COMPARE", "THORBIS_LOAD_SHARD", "THORBIS_JOB_STARTED")}
+        clean.update(values)
+        patch = mock.patch.dict(os.environ, clean)
+        patch.start()
+        self.addCleanup(patch.stop)
+        for key in [key for key, value in clean.items() if value == ""]:
+            os.environ.pop(key)
+
+    def test_the_log_compare_keeps_the_streams_lines_and_changes_no_exit(self):
+        kept = self.dir / "load-experiment"
+        self.env_patch(THORBIS_LOG_COMPARE=str(kept))
+        for first, reruns, code in ((run_case(A, "passed") + summary(1, 0) + [["exit", 0]], (), 0),
+                                    (run_case(A, "failed") + summary(1, 1) + [["exit", 65]], (), 65),
+                                    (run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]], (), 0),
+                                    (run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]], ["failed"], 65)):
+            with self.subTest(code=code, reruns=reruns):
+                shutil.rmtree(kept, ignore_errors=True)
+                shutil.rmtree(self.evidence, ignore_errors=True)
+                result = self.run_script(first, reruns=reruns)
+                self.assertEqual(result.returncode, code, result.stderr)
+                window = (kept / "window.txt").read_text().split()
+                self.assertEqual((window[0], window[2]), ("began", "ended"))
+                self.assertLessEqual(int(window[1]), int(window[3]))
+                stream = (kept / "stream.log").read_text()
+                self.assertTrue(stream.startswith("Filtering the log data"), stream[:80])
+                if (self.evidence / "cancelled-taps.log").exists():
+                    self.assertEqual(stream, (self.evidence / "cancelled-taps.log").read_text())
+                self.assertNotIn("log compare:", result.stderr)
+
+    def test_a_log_compare_directory_in_the_way_is_said_and_changes_no_exit(self):
+        blocker = self.dir / "blocker"
+        blocker.write_text("")
+        self.env_patch(THORBIS_LOG_COMPARE=str(blocker / "load-experiment"))
+        passed = self.run_script(run_case(A, "passed") + summary(1, 0) + [["exit", 0]])
+        rerun = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]])
+        self.assertEqual((passed.returncode, rerun.returncode), (0, 0))
+        self.assertIn("log compare: could not note the stream's start", passed.stderr)
+        self.assertEqual(len(self.reruns()), 1)
+
+    def test_without_the_log_compare_nothing_is_kept_or_said(self):
+        self.env_patch()
+        result = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]])
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("log compare", result.stdout + result.stderr)
+        self.assertNotIn("Load experiment", result.stdout + result.stderr)
+        self.assertFalse((self.dir / "load-experiment").exists())
+
+    def test_a_treated_shard_runs_no_failed_test_once_more(self):
+        for shard, word in (("phone3", "spotlight-off"), ("phone4", "apsd-off"), ("ipad2", "apsd-off"), ("phone9", "unknown")):
+            with self.subTest(shard=shard):
+                shutil.rmtree(self.evidence, ignore_errors=True)
+                self.summary.unlink(missing_ok=True)
+                (self.stub / "calls.jsonl").unlink(missing_ok=True)
+                self.env_patch(THORBIS_LOAD_SHARD=shard)
+                result = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]])
+                self.assertEqual(result.returncode, 65)
+                self.assertEqual(self.reruns(), [])
+                held = (f"::warning::Load experiment (BYR-1896): this shard was treated ({word}), so no failed test is "
+                        f"run once more. The rule would have run: {A}")
+                self.assertIn(held, result.stdout)
+                self.assertIn("so no failed test is run once more", (self.evidence / "decision.txt").read_text())
+                self.assertIn("so no failed test is run once more", self.summary.read_text())
+
+    def test_a_control_shard_keeps_the_rule(self):
+        for shard in ("phone1", "phone2", "ipad1"):
+            with self.subTest(shard=shard):
+                (self.stub / "calls.jsonl").unlink(missing_ok=True)
+                self.env_patch(THORBIS_LOAD_SHARD=shard)
+                result = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.reruns()), 1)
+                self.assertIn("this shard is a control (plan none)", result.stderr)
+
+    def test_a_job_past_seventy_minutes_runs_no_failed_test_once_more(self):
+        self.env_patch(THORBIS_LOAD_SHARD="phone1", THORBIS_JOB_STARTED=str(int(time.time()) - 69 * 60))
+        result = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]])
+        self.assertEqual(result.returncode, 65)
+        self.assertEqual(self.reruns(), [])
+        self.assertIn("::error::No time is left in the job to run", result.stdout)
+        (self.stub / "calls.jsonl").unlink(missing_ok=True)
+        self.env_patch(THORBIS_LOAD_SHARD="phone1", THORBIS_JOB_STARTED="not a time")
+        result = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(self.reruns()), 1)
+
+    def test_a_cancel_with_the_log_compare_set_still_ends_as_before(self):
+        self.env_patch(THORBIS_LOG_COMPARE=str(self.dir / "load-experiment"), THORBIS_LOAD_SHARD="phone3")
+        self.test_a_cancel_to_the_whole_group_still_writes_the_table_and_fails_the_step()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -50,6 +50,7 @@ while IFS= read -r file; do
     Thorbis/Sources/TabletLayout.swift | Thorbis/Sources/PaperTabletSchedule.swift | Thorbis/Sources/PaperNavigation.swift) echo true; exit 0 ;;
     scripts/ci-ipad-scope.sh | scripts/ci-simulator-id.sh | scripts/ui_test_shards.py | .github/workflows/ios.yml) echo true; exit 0 ;;
     scripts/ci-run-ui-tests.sh | scripts/ci_cancelled_taps.py | scripts/ci_cpu_load.py) echo true; exit 0 ;;
+    scripts/ci-load-experiment.sh | scripts/ci_log_compare.py) echo true; exit 0 ;;
   esac
   if grep -qxF "$file" <<<"$tablet_tests"; then
     echo true

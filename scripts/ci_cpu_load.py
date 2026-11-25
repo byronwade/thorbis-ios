@@ -22,7 +22,12 @@ is tab-separated, one line per fact, each but `p` lines starting with the UTC ti
     p         one raw line of `ps -Ao pid=,time=,ucomm=` for a process of interest (the app, the UI
               test runner, xcodebuild and the simulator services that compete for CPU), belonging
               to the sample above it: pid, accumulated CPU time (user + system), short name
-    top       every 60 samples, the 8 names that used the most CPU in them, with seconds
+    ident     (format 2) one raw line of `ps -o pid=,ppid=,user=,ucomm= -p <pid> ...` for a
+              diagnosticd, apsd, logd or launchd_sim pid first seen under that name: its parent
+              tells whether it runs on the host (parent 1) or in the simulator (parent launchd_sim)
+    identcall (format 2) one per such call: how many pids it asked for, rows, ms, exit or timeout
+    top       every 60 samples, the names that used the most CPU in them, with seconds: 8 names in
+              format 1, 20 in format 2, which also leaves the recorder's own pid out
     note      something that went wrong (ps timed out or failed)
     stop      samples, missed ticks, the CPU the recorder and its children (ps, sysctl) used,
               wall time, and why it stopped
@@ -30,10 +35,17 @@ is tab-separated, one line per fact, each but `p` lines starting with the UTC ti
 environment is ever read or written: ps is not asked for `command`, `args`, `comm` or `-E`, and it
 runs with an environment of PATH and LC_ALL only.
 
+Format 2 (BYR-1896) differs from format 1 only in the names kept in `p` lines, the `ident` lines
+and the longer `top` lines; `read` reads both.
+
 `read` takes the record and the step times `ci_cancelled_taps.py stamp` wrote (test-times.tsv and
 any rerun-N-times.tsv) and prints, for every test step of 10 s or more, and separately for every
 first screen read after a tap on "job-money-customer-view", how much CPU the app's process used
-during it, as a share of the step's length. It always exits 0.
+during it, as a share of the step's length. It always exits 0. Right after its "Record:" line it prints a budget
+block (BYR-1896): the record's busy CPU split into named groups, for the whole record and for its first
+nine top lines, each group from `p` lines where the record has them and from the 8 busiest names of each
+`top` line, with a side (host or simulator) for each diagnosticd and apsd pid from the `ident` lines,
+the shard's treatment from treatment.txt beside the record, and one `BUDGET 2 key=value ...` line.
 
 How to read it. The app's CPU time is that of all its threads together, so the share can be over
 100%, and 70% of one CPU can be two threads at 35% each. A share of 70% or more ("working") says
@@ -70,14 +82,32 @@ PARTIAL = "not judged: app not running all step"
 PS = ["ps", "-Ao", "pid=,time=,ucomm="]
 APP = "Thorbis"
 RUNNER_PREFIX = "ThorbisUITests"
-OF_INTEREST = {"Thorbis", "xcodebuild", "backboardd", "SpringBoard", "testmanagerd", "diagnosticd", "logd", "log"}
+# Format 1 kept these names. Format 2 (BYR-1896) adds the system services the first eight records
+# named in their top lines, so their CPU is exact too. Each is the kernel's short name (at most 16
+# characters): "BackgroundShortc" stands for every name that starts so, and trustd, spindump,
+# mobileassetd and storagekitd run both on the host and in the simulator under one name.
+FORMAT1_NAMES = ("Thorbis", "xcodebuild", "backboardd", "SpringBoard", "testmanagerd", "diagnosticd", "logd", "log")
+OF_INTEREST = set(FORMAT1_NAMES) | {
+    "apsd", "mds", "mds_stores", "mdworker_shared", "searchd", "corespotlightd", "SimRenderServer", "SimMetalHost",
+    "spindump", "launchd_sim", "trustd", "diskimagesiod", "storagekitd", "mobileassetd", "ThorbisWidgets",
+    "PosterBoard", "amsengagementd", "BackgroundShortc"}
+INTEREST_PREFIXES = (RUNNER_PREFIX, "provjobd")
+# Which side a daemon runs on, host or simulator, is told by its parent: one ps call per new
+# (pid, name) of these four names only, so the number of calls does not follow a treatment.
+IDENT_NAMES = ("diagnosticd", "apsd", "logd", "launchd_sim")
+IDENT_PS = ["ps", "-o", "pid=,ppid=,user=,ucomm="]
+IDENT_TIMEOUT = 2.0
+IDENT_TRIES = 3
+IDENT_MAX = 50
+TOP_NAMES = 20
 DOOR_TAP = 'Tap "job-money-customer-view" Button'
-FORMAT = "ci_cpu_load 1"
+FORMAT = "ci_cpu_load 2"
 MAX_NOTES = 50
 
 CPU_MINUTES = re.compile(r"^(\d+):([0-5]\d)(?:\.(\d{1,2}))?$")                  # macOS: M:SS.cc
 CPU_HOURS = re.compile(r"^(?:(\d+)-)?(\d+):([0-5]\d):([0-5]\d)(?:\.(\d+))?$")   # [D-]H:MM:SS[.ff]
 PS_LINE = re.compile(r"^\s*(\d+)\s+(\S+)\s+(.*?)\s*$")
+IDENT_LINE = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*?)\s*$")
 ISO = re.compile(r"^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)\.(\d{3})Z$")
 RERUN_FILE = re.compile(r"^(rerun-\d+)-times\.tsv$")
 
@@ -113,7 +143,7 @@ def parse_ps_line(line):
 
 
 def of_interest(name):
-    return name in OF_INTEREST or name.startswith(RUNNER_PREFIX)
+    return name in OF_INTEREST or name.startswith(INTEREST_PREFIXES)
 
 
 def iso(t):
@@ -182,6 +212,45 @@ def record(path, interval=1.0, max_seconds=6000.0, ps_timeout=5.0):
             return f"sysctl failed {result.returncode}"
         return clean(result.stdout.decode("utf-8", "replace"))[:200]
 
+    def ident(wanted):
+        """Ask ps for the parent and user of each new (pid, name) of IDENT_NAMES. A pair counts as
+        asked once a call that finished has answered; a call that timed out or failed is tried
+        again with the next sample, at most IDENT_TRIES times per pair."""
+        args = list(IDENT_PS)
+        for pid, _ in wanted:
+            args += ["-p", str(pid)]
+        pids = {pid for pid, _ in wanted}
+        started = time.monotonic()
+        rows = 0
+        try:
+            result = run(args, IDENT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            outcome = "timeout"
+            note(f"ident ps did not finish in {IDENT_TIMEOUT:g} s; {len(wanted)} pids not identified this time")
+        except OSError as error:
+            outcome = "could not start"
+            note(f"ident ps could not start ({type(error).__name__})")
+        else:
+            outcome = f"exit {result.returncode}"
+            for line in result.stdout.decode("utf-8", "replace").splitlines():
+                match = IDENT_LINE.match(line)
+                if match and int(match.group(1)) in pids:
+                    rows += 1
+                    write("ident", clean(line.rstrip()))
+            if result.returncode != 0 and rows == 0:
+                note(f"ident ps exited {result.returncode}: " + clean(result.stderr.decode("utf-8", "replace"))[:120])
+            else:
+                for key in wanted:      # a pid ps did not list has ended; asking again tells nothing new
+                    state["identified"].add(key)
+        for key in wanted:
+            if key not in state["identified"]:
+                state["tries"][key] = state["tries"].get(key, 0) + 1
+        write("identcall", f"pids {len(wanted)}", f"rows {rows}", f"ms {(time.monotonic() - started) * 1000:.0f}",
+              outcome)
+
+    state["identified"] = set()
+    state["tries"] = {}
+    own_pid = os.getpid()
     began = time.monotonic()
     parent = os.getppid()
     why = "error"
@@ -238,7 +307,8 @@ def record(path, interval=1.0, max_seconds=6000.0, ps_timeout=5.0):
                         before = previous.get(pid)
                         grew = seconds - before if before is not None and seconds >= before else seconds
                         busy += grew
-                        top[name] = top.get(name, 0.0) + grew
+                        if pid != own_pid:
+                            top[name] = top.get(name, 0.0) + grew
                 previous = {pid: seconds for pid, (_, seconds, _) in parsed.items()}
                 write("sample", str(samples), load, f"ps {took:.0f} ms", f"lines {len(lines)}", f"unread {unread}",
                       f"busy {busy:.2f}", at=at)
@@ -247,8 +317,13 @@ def record(path, interval=1.0, max_seconds=6000.0, ps_timeout=5.0):
                     out.flush()
                 except (OSError, ValueError):
                     raise _Stop("cannot write")
+                wanted = sorted({(pid, name) for pid, (_, _, name) in parsed.items()
+                                 if name in IDENT_NAMES and (pid, name) not in state["identified"]
+                                 and state["tries"].get((pid, name), 0) < IDENT_TRIES})[:IDENT_MAX]
+                if wanted:
+                    ident(wanted)
             if samples % 60 == 0 and top:
-                busiest = sorted(top.items(), key=lambda item: -item[1])[:8]
+                busiest = sorted(top.items(), key=lambda item: -item[1])[:TOP_NAMES]
                 write("top", *(f"{clean(name)} {seconds:.2f}" for name, seconds in busiest))
                 top = {}
             # A schedule kept from the start: a tick that comes while the last one still runs is skipped.
@@ -306,6 +381,11 @@ class Record:
         self.ncpu = None
         self.unread = 0
         self.stop = {}
+        self.format = None          # "1", "2" or None when the start line does not say
+        self.recorder_pid = None
+        self.tops = []              # (time, [(name, cpu seconds)]) in the order written
+        self.idents = []            # (time, pid, ppid, user, name)
+        self.ident_calls = []       # (time, pids, rows, ms, outcome)
 
     def valid(self):
         return [sample for sample in self.samples if sample.valid]
@@ -320,6 +400,14 @@ def iso_seconds(text):
         return calendar.timegm((parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], 0, 0, 0)) + parts[6] / 1000
     except (ValueError, OverflowError):
         return None
+
+
+def _number(text):
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        return None
+    return value if value == value and abs(value) != float("inf") else None
 
 
 def field(fields, word):
@@ -361,9 +449,14 @@ def read_record(path):
                     busy = field(rest, "busy")
                     current = Sample(at, float(loads[0]), valid, int(field(rest, "unread") or 0),
                                      float(busy) if valid and busy not in (None, "-") else None)
+                    current.ps_ms = _number((field(rest, "ps") or "").split(" ")[0]) if valid else None
                     rec.samples.append(current)
                 elif kind == "start":
                     current = None
+                    if rest and rest[0].startswith("ci_cpu_load "):
+                        rec.format = rest[0].split(" ", 1)[1]
+                    pid = field(rest, "pid")
+                    rec.recorder_pid = int(pid) if pid and pid.isdigit() else None
                     interval = field(rest, "interval")
                     if interval:
                         rec.interval = float(interval)
@@ -375,7 +468,26 @@ def read_record(path):
                     for item in rest:
                         word, _, value = item.rpartition(" ")
                         rec.stop[word] = value
-                elif kind in ("loadraw", "note", "top"):
+                elif kind == "top":
+                    current = None
+                    items = []
+                    for item in rest:       # a top line never counts as unread, as in format 1
+                        name, _, seconds = item.rpartition(" ")
+                        value = _number(seconds)
+                        if name and value is not None:
+                            items.append((name, value))
+                    rec.tops.append((at, items))
+                elif kind == "ident":
+                    current = None
+                    match = IDENT_LINE.match(rest[0]) if len(rest) == 1 else None
+                    if not match:
+                        raise ValueError("ident")
+                    rec.idents.append((at, int(match.group(1)), int(match.group(2)), match.group(3), match.group(4)))
+                elif kind == "identcall":
+                    current = None
+                    rec.ident_calls.append((at, field(rest, "pids"), field(rest, "rows"), field(rest, "ms"),
+                                            rest[-1] if rest else "?"))
+                elif kind in ("loadraw", "note"):
                     current = None
                 else:
                     raise ValueError(kind)
@@ -469,6 +581,7 @@ class Row:
         self.busiest = None
         self.verdict = "-"
         self.note = ""
+        self.absent = None      # seconds of the step with no app process listed (None: not measured)
 
 
 def _prepare(rec):
@@ -557,6 +670,7 @@ def measure(rec, step):
         if span > 0 and None not in busy:
             row.host_busy = sum(busy) / span / rec.ncpu
     if not app:
+        row.absent = step.length
         row.verdict = "not measured: no app process"
         row.note = "; ".join(notes)
         return row
@@ -578,6 +692,7 @@ def measure(rec, step):
             absent += b - a
             at_start = at_start or k == 0
             at_end = at_end or k == last - first - 1
+    row.absent = absent
     partial = absent > ABSENT_LIMIT * rec.interval
     if partial:
         where = [words for flag, words in ((at_start, "app started inside it"), (at_end, "app ended inside it")) if flag]
@@ -665,6 +780,268 @@ def _counts(rows, judged_only):
     return text + "."
 
 
+# ----------------------------------------------------------------------------------------------
+# budget (BYR-1896): the record's busy CPU split into named groups, for the runner load experiment
+
+BUDGET_GROUPS = (
+    ("app", (APP,)), ("runner", None), ("xcodebuild", ("xcodebuild",)), ("diagnosticd", ("diagnosticd",)),
+    ("apsd", ("apsd",)), ("spotlight", ("mds", "mds_stores", "mdworker_shared")),
+    ("simsearch", ("searchd", "corespotlightd")), ("springboard", ("SpringBoard", "backboardd")),
+    ("render", ("SimRenderServer", "SimMetalHost")), ("spindump", ("spindump",)),
+    ("logs", ("logd", "log", "testmanagerd")), ("launchd_sim", ("launchd_sim",)))
+SIDED = ("diagnosticd", "apsd")
+SIDES = ("host", "sim", "unknown")
+TREATMENT = re.compile(r"^LOAD EXPERIMENT (\S+) (\S+) (\S+?):? (.*)$")
+OPEN_STEP = "Open com.thorbis.field"
+# The recorder's own children: their CPU is in the stop line's "ps cpu", so a top line naming them
+# must not take it off `rest` a second time.
+RECORDER_CHILDREN = ("ps", "sysctl")
+
+
+def _group_of(name):
+    if name.startswith(RUNNER_PREFIX):
+        return "runner"
+    for group, members in BUDGET_GROUPS:
+        if members and name in members:
+            return group
+    return "other"
+
+
+def _percentile(values, q):
+    """Nearest rank; q in 0..100."""
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    return ordered[max(0, min(len(ordered) - 1, int(-(-q * len(ordered) // 100)) - 1))]
+
+
+def _account(valid):
+    """CPU growth per p line, as (time, name, pid, seconds). The same pid under the same name with a
+    value not lower counts its growth; a pid first seen after the first valid sample, or seen again
+    under another name or lower, is a new process and its whole value counts. Also the births per name."""
+    last, events, born = {}, [], {}
+    for index, sample in enumerate(valid):
+        for pid, (seconds, name) in sample.procs.items():
+            old = last.get(pid)
+            last[pid] = (seconds, name)
+            if index == 0:
+                continue
+            if old is not None and old[1] == name and seconds >= old[0]:
+                grew = seconds - old[0]
+            else:
+                born[name] = born.get(name, 0) + 1
+                grew = seconds
+            events.append((sample.t, name, pid, grew))
+    return events, born, {name for _, (_, name) in valid[0].procs.items()} if valid else set()
+
+
+def _sides(rec, valid):
+    """(pid, name) -> [(time, side, ppid, user)] from the ident rows; launchd_sim pids from both."""
+    sim_parents = {pid for _, pid, _, _, name in rec.idents if name == "launchd_sim"}
+    for sample in valid:
+        sim_parents.update(pid for pid, (_, name) in sample.procs.items() if name == "launchd_sim")
+    table = {}
+    for at, pid, ppid, user, name in rec.idents:
+        side = "sim" if ppid in sim_parents else "host" if ppid == 1 else "unknown"
+        table.setdefault((pid, name), []).append((at, side, ppid, user))
+    return table
+
+
+def _side_at(table, pid, name, t):
+    rows = table.get((pid, name))
+    if not rows:
+        return ("unknown", None, None)
+    before = [row for row in rows if row[0] <= t]
+    row = before[-1] if before else rows[0]
+    return row[1:]
+
+
+def read_treatment(path):
+    """(shard, plan word, applied, lines) from the experiment's treatment.txt, or Nones."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = [clean(line)[:200] for line in handle if line.strip()]
+    except OSError:
+        return None, None, None, []
+    shard = plan = applied = None
+    started = False
+    for line in lines:
+        match = TREATMENT.match(line)
+        if not match:
+            continue
+        shard = shard or match.group(1)
+        phase, word, rest = match.group(2), match.group(3), match.group(4)
+        if phase == "plan":
+            plan = word if word != "unknown" else "unknown"
+            if word == "none":
+                applied = "-"
+            continue
+        plan = plan if plan not in (None, "none") else word
+        if rest.startswith("started"):
+            started = True
+        elif rest.startswith("applied ") and phase == "sim":
+            verdict = rest[len("applied "):].split(" (", 1)[0].strip()
+            applied = {"yes": "yes", "no": "no"}.get(verdict, "not_known")
+            started = False
+    if plan not in (None, "none", "unknown") and (applied is None or started):
+        applied = "not_known"
+    return shard, plan, applied, lines
+
+
+def budget(rec, record_path, long_rows, times_paths=None):
+    """The budget block's lines. Never raises: a fault is one line saying so. With no step times
+    (times_paths empty) the Open figures are not measured, which is not the same as none."""
+    try:
+        return _budget(rec, record_path, long_rows, times_paths)
+    except Exception as error:      # evidence only: the table above and below must still come out
+        return [f"budget: could not be read ({type(error).__name__})"]
+
+
+def _budget(rec, record_path, long_rows, times_paths=None):
+    shard, plan, applied, treatment = read_treatment(os.path.join(os.path.dirname(record_path) or ".", "treatment.txt"))
+    lines = ["Budget (BYR-1896). Share = CPU s / (window s x CPUs). p = from p lines: exact for a process that lives "
+             "between samples, a lower bound for one that ends or is born and gone between them. top8 = lower bound "
+             "from the 8 busiest names of each top line. diag is the total of diag_host, diag_sim and diag_unknown; "
+             "apsd (p) and apsd_top8 are two kinds of figure. Names are 16-character short names.",
+             f"budget format {rec.format or '?'} shard {shard or '-'}"]
+    lines += [f"budget treatment {line}" for line in treatment[:10]] or ["budget treatment none written"]
+    samples, valid, n = rec.samples, rec.valid(), rec.ncpu
+    if not samples or len(valid) < 2 or not n:
+        lines.append("budget record: too few samples or no CPU count, so no budget")
+        return lines
+    t0, tend = samples[0].t, samples[-1].t
+    span = tend - t0
+    wall = _number(rec.stop.get("wall"))
+    missed = _number(rec.stop.get("missed"))
+    ps = [sample.ps_ms for sample in valid if getattr(sample, "ps_ms", None) is not None]
+    missed_pct = None if wall in (None, 0) or missed is None else missed / wall * 100
+    lines.append("budget record wall %s s samples %d missed %s (%s%%) ps median %s ms p90 %s ms" % (
+        "-" if wall is None else f"{wall:.1f}", len(samples), "-" if missed is None else f"{missed:.0f}",
+        "-" if missed_pct is None else f"{missed_pct:.1f}",
+        "-" if not ps else f"{_percentile(ps, 50):.0f}", "-" if not ps else f"{_percentile(ps, 90):.0f}"))
+    events, born, first_names = _account(valid)
+    pnames = {event[1] for event in events} | first_names
+    table = _sides(rec, valid)
+    recorder_cpu = (_number(rec.stop.get("recorder cpu")) or 0.0) + (_number(rec.stop.get("ps cpu")) or 0.0)
+    has_stop = "recorder cpu" in rec.stop
+    windows = [("whole", tend + 1)]
+    # The first nine top lines, or the whole record when it has fewer.
+    windows.append(("early", rec.tops[8][0] if len(rec.tops) >= 9 else tend + 1))
+    # Format 2 names every OF_INTEREST process in its p lines, so a group none of whose names was ever
+    # seen there is a measured 0; format 1 did not look for most of them ("-", not measured).
+    measured_all = rec.format == "2"
+    ident_names = {name for _, _, _, _, name in rec.idents}
+    figures = {}
+    for label, hi in windows:
+        secs = min(hi, tend) - t0
+        pairs = [(b.busy, b.t - a.t) for a, b in zip(valid, valid[1:]) if t0 <= b.t < hi and b.t > a.t and b.busy is not None]
+        busy = sum(value for value, _ in pairs)
+        per = [value / dt / n for value, dt in pairs]
+        if secs <= 0 or not pairs:
+            lines.append(f"budget window {label} - s: no samples")
+            continue
+        share = lambda seconds: seconds / secs / n * 100     # noqa: E731
+        lines.append("budget window %s %.0f s busy mean %.1f%% p90 %.1f%%" % (
+            label, secs, busy / sum(dt for _, dt in pairs) / n * 100, _percentile(per, 90) * 100))
+        p_cpu, sided = {}, {}
+        for t, name, pid, grew in events:
+            if t >= hi:
+                continue
+            p_cpu[name] = p_cpu.get(name, 0.0) + grew
+            if name in SIDED:
+                side = _side_at(table, pid, name, t)[0]
+                sided[(name, side)] = sided.get((name, side), 0.0) + grew
+        top8, top_all = {}, {}
+        for t, items in rec.tops:
+            if t > hi:
+                continue
+            kept = [item for item in items if not (has_stop and item[0] in RECORDER_CHILDREN)]
+            for rank, (name, seconds) in enumerate(kept):
+                top_all[name] = top_all.get(name, 0.0) + seconds
+                if rank < 8:
+                    top8[name] = top8.get(name, 0.0) + seconds
+        recorder = recorder_cpu * secs / span if span > 0 else 0.0
+        group_p, group_top8 = {}, {}
+        for name, seconds in p_cpu.items():
+            group_p[_group_of(name)] = group_p.get(_group_of(name), 0.0) + seconds
+        for name, seconds in top8.items():
+            group_top8[_group_of(name)] = group_top8.get(_group_of(name), 0.0) + seconds
+        groups_with_p = {_group_of(name) for name in pnames}
+
+        def row(name, p_value, top_value):
+            def cell(value):
+                return "- -" if value is None else f"{value:.1f} s {share(value):.1f}%"
+            lines.append(f"budget group {label} {name} p {cell(p_value)} top8 {cell(top_value)}")
+            figures[(label, name)] = (None if p_value is None else share(p_value), None if top_value is None else share(top_value))
+
+        for group, _ in BUDGET_GROUPS + (("other", None),):
+            seen = group in groups_with_p or (measured_all and group != "other")
+            row(group, group_p.get(group, 0.0) if seen else None, group_top8.get(group, 0.0))
+            if group in SIDED:
+                for side in SIDES:
+                    if group in pnames:
+                        # No ident row for the name at all (format 1, or every ident call failed):
+                        # its side was never measured, so host and sim are "-" and all of it is unknown.
+                        known = side == "unknown" or group in ident_names
+                        value = sided.get((group, side), 0.0) if known else None
+                    else:
+                        value = 0.0 if measured_all else None
+                    row(f"{group}.{side}", value, None)
+        row("recorder", recorder if has_stop else None, None)
+        rest = busy - sum(p_cpu.values()) - sum(v for name, v in top_all.items() if name not in pnames) - recorder
+        old = {name for name in pnames if name in FORMAT1_NAMES or name.startswith(RUNNER_PREFIX)}
+        rest1 = busy - sum(p_cpu.get(name, 0.0) for name in old) - sum(v for name, v in top8.items() if name not in old) - recorder
+        row("rest", rest, None)
+        row("rest1", rest1, None)
+    for (pid, name) in sorted({(pid, name) for sample in valid for pid, (_, name) in sample.procs.items()
+                               if name in ("diagnosticd", "apsd", "logd")}, key=lambda key: (key[1], key[0])):
+        side, ppid, user = _side_at(table, pid, name, tend)
+        cpu = sum(grew for _, nm, pd, grew in events if pd == pid and nm == name)
+        lines.append(f"budget ident {pid} {name} {side} ppid {'-' if ppid is None else ppid} user {user or '-'} cpu {cpu:.1f} s")
+    if born:
+        lines.append("budget born " + ", ".join(f"{name} {count}" for name, count in sorted(born.items(), key=lambda x: (-x[1], x[0]))[:20]))
+    for at, pids, rows, ms, outcome in rec.ident_calls[:10]:
+        lines.append(f"budget identcall {_clock(at)[:8]} pids {pids or '-'} rows {rows or '-'} ms {ms or '-'} {outcome}")
+    if len(rec.ident_calls) > 10:
+        lines.append(f"budget identcall {len(rec.ident_calls) - 10} more")
+    opens = [r for r in long_rows if r.step.text.startswith(OPEN_STEP)]
+    longest = max((r.step.length for r in opens), default=None)
+    has_steps = bool(times_paths) or times_paths is None
+    if has_steps:
+        lines.append("budget opens count %d longest %s s sum %.1f s no_app %.1f s" % (
+            len(opens), "-" if longest is None else f"{longest:.1f}", sum(r.step.length for r in opens),
+            sum(r.absent or 0.0 for r in opens)))
+    else:
+        lines.append("budget opens: no step times, so the Open steps are not measured here")
+
+    def key(label, name, which):
+        value = figures.get((label, name), (None, None))[0 if which == "p" else 1]
+        return "-" if value is None else f"{value:.1f}"
+
+    whole = [l for l in lines if l.startswith("budget window whole ")]
+    apsd_unknown = figures.get(("whole", "apsd.unknown"), (None, None))[0]
+    # Any apsd CPU whose side is not known could be the simulator's, so apsd_sim is then not a figure.
+    apsd_sim = "-" if apsd_unknown is None or apsd_unknown > 0 else key("whole", "apsd.sim", "p")
+    mean = p90 = "-"
+    if whole:
+        parts = whole[0].split()
+        mean, p90 = parts[-3].rstrip("%"), parts[-1].rstrip("%")
+    lines.append(" ".join([
+        "BUDGET 2", f"format={rec.format or '?'}", f"shard={shard or '-'}", f"plan={plan or '-'}", f"applied={applied or '-'}",
+        f"busy_mean={mean}", f"busy_p90={p90}", "missed_pct=" + ("-" if missed_pct is None else f"{missed_pct:.1f}"),
+        f"app={key('whole', 'app', 'p')}", f"diag={key('whole', 'diagnosticd', 'p')}",
+        f"diag_host={key('whole', 'diagnosticd.host', 'p')}", f"diag_sim={key('whole', 'diagnosticd.sim', 'p')}",
+        f"diag_unknown={key('whole', 'diagnosticd.unknown', 'p')}", f"apsd={key('whole', 'apsd', 'p')}",
+        f"apsd_host={key('whole', 'apsd.host', 'p')}", f"apsd_sim={apsd_sim}",
+        f"apsd_unknown={key('whole', 'apsd.unknown', 'p')}", f"apsd_top8={key('whole', 'apsd', 'top8')}",
+        f"spotlight={key('whole', 'spotlight', 'p')}", f"spotlight_early={key('early', 'spotlight', 'p')}",
+        f"spotlight_top8={key('whole', 'spotlight', 'top8')}", f"spotlight_top8_early={key('early', 'spotlight', 'top8')}",
+        f"render_top8={key('whole', 'render', 'top8')}", f"rest1={key('whole', 'rest1', 'p')}",
+        "open10_n=" + (str(len(opens)) if has_steps else "-"),
+        "open10_max=" + ("-" if longest is None or not has_steps else f"{longest:.1f}")]))
+    return lines
+
+
 def report(record_path, times_paths):
     rec = read_record(record_path)
     steps = read_steps(times_paths)
@@ -686,6 +1063,7 @@ def report(record_path, times_paths):
         lines.append(text + ".")
     else:
         lines.append(f"Record: no samples in {record_path}.")
+    lines.extend(budget(rec, record_path, long_rows, times_paths))
     names = ", ".join(os.path.basename(path) for path in times_paths) or "no step times"
     lines.append(f"Read: {names}. App CPU share: the CPU time of all the app's threads together over the step's "
                  f"length, so 100% is one CPU busy for the whole step and it can be over 100%.")

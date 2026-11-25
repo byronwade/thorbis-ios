@@ -32,7 +32,7 @@ jobs:
           python3 scripts/ui_test_shards.py --shards 6 --check
           python3 scripts/ui_test_shards.py --tablet --shards 2 --check
       - name: Test the guard, the shard planner, the cancelled-tap rule and the CPU load record
-        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests scripts.tests.test_ci_cpu_load
+        run: python3 -m unittest scripts.tests.test_stock_control_guard scripts.tests.test_ui_test_shards scripts.tests.test_ci_cancelled_taps scripts.tests.test_ci_run_ui_tests scripts.tests.test_ci_cpu_load scripts.tests.test_ci_load_experiment scripts.tests.test_ci_log_compare
       - name: Check every text colour against the grounds it sits on
         run: python3 scripts/tests/contrast.py
 
@@ -149,6 +149,17 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
+      # BYR-1896, a CI-only load experiment for one run: scripts/ci-load-experiment.sh holds the plan
+      # (phone 1, phone 2 and iPad 1 are controls; phone 3 and 6 turn the host's Spotlight indexing off;
+      # phone 4, phone 5 and iPad 2 stop the simulator's push daemon). A treated shard runs no failed
+      # test once more. Each step of it prints every command, its output and its exit status, and
+      # never fails the job.
+      - name: Load experiment (BYR-1896), 1 of 4, the plan and the host
+        continue-on-error: true
+        timeout-minutes: 4
+        env:
+          THORBIS_LOAD_SHARDS: ${{ strategy.job-total }}
+        run: scripts/ci-load-experiment.sh host phone${{ matrix.shard }} "${{ runner.temp }}/cpu-load" "${{ runner.temp }}/load-experiment"
       - name: Select Xcode
         run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
       - name: Fetch the build
@@ -181,6 +192,11 @@ jobs:
           simulator_id=$(scripts/ci-simulator-id.sh)
           xcrun simctl bootstatus "$simulator_id" -b
           booted=$SECONDS
+          # BYR-1896 load experiment, 2 of 4: after boot, before install (scripts/ci-load-experiment.sh
+          # says what). Its own commands are bounded to under 120 s; this alarm is the backstop.
+          perl -e 'alarm shift; exec { $ARGV[0] } @ARGV or die "cannot run $ARGV[0]: $!\n"' 150 scripts/ci-load-experiment.sh \
+            sim phone${{ matrix.shard }} "${{ runner.temp }}/cpu-load" "${{ runner.temp }}/load-experiment" "$simulator_id" \
+            || echo "::warning::Load experiment (sim) exited $?; the tests run as planned"
           app=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 2 -name 'Thorbis.app' | head -n 1)
           if [[ -z "$app" ]]; then
             echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
@@ -225,6 +241,9 @@ jobs:
         # the host's load once a second while the tests run (scripts/ci_cpu_load.py).
         env:
           THORBIS_CPU_LOAD: ${{ runner.temp }}/cpu-load
+          # BYR-1896: the stream's lines are kept for step 3, and a treated shard runs no failed test once more.
+          THORBIS_LOG_COMPARE: ${{ runner.temp }}/load-experiment
+          THORBIS_LOAD_SHARD: phone${{ matrix.shard }}
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
@@ -265,6 +284,39 @@ jobs:
         with:
           name: ios-ui-cpu-load-${{ matrix.shard }}
           path: ${{ runner.temp }}/cpu-load
+          if-no-files-found: ignore
+          retention-days: 14
+      # BYR-1896: these run after the tests, every re-run and the uploads above, so they cannot change a
+      # test's result or its evidence. Each starts only when the job has time for it (80 of its 90 min).
+      - name: Load experiment (BYR-1896), 3 of 4, still applied, and the stored log against the stream
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 11
+        env:
+          THORBIS_RERUN_EVIDENCE: ${{ runner.temp }}/ui-test-reruns
+          # The script looks the simulator's id up itself, under a 30 s alarm, after its time check.
+          THORBIS_LOAD_DEVICE: iPhone
+        run: |
+          for phase in after compare; do
+            scripts/ci-load-experiment.sh "$phase" phone${{ matrix.shard }} "${{ runner.temp }}/cpu-load" \
+              "${{ runner.temp }}/load-experiment" || echo "::warning::Load experiment ($phase) exited $?"
+          done
+      - name: Load experiment (BYR-1896), 4 of 4, which diagnosticd is which, and what stopping each does
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          THORBIS_LOAD_DEVICE: iPhone
+        run: |
+          scripts/ci-load-experiment.sh probe phone${{ matrix.shard }} "${{ runner.temp }}/cpu-load" \
+            "${{ runner.temp }}/load-experiment" || echo "::warning::Load experiment (probe) exited $?"
+      - name: Save the load experiment's evidence
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-load-experiment-${{ matrix.shard }}
+          path: ${{ runner.temp }}/load-experiment
           if-no-files-found: ignore
           retention-days: 14
 
@@ -314,6 +366,17 @@ jobs:
         shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
+      # BYR-1896, a CI-only load experiment for one run: scripts/ci-load-experiment.sh holds the plan
+      # (phone 1, phone 2 and iPad 1 are controls; phone 3 and 6 turn the host's Spotlight indexing off;
+      # phone 4, phone 5 and iPad 2 stop the simulator's push daemon). A treated shard runs no failed
+      # test once more. Each step of it prints every command, its output and its exit status, and
+      # never fails the job.
+      - name: Load experiment (BYR-1896), 1 of 4, the plan and the host
+        continue-on-error: true
+        timeout-minutes: 4
+        env:
+          THORBIS_LOAD_SHARDS: ${{ strategy.job-total }}
+        run: scripts/ci-load-experiment.sh host ipad${{ matrix.shard }} "${{ runner.temp }}/cpu-load" "${{ runner.temp }}/load-experiment"
       - name: Select Xcode
         run: sudo xcode-select --switch "$XCODE_APP/Contents/Developer"
       - name: Fetch the build
@@ -328,6 +391,11 @@ jobs:
           simulator_id=$(scripts/ci-simulator-id.sh iPad)
           xcrun simctl bootstatus "$simulator_id" -b
           booted=$SECONDS
+          # BYR-1896 load experiment, 2 of 4: after boot, before install (scripts/ci-load-experiment.sh
+          # says what). Its own commands are bounded to under 120 s; this alarm is the backstop.
+          perl -e 'alarm shift; exec { $ARGV[0] } @ARGV or die "cannot run $ARGV[0]: $!\n"' 150 scripts/ci-load-experiment.sh \
+            sim ipad${{ matrix.shard }} "${{ runner.temp }}/cpu-load" "${{ runner.temp }}/load-experiment" "$simulator_id" \
+            || echo "::warning::Load experiment (sim) exited $?; the tests run as planned"
           app=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 2 -name 'Thorbis.app' | head -n 1)
           if [[ -z "$app" ]]; then
             echo "::warning::The build carries no Thorbis.app to install ahead of the tests"
@@ -372,6 +440,9 @@ jobs:
         # the host's load once a second while the tests run (scripts/ci_cpu_load.py).
         env:
           THORBIS_CPU_LOAD: ${{ runner.temp }}/cpu-load
+          # BYR-1896: the stream's lines are kept for step 3, and a treated shard runs no failed test once more.
+          THORBIS_LOG_COMPARE: ${{ runner.temp }}/load-experiment
+          THORBIS_LOAD_SHARD: ipad${{ matrix.shard }}
         run: |
           test_run=$(find "${{ runner.temp }}/ThorbisBuild/Products" -maxdepth 1 -name '*.xctestrun' | head -n 1)
           [[ -n "$test_run" ]] || { echo "The build carries no .xctestrun file" >&2; exit 1; }
@@ -408,6 +479,39 @@ jobs:
         with:
           name: ios-ipad-ui-cpu-load-${{ matrix.shard }}
           path: ${{ runner.temp }}/cpu-load
+          if-no-files-found: ignore
+          retention-days: 14
+      # BYR-1896: these run after the tests, every re-run and the uploads above, so they cannot change a
+      # test's result or its evidence. Each starts only when the job has time for it (80 of its 90 min).
+      - name: Load experiment (BYR-1896), 3 of 4, still applied, and the stored log against the stream
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 11
+        env:
+          THORBIS_RERUN_EVIDENCE: ${{ runner.temp }}/ui-test-reruns
+          # The script looks the simulator's id up itself, under a 30 s alarm, after its time check.
+          THORBIS_LOAD_DEVICE: iPad
+        run: |
+          for phase in after compare; do
+            scripts/ci-load-experiment.sh "$phase" ipad${{ matrix.shard }} "${{ runner.temp }}/cpu-load" \
+              "${{ runner.temp }}/load-experiment" || echo "::warning::Load experiment ($phase) exited $?"
+          done
+      - name: Load experiment (BYR-1896), 4 of 4, which diagnosticd is which, and what stopping each does
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          THORBIS_LOAD_DEVICE: iPad
+        run: |
+          scripts/ci-load-experiment.sh probe ipad${{ matrix.shard }} "${{ runner.temp }}/cpu-load" \
+            "${{ runner.temp }}/load-experiment" || echo "::warning::Load experiment (probe) exited $?"
+      - name: Save the load experiment's evidence
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipad-ui-load-experiment-${{ matrix.shard }}
+          path: ${{ runner.temp }}/load-experiment
           if-no-files-found: ignore
           retention-days: 14
 
