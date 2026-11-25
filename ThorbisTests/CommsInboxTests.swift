@@ -618,4 +618,63 @@ final class CommsInboxTests: XCTestCase {
         thread.composing = "On my way"
         XCTAssertEqual(thread.line(in: .drafts), "Draft: On my way")
     }
+
+    func testMarkNoticesReadDropsIdentityRefusalWithoutRetryOrError() async throws {
+        let actor = "44444444-4444-4444-8444-444444444444"
+        let org = "55555555-5555-4555-8555-555555555555"
+        let refusal = #"{"type":"https://thorbis.com/problems/conflict","title":"conflict","status":409,"category":"conflict","detail":"the active identity changed; refresh before acknowledging notices","code":"identity_changed"}"#
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, #"{"read":true,"marked":50,"nextCursor":"sweep-1"}"#),
+            .init(200, #"{"items":[],"unreadState":"present","nextCursor":null}"#),
+            .init(409, refusal),
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CommsInboxModel(seen: CommsCallSeen(defaults: nil, actorID: actor, organizationID: org))
+
+        await model.markNoticesRead(api: api, actorID: actor, organizationID: org)
+        XCTAssertEqual(model.readCursor, "sweep-1")
+        await model.markNoticesRead(api: api, actorID: actor, organizationID: org)
+
+        let requests = URLProtocolFixture.recorded
+        // No retry and no refetch after the refusal.
+        XCTAssertEqual(requests.map { $0.url?.path }, ["/v1/staff/notices/read", "/v1/staff/notices", "/v1/staff/notices/read"])
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(requests[2].body)) as? [String: Any])
+        XCTAssertEqual(body["cursor"] as? String, "sweep-1")
+        XCTAssertEqual(body["expectedIdentity"] as? [String: String], ["actorId": actor, "organizationId": org])
+        XCTAssertNil(model.readCursor)
+        XCTAssertNil(model.noticesError)
+        XCTAssertFalse(model.noticesLoading)
+    }
+
+    func testMarkNoticesReadWithoutIdentitySendsNothing() async {
+        let actor = "44444444-4444-4444-8444-444444444444"
+        let org = "55555555-5555-4555-8555-555555555555"
+        let api = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        let model = CommsInboxModel(seen: CommsCallSeen(defaults: nil, actorID: nil, organizationID: nil))
+
+        await model.markNoticesRead(api: api, actorID: nil, organizationID: org)
+        await model.markNoticesRead(api: api, actorID: actor, organizationID: nil)
+
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+        XCTAssertNil(model.readCursor)
+        XCTAssertNil(model.noticesError)
+        XCTAssertFalse(model.noticesLoading)
+    }
+
+    func testMarkNoticesReadKeepsTheErrorLineForOtherConflicts() async throws {
+        let actor = "44444444-4444-4444-8444-444444444444"
+        let org = "55555555-5555-4555-8555-555555555555"
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, #"{"read":true,"marked":50,"nextCursor":"sweep-1"}"#),
+            .init(200, #"{"items":[],"unreadState":"present","nextCursor":null}"#),
+            .init(409, #"{"title":"conflict","status":409,"detail":"something else changed","code":"other_conflict"}"#),
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CommsInboxModel(seen: CommsCallSeen(defaults: nil, actorID: actor, organizationID: org))
+
+        await model.markNoticesRead(api: api, actorID: actor, organizationID: org)
+        await model.markNoticesRead(api: api, actorID: actor, organizationID: org)
+
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertEqual(model.noticesError, "something else changed")
+        XCTAssertEqual(model.readCursor, "sweep-1")
+    }
 }
