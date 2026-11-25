@@ -267,8 +267,25 @@ final class JobEstimateHandoffUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-job-estimate-handoff", "--paper-preview-owner-auth", "approved"] + extra
+        // BYR-1841, an experiment and not a fix: about half of this class's tests, always the same
+        // half, launch the app with SwiftUI's AttributeGraph told to build its type layouts on the
+        // calling thread instead of a low-priority background queue. On a busy CI runner that queue
+        // can starve while the main thread keeps redoing work that a ready layout would let it skip,
+        // which is the suspected cause of the long first opening of Customer view. The variable is
+        // undocumented and nothing in the app sets it. The app's DEBUG probe logs which launches had
+        // it, so one run compares the two halves. No test's steps, waits or assertions differ
+        // between the halves.
+        if Self.buildsLayoutsOnTheCallingThread(name) { app.launchEnvironment["AG_ASYNC_LAYOUTS"] = "0" }
         app.launch()
         return app
+    }
+    /// True for about half of the tests (36 of 68 today): the sum of the method name's UTF-8 bytes
+    /// is even. The method name is what follows the last space of `name`
+    /// ("-[ThorbisUITests.JobEstimateHandoffUITests testX]"), without the bracket. It depends only on
+    /// that, so a test is in the same half on every run and machine.
+    static func buildsLayoutsOnTheCallingThread(_ testName: String) -> Bool {
+        let method = testName.split(separator: " ").last.map { String($0).replacingOccurrences(of: "]", with: "") } ?? ""
+        return method.utf8.reduce(0) { ($0 + Int($1)) % 2 } == 0
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = name
