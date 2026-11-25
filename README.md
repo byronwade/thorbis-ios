@@ -76,3 +76,17 @@ each re-run shows that one test passing.
 Every such run is a warning on the job and is listed in its summary with the reasons, and its
 evidence is uploaded as `ios-ui-test-reruns-<shard>`, or `ios-ipad-ui-test-reruns-<shard>` for
 the iPad shards (BYR-1835). A failure without that evidence is never run again.
+
+Every UI shard, passing or failing, also uploads `ios-ui-cpu-load-<shard>` (`ios-ipad-ui-cpu-load-<shard>`
+on the iPad) for BYR-1841: `cpu-load.txt` notes once a second the host's load and the CPU time used
+so far by the app (a new pid each launch), the test runner, xcodebuild and the simulator's busiest
+services, read with `ps` by pid and short name only (`scripts/ci_cpu_load.py` documents each line).
+Beside it, `cpu-load-table.txt`, also printed in the job log, lists every test step of 10 s or more and
+every first screen read after the Customer view tap with the share of one CPU the app used during it.
+That is the CPU time of all its threads together, so it can be over 100%, and 70% of one CPU can be
+two threads at 35% each. 70% or more ("working") shows that the app's threads together used at least
+0.7 s of CPU per second of the step, not which threads ran nor that the main thread was one of them;
+30% or less ("waiting") shows that they used at most 0.3 s of CPU per second of the step, so for most
+of the step no thread of the app was running (each was waiting for a CPU or blocked), and only
+together with a high "host busy" (how busy the runner's CPUs were) does it point to a CPU shortage.
+It is evidence, not a test, and comes out once that question is answered.

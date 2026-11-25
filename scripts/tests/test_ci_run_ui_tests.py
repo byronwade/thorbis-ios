@@ -16,6 +16,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "ci-run-ui-tests.sh"
@@ -82,6 +83,17 @@ XCODEBUILD = COMMON + textwrap.dedent("""\
     args = sys.argv[1:]
     with open(os.path.join(STUB, "calls.jsonl"), "a") as calls:
         calls.write(json.dumps(["xcodebuild"] + args) + "\\n")
+    # With the CPU load record on (BYR-1841), go on only once the recorder has written a sample
+    # (after any note about ps), so the script cannot end before the recorder's first ps call does.
+    cpu_load = os.environ.get("THORBIS_CPU_LOAD")
+    if cpu_load and os.path.isdir(cpu_load):
+        def sampled():
+            try:
+                with open(os.path.join(cpu_load, "cpu-load.txt"), encoding="utf-8", errors="replace") as handle:
+                    return "\\tsample\\t" in handle.read()
+            except OSError:
+                return False
+        wait_for(sampled, limit=10.0)
     bundle = args[args.index("-resultBundlePath") + 1]
     os.makedirs(bundle, exist_ok=True)
     with open(os.path.join(STUB, "scenario.json")) as handle:
@@ -186,6 +198,10 @@ XCODEBUILD = COMMON + textwrap.dedent("""\
             say(item[1])
         elif kind == "stderr":
             print(item[1], file=sys.stderr, flush=True)
+        elif kind == "hang":
+            # A run still going when the job is cancelled: say so, then wait to be signalled.
+            open(os.path.join(STUB, "hanging"), "w").close()
+            time.sleep(15)
         elif kind == "exit":
             sys.exit(item[1])
         else:
@@ -247,6 +263,10 @@ class RunUITestsTests(unittest.TestCase):
         env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}", STUB_DIR=str(self.stub),
                    TMPDIR=str(self.tmp), GITHUB_STEP_SUMMARY=str(self.summary))
         env.pop("STREAM_BROKEN", None)
+        if env.get("THORBIS_CPU_LOAD") and Path(env["THORBIS_CPU_LOAD"]).is_dir():
+            # The xcodebuild stand-in waits for this run's first sample, not one left by a run before.
+            for name in ("cpu-load.txt", "cpu-load-table.txt"):
+                Path(env["THORBIS_CPU_LOAD"], name).unlink(missing_ok=True)
         if stream_broken:
             env["STREAM_BROKEN"] = "yes"
         began = time.time()
@@ -473,6 +493,159 @@ class RunUITestsTests(unittest.TestCase):
     def test_a_wrong_command_line_is_refused(self):
         result = subprocess.run(["bash", str(SCRIPT), "a", "b", "c", "d"], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 2)
+
+    # The CPU load record (BYR-1841, scripts/ci_cpu_load.py): stand-ins for macOS's ps and sysctl,
+    # and THORBIS_CPU_LOAD set as the workflow sets it.
+
+    def cpu_stand_ins(self, ps="ok", sysctl="ok"):
+        """ps prints macOS-form lines and notes each call; "fail" exits 1, "missing" exits 127."""
+        bodies = {
+            # The recorder gives ps only PATH and LC_ALL, so the stand-in is told where to write.
+            "ps": textwrap.dedent(f"""\
+                import os, sys
+                with open({str(self.stub / "ps-calls")!r}, "a") as handle:
+                    handle.write(" ".join(sys.argv[1:]) + "\\n")
+                if {ps!r} == "fail":
+                    print("ps: time: requires entitlement", file=sys.stderr)
+                    sys.exit(1)
+                if {ps!r} == "missing":
+                    sys.exit(127)
+                print("27095   0:12.34 Thorbis         ")
+                print(" 6150   0:41.20 ThorbisUITests-R")
+                print(" 4920   1:02.34 xcodebuild      ")
+                """),
+            "sysctl": textwrap.dedent(f"""\
+                import sys
+                if {sysctl!r} != "ok":
+                    sys.exit(1)
+                print("{{ 3.10 2.95 2.20 }}" if "vm.loadavg" in sys.argv else "3\\n3\\n3")
+                """),
+        }
+        for name, body in bodies.items():
+            path = self.bin / name
+            path.write_text(f"#!{sys.executable}\n" + body)
+            path.chmod(0o755)
+        self.cpu_load = self.dir / "cpu-load"
+        return mock.patch.dict(os.environ, {"THORBIS_CPU_LOAD": str(self.cpu_load)})
+
+    def assert_recorder_stopped(self):
+        record = (self.cpu_load / "cpu-load.txt").read_text().splitlines()
+        self.assertIn("\tstart\t", record[0])
+        self.assertIn("\tstop\t", record[-1])
+        pid = int(record[0].rsplit("pid ", 1)[1])
+        stat = Path(f"/proc/{pid}/stat")
+        if stat.parent.parent.exists() and Path("/proc/self/stat").exists():
+            alive = stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        else:
+            try:
+                os.kill(pid, 0)
+                alive = True
+            except ProcessLookupError:
+                alive = False
+        self.assertFalse(alive, "the CPU load recorder outlived the script")
+        return "\n".join(record)
+
+    def test_the_cpu_load_record_covers_a_passing_shard_and_leaves_no_evidence(self):
+        with self.cpu_stand_ins():
+            result = self.run_script(run_case(A, "passed") + summary(1, 0) + [["exit", 0]])
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(self.evidence.exists())
+        record = self.assert_recorder_stopped()
+        self.assertIn("\tsample\t1\t", record)
+        self.assertIn("p\t27095   0:12.34 Thorbis", record)
+        self.assertEqual(set((self.stub / "ps-calls").read_text().splitlines()), {"-Ao pid=,time=,ucomm="})
+        table = (self.cpu_load / "cpu-load-table.txt").read_text()
+        self.assertIn("CPU load during long steps", table)
+        self.assertIn("Read: test-times.tsv.", table)
+        self.assertIn("CPU load during long steps", result.stderr)
+        self.assertNotIn("CPU load during long steps", result.stdout)
+
+    def test_the_cpu_load_record_keeps_a_failures_status(self):
+        with self.cpu_stand_ins():
+            result = self.run_script(run_case(A, "failed") + summary(1, 1) + [["exit", 65]])
+        self.assertEqual(result.returncode, 65)
+        self.assertEqual(self.reruns(), [])
+        self.assert_recorder_stopped()
+        self.assertTrue((self.cpu_load / "cpu-load-table.txt").exists())
+        with self.cpu_stand_ins():
+            crashed = self.run_script([["started", A], ["tap"], ["exit", 70]])
+        self.assertEqual(crashed.returncode, 70)
+        self.assert_recorder_stopped()
+
+    def test_the_cpu_load_record_reads_the_times_of_a_test_run_once_more(self):
+        with self.cpu_stand_ins():
+            result = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.reruns()), 1)
+        self.assert_recorder_stopped()
+        self.assertIn("Read: test-times.tsv, rerun-1-times.tsv.", (self.cpu_load / "cpu-load-table.txt").read_text())
+        with self.cpu_stand_ins():
+            stands = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]], reruns=["failed"])
+        self.assertEqual(stands.returncode, 65)
+
+    def test_a_ps_or_sysctl_that_fails_changes_nothing(self):
+        for ps, sysctl in (("fail", "fail"), ("missing", "ok")):
+            with self.subTest(ps=ps, sysctl=sysctl):
+                with self.cpu_stand_ins(ps=ps, sysctl=sysctl):
+                    passed = self.run_script(run_case(A, "passed") + summary(1, 0) + [["exit", 0]])
+                    failed = self.run_script(run_case(A, "failed") + summary(1, 1) + [["exit", 65]])
+                self.assertEqual(passed.returncode, 0)
+                self.assertEqual(failed.returncode, 65)
+                self.assertEqual(self.reruns(), [])
+                record = self.assert_recorder_stopped()
+                self.assertIn("\tnote\tps exited", record)
+                self.assertIn("\tps failed\t", record)
+                shutil.rmtree(self.evidence, ignore_errors=True)
+
+    def test_an_unusable_cpu_load_directory_changes_nothing(self):
+        blocker = self.dir / "blocker"
+        blocker.write_text("")
+        with self.cpu_stand_ins(), mock.patch.dict(os.environ, {"THORBIS_CPU_LOAD": str(blocker / "cpu-load")}):
+            passed = self.run_script(run_case(A, "passed") + summary(1, 0) + [["exit", 0]])
+            failed = self.run_script(run_case(A, "failed", tap=True) + summary(1, 1) + [["exit", 65]], reruns=["failed"])
+        self.assertEqual(passed.returncode, 0)
+        self.assertEqual(failed.returncode, 65)
+        self.assertNotIn("cpu load", passed.stderr.lower())
+        self.assertFalse((self.stub / "ps-calls").exists())
+
+    def test_a_cancel_to_the_whole_group_still_writes_the_table_and_fails_the_step(self):
+        # A cancel signals every process of the step at once, so the stamper is gone before the
+        # script's EXIT trap runs. The trap must still stop the recorder, write the table and
+        # remove the scratch directory, and the script must still end killed by the signal.
+        (self.stub / "scenario.json").write_text(json.dumps({"first": [["started", A], ["hang"]], "reruns": []}))
+        with self.cpu_stand_ins():
+            env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}", STUB_DIR=str(self.stub),
+                       TMPDIR=str(self.tmp), GITHUB_STEP_SUMMARY=str(self.summary))
+        with open(self.dir / "stdout.txt", "w") as out, open(self.dir / "stderr.txt", "w") as err:
+            process = subprocess.Popen(["bash", str(SCRIPT), "fake.xctestrun", "SIM-1", str(self.dir / "first.xcresult"),
+                                        str(self.evidence), *SHARD], env=env, stdout=out, stderr=err,
+                                       stdin=subprocess.DEVNULL, start_new_session=True)
+            try:
+                end = time.time() + 15
+                while time.time() < end and not (self.stub / "hanging").exists():
+                    time.sleep(0.01)
+                self.assertTrue((self.stub / "hanging").exists(), "the xcodebuild stand-in never started its tests")
+                os.killpg(process.pid, signal.SIGTERM)
+                code = process.wait(timeout=30)
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        self.assertEqual(code, -signal.SIGTERM)
+        self.assertEqual(os.listdir(self.tmp), [], "the script left its scratch directory behind")
+        self.assertIn("CPU load during long steps", (self.cpu_load / "cpu-load-table.txt").read_text())
+        self.assert_recorder_stopped()
+
+    def test_without_thorbis_cpu_load_ps_is_never_called(self):
+        self.cpu_stand_ins()
+        with mock.patch.dict(os.environ):
+            os.environ.pop("THORBIS_CPU_LOAD", None)
+            result = self.run_script(run_case(A, "passed") + summary(1, 0) + [["exit", 0]])
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse((self.stub / "ps-calls").exists())
+        self.assertFalse(self.cpu_load.exists())
+        self.assertNotIn("CPU load", result.stderr)
 
 
 if __name__ == "__main__":

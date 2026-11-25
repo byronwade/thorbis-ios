@@ -72,6 +72,42 @@ taps="$scratch/cancelled-taps.log"
 : >"$times"
 : >"$taps"
 
+# BYR-1841, evidence and not a test. When THORBIS_CPU_LOAD names a directory, scripts/ci_cpu_load.py
+# writes cpu-load.txt there: once a second, from before the first test to after the last re-run,
+# the host's load and the CPU time used so far by the app, the test runner, xcodebuild and the
+# simulator's busiest services. When this script ends, however it ends, the recorder is stopped and
+# cpu-load-table.txt (also printed to the log) lists each test step of 10 s or more with how much of
+# one CPU the app used in it. ps is asked for pid, CPU time and the kernel's short name only, never a
+# command line or the environment. None of it changes this script's status, which tests run, or
+# anything the re-run rule reads. Unset, none of it runs.
+cpu_load=${THORBIS_CPU_LOAD:-}
+cpu_recorder=
+if [[ -n "$cpu_load" ]] && mkdir -p "$cpu_load" 2>/dev/null; then
+  python3 "$here/ci_cpu_load.py" record "$cpu_load/cpu-load.txt" </dev/null >/dev/null 2>&1 &
+  cpu_recorder=$!
+fi
+# shellcheck disable=SC2329 # run by the EXIT trap below
+finish() {
+  # A cancel signals the whole group, so the stamper may be gone already. A write to its fifo
+  # must not end this before the scratch directory is removed and the table is written.
+  trap '' PIPE
+  if [[ -n "$cpu_recorder" ]]; then
+    local waited=0 file
+    kill -TERM "$cpu_recorder" 2>/dev/null || true
+    while kill -0 "$cpu_recorder" 2>/dev/null && ((waited < 20)); do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    kill -KILL "$cpu_recorder" 2>/dev/null || true
+    cpu_times=("$times")
+    for file in "$evidence"/rerun-*-times.tsv; do [[ -f "$file" ]] && cpu_times+=("$file"); done
+    python3 "$here/ci_cpu_load.py" read "$cpu_load/cpu-load.txt" "${cpu_times[@]}" \
+      --out "$cpu_load/cpu-load-table.txt" </dev/null >&2 2>/dev/null || true
+  fi
+  rm -rf "$scratch"
+}
+trap finish EXIT
+
 # The lines, as they are logged. `cat` keeps the stream writing to a pipe: into a pipe it handed
 # over each line as it was logged (seen in run 45119132156), and into a file it may hold lines back.
 # The first clause is the one stop_watcher looks for; keep it first and keep its words.
