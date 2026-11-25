@@ -371,7 +371,12 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let price = app.textFields["invoice-line-price-" + identity]
         XCTAssertTrue(price.waitForExistence(timeout: 5))
         let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: price)
-        XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 5), .completed, "A typed line opens on its price")
+        // One read of this screen can take several seconds on a CI simulator (BYR-1836). A wait
+        // shorter than a read gets no answer at all: with 5 s the only read was cut off while the
+        // app's own log showed the field focused. The condition is the same; the deadline covers
+        // more than one read, as openLineIdentity(app, timeout: 20) does on this screen.
+        XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 20), .completed,
+                       "A typed line opens on its price. \(app.debugDescription)")
     }
 
     func testRepeatedAddsKeepCatalogReachableWithKeyboard() {
