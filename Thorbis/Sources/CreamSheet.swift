@@ -379,12 +379,6 @@ final class DayMoney: ObservableObject {
         totalDue = InvoiceBalance.due(mine)
     }
 
-    /// Owed on these jobs' invoices; nil until the invoices have been read.
-    func toCollect(_ jobs: [Job]) -> Int? {
-        guard totalDue != nil else { return nil }
-        return jobs.reduce(0) { $0 + (dueByJob[$1.id] ?? 0) }
-    }
-
     /// Reads once per identity; `load` reads again (a pull to refresh).
     func loadIfNeeded(api: APIClient, organizationID: String?, identity: String) async {
         guard identity != self.identity || totalDue == nil else { return }

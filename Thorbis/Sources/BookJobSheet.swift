@@ -50,27 +50,6 @@ enum BookJobSearch {
         JobFiltering.date(job.scheduledFor) ?? JobFiltering.date(job.createdAt) ?? .distantPast
     }
 
-    /// There is no job-type catalog in the API, so the quick picks are this workspace's own
-    /// recent titles, the most used first.
-    static func commonTitles(_ jobs: [Job], limit: Int = 6) -> [String] {
-        let recent = jobs.sorted { activity($0) > activity($1) }.prefix(80)
-        var counts: [String: Int] = [:]
-        var spelling: [String: String] = [:]
-        var order: [String] = []
-        for job in recent {
-            let title = job.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !title.isEmpty, title.count <= 32 else { continue }
-            let key = title.lowercased()
-            if spelling[key] == nil { spelling[key] = title; order.append(key) }
-            counts[key, default: 0] += 1
-        }
-        let ranked = order.enumerated().sorted { lhs, rhs in
-            let left = counts[lhs.element] ?? 0, right = counts[rhs.element] ?? 0
-            return left != right ? left > right : lhs.offset < rhs.offset
-        }
-        return ranked.prefix(limit).compactMap { spelling[$0.element] }
-    }
-
     /// Jobs booked on `day` per technician, from the jobs this person can see. Canceled ones don't count.
     static func load(_ jobs: [Job], on day: Date, calendar: Calendar = .current) -> [String: Int] {
         jobs.reduce(into: [:]) { result, job in

@@ -1718,13 +1718,6 @@ struct InvoicePaymentCollectionSheet: View {
         .contentShape(Rectangle())
     }
 
-    private var receivedPaymentNote: some View {
-        Label("Only record money you have already received. This does not charge a card or bank account.", systemImage: "info.circle")
-            .font(Theme.font(13))
-            .foregroundStyle(Theme.muted)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
     /// Paper 39 "Text receipt to": one card row, 56 tall. The app sends receipts by email.
     private var receiptRow: some View {
         HStack(spacing: 12) {
@@ -2196,23 +2189,6 @@ struct InvoicePaymentCollectionSheet: View {
     private var customerName: String {
         store.customerName(invoice.customerId)
     }
-}
-
-
-@MainActor
-private func paymentDetail(_ label: String, _ value: String) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 10) {
-        Text(label).foregroundStyle(Theme.muted)
-        Spacer()
-        // MF-02: amounts in the detail read at the line size; dates stay body text.
-        if value.first == "$" || value.first == "-" {
-            Text(value).moneyStyle(.line).foregroundStyle(Theme.foreground)
-        } else {
-            Text(value).foregroundStyle(Theme.foreground).multilineTextAlignment(.trailing)
-        }
-    }
-    .font(Theme.font(15))
-    .padding(.vertical, 12)
 }
 
 private func paymentDate(_ value: String) -> String {

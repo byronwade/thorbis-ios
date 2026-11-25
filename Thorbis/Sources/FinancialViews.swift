@@ -486,15 +486,6 @@ struct EstimateDetailView: View {
         }
     }
 
-    private func estimateDateVerb(_ status: String) -> String {
-        switch status {
-        case "sent": "Sent"
-        case "approved": "Approved"
-        case "declined": "Declined"
-        default: "Created"
-        }
-    }
-
     /// The date that goes with the status word: when it was sent, approved or declined.
     private func estimateStatusDate(_ record: EstimateRecord) -> String? {
         switch record.status {
@@ -1604,11 +1595,6 @@ struct MoneyFigure: View {
 }
 
 // MARK: - Document pieces (estimate and invoice detail)
-
-/// "Sent Jul 18" for a document's date chip; nil when the date doesn't parse.
-func documentDateChipText(_ verb: String, _ raw: String?) -> String? {
-    JobFiltering.date(raw).map { "\(verb) \(documentDate($0))" }
-}
 
 /// "Jul 18", with the year only when it isn't this year.
 func documentDate(_ date: Date) -> String {

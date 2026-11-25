@@ -243,7 +243,6 @@ struct PriceBookContent: Encodable, Equatable {
     var kind: String
 
     static let kinds = ["service", "labor", "material", "assembly"]
-    static let taxClassifications = ["taxable", "non_taxable"]
 }
 
 extension APIClient {

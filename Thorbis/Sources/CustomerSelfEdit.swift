@@ -114,13 +114,6 @@ struct ConditionalLocationUpdate: Encodable {
 
 @MainActor
 extension APIClient {
-    /// `POST /v1/customers/{id}` (customer.edit). The server records the change set in the audit log.
-    func updateFieldCustomer(_ customerID: String, request: FieldCustomerUpdate) async throws -> CustomerRecord {
-        guard UUID(uuidString: customerID) != nil else {
-            throw Problem(title: "Invalid record ID", status: nil, detail: customerID)
-        }
-        return try await send("POST", "/v1/customers/\(customerID)", body: request)
-    }
     func updateFieldCustomerConditionally(_ customerID: String, request: ConditionalCustomerUpdate) async throws -> CustomerRecord {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await send("POST", "/v1/customers/\(customerID)", body: request)

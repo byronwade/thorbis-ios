@@ -99,13 +99,6 @@ enum JobLiveActivity {
         lifecycle.retire(endCount: running.count, end: { await end(id: running[$0]) })
     }
 
-    @MainActor
-    static func endAll() async {
-        let running = Activity<JobActivityAttributes>.activities.map(\.id)
-        await lifecycle.perform(endCount: running.count, isAuthorized: { true },
-                                end: { await end(id: running[$0]) }, finish: {})
-    }
-
     private static func end(id: String) async {
         guard let activity = Activity<JobActivityAttributes>.activities.first(where: { $0.id == id }) else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
