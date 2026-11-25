@@ -38,6 +38,9 @@ struct JobDetailView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var outbox: FieldOutbox
+    /// The favorite row's words follow what is saved. RootView binds the store to the signed-in
+    /// scope, so this screen knows the saved state with the iPad sidebar or phone drawer closed.
+    @ObservedObject private var favorites = ScopedRecordFavorites.shared
     @EnvironmentObject private var pendingMedia: PendingMediaStore
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
@@ -1453,11 +1456,11 @@ struct JobDetailView: View {
         guard session.can("job.view", feature: "jobs"),
               let context = ScopedRecordFavorites.currentScope(session: session, api: api),
               context.organizationID.caseInsensitiveCompare(job.organizationId) == .orderedSame else { return nil }
-        let favorites = ScopedRecordFavorites.shared
         let selected = favorites.isBound(to: context) && favorites.entries.contains { $0.kind == .job && $0.id == job.id.lowercased() }
+        // The row does what its words say: "Add" only adds and "Remove" only removes.
         return ThorbisMenuItem(selected ? "Remove from favorites" : "Add to favorites", icon: selected ? "star.fill" : "star") {
             favorites.bind(context)
-            favorites.toggle(.job, id: job.id)
+            favorites.set(.job, id: job.id, favorite: !selected)
         }
     }
 

@@ -1315,9 +1315,10 @@ struct CustomerDetailView: View {
         if let record, record.id == customer.id, let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
            scope.organizationID.caseInsensitiveCompare(record.organizationId) == .orderedSame {
             let starred = favorites.isBound(to: scope) && favorites.entries.contains { $0.kind == .customer && $0.id == record.id.lowercased() }
+            // The row does what its words say: "Add" only adds and "Remove" only removes.
             items.append(ThorbisMenuItem(starred ? "Remove from favorites" : "Add to favorites", icon: starred ? "star.slash" : "star") {
                 favorites.bind(scope)
-                favorites.toggle(.customer, id: record.id)
+                favorites.set(.customer, id: record.id, favorite: !starred)
             })
         }
         if canEdit && !onPage {

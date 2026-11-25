@@ -21,6 +21,13 @@ enum ReleaseNotes {
 
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-25-favorites-stay-saved",
+            date: "2026-11-25",
+            highlights: [
+                .init(symbol: "star", title: "Saved favorites stay saved",
+                      detail: "A job or customer you saved shows Remove from favorites when you come back, and Add never removes one."),
+            ]),
+        ReleaseNote(
             id: "2026-11-24-follow-up-booking-answer",
             date: "2026-11-24",
             highlights: [

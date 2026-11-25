@@ -544,7 +544,7 @@ struct PlacesList: View {
                         .contextMenu {
                             Button("Remove from favorites", role: .destructive) {
                                 guard recordFavorites.isBound(to: favoriteScope) else { return }
-                                recordFavorites.toggle(item.entry.kind, id: item.entry.id)
+                                recordFavorites.set(item.entry.kind, id: item.entry.id, favorite: false)
                             }
                         }
                         .accessibilityIdentifier("\(idPrefix)-favorite-record-\(item.entry.id)")
