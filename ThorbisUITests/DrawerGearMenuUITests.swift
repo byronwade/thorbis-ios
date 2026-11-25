@@ -77,6 +77,51 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(favorite.waitForNonExistence(timeout: 10))
     }
 
+    /// A job saved as a favorite in one launch reads "Remove from favorites" in the next, with the
+    /// iPad sidebar (portrait, so not docked) or the phone drawer closed. The store used to be bound
+    /// only while the sidebar, the drawer or Search was open: with all three closed the row read
+    /// "Add to favorites" for a saved job, and tapping it removed the favorite. The launches share
+    /// their own favorites suite, so nothing an earlier test saved reaches this one and nothing
+    /// saved here reaches a later test.
+    func testSavedFavoriteJobReadsRemoveAfterAFreshLaunch() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-role", "office",
+                               "--paper-preview-favorites-suite", UUID().uuidString]
+        func row(reads label: String, _ message: String) -> XCUIElement {
+            XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 30))
+            let row = thorbisJobFavoriteRow(app)
+            XCTAssertTrue(row.waitForExistence(timeout: 10))
+            let reads = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: row)
+            XCTAssertEqual(XCTWaiter.wait(for: [reads], timeout: 10), .completed, "\(message); the row reads \(row.label)")
+            return row
+        }
+        func choose(_ row: XCUIElement) {
+            row.tap()
+            XCTAssertTrue(row.waitForNonExistence(timeout: 15), "The Share sheet closes on each choice")
+        }
+
+        app.launch()
+        choose(row(reads: "Add to favorites", "This test's own suite starts with no favorites"))
+        _ = row(reads: "Remove from favorites", "The job is saved before the app is closed")
+        app.terminate()
+
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 30))
+        // Before More opens: nothing has opened the sidebar or the drawer in this launch.
+        if app.usesTabletLayout {
+            XCTAssertTrue(app.buttons["sidebar-show"].waitForExistence(timeout: 10), "Portrait: the sidebar is hidden, not docked")
+            XCTAssertFalse(app.buttons["sidebar-search"].exists, "The sidebar is closed, so it is not what binds the favorites")
+        } else {
+            XCTAssertFalse(app.scrollViews["drawer-rows"].exists, "The drawer is closed, so it is not what binds the favorites")
+        }
+        let saved = row(reads: "Remove from favorites", "A job saved in an earlier launch reads as saved")
+        // Remove removes, and the row then offers Add: the suite ends as it began, with no favorite.
+        choose(saved)
+        _ = row(reads: "Add to favorites", "Remove from favorites removes the saved job")
+    }
+
     // Paper v2 (Navigation 29N/57N/58N): the drawer lists no recent records, so the Recent →
     // Favorites path is gone from the drawer; favorites are still added from a record's own menu.
 

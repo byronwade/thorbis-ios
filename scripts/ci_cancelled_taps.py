@@ -18,7 +18,14 @@ as far as XCTest's own record of the test shows it:
   - the error falls within a second of a "Tap" step, on XCTest's own clock (the test's
     "Start Test at" time plus the step's offset), before the next step began;
   - the next step is a "Waiting ..." step, and it is the one that failed: no other step comes
-    between it and the test's first failure;
+    between it and the test's first failure. A wait made with XCTWaiter on a predicate does not
+    count. XCTest writes no "Waiting ..." step for it, only a "Checking `Expect predicate `...`"
+    step each time it checks, about once a second, and nothing that marks where the wait begins
+    or ends. In run 45558161330, shard 3, the checks of one wait came 0.92 to 1.07 s apart, and a
+    wait's first check came about a second after it began. So a wait that passed, followed by a
+    wait on the same predicate that failed, can write the same steps as one wait that failed, and
+    that record cannot show that the test failed on the wait right after its tap. Such a failure
+    stands;
   - that first failure does not speak of a crash, a launch, a termination, a lost connection,
     an exception or anything unexpected, and xcodebuild counted no unexpected failure.
 
@@ -30,28 +37,75 @@ command only once the app has told it which key commands it has:
     backboardd[...] [com.apple.BackBoard:EventDelivery] new key command registrations for pid:15145
         environment: keyboardFocus; ... keyCommands: { ... cmd: (... k ...), ... }
 
-Until then it finds no command for the chord and hands the app the bare letter:
+Until then the chord takes one of two routes, and neither reaches the app as the chord. If
+SpringBoard's own keyboardFocus table holds no command for it (⌘K, ⇧⌘N), backboardd finds none
+and hands the app the bare letter:
 
     backboardd[...] [com.apple.BackBoard:EventDeliveryMatching] cache miss for Keyboard event
     backboardd[...] [com.apple.BackBoard:EventDelivery] sequence starting with Keyboard event:
         <sq: ...; (<keyboardFocus; display: builtin; pid: 15145; token: ...>)>
+
+If SpringBoard's table holds it (⌘F, ⌃⌘S), backboardd refuses it in SpringBoard's system overlay,
+matches it in SpringBoard's keyboardFocus table, SpringBoard takes it, and the app is sent nothing
+(CI run 45573322329, SpringBoard pid 1378):
+
+    backboardd[...] [com.apple.BackBoard:EventDeliveryMatching] KCMD: no match in pid:1378 systemKeyCommandOverlay
+    backboardd[...] [com.apple.BackBoard:EventDeliveryMatching] KCMD: match in pid:1378 keyboardFocus
 
 On the iPad the app usually registers 0.2 to 0.7 s after the first keyboard comes, but now and
 then not until a later one, and a test that pressed its chord twice before that fails. A
 failure counts as that, and as nothing else, only when ALL of these hold:
 
   - the same rules about the first failure as for a tap, and its last two steps are a
-    "Type '<key>' key with modifiers '<m>' (0x..)" step and then a "Waiting ..." step;
+    "Type '<key>' key with modifiers '<m>' (0x..)" step and then a "Waiting <N>s ..." step;
+  - that wait ran out: between it and the first failure XCTest wrote its "Collecting debug
+    information" notice, no sooner than the wait began, and for the second route below at
+    least N seconds after it began. For the second route the same holds for the wait after
+    EVERY chord of the test: the next step after each chord is a "Waiting <N>s" step, and the
+    notice follows it, before the step after it, at least N seconds after it began. Without
+    that the failure stands, whatever it was: a wait that passed, a wait step whose N cannot
+    be read, or a wait that ran out without the notice. (In run 45573322329 the notices came
+    4.23 and 4.37 s after the last 4.0 s waits, and after each first wait too; each of the ten
+    notices in that job's log came at least N seconds after a "Waiting <N>s" step, and none
+    followed a wait that passed. The bare-key route checks neither the N seconds nor the
+    earlier chords' waits, because the tests of ci-run-ui-tests.sh write its lost chords with
+    one notice, straight after the last wait.)
   - backboardd logged exactly one connection from a process named Thorbis while the test ran,
     before its first chord, which names the app's pid;
   - for EVERY chord of the test, between a second before its step and half a second after the
-    next step began on XCTest's clock, backboardd logged a cache miss and then sent the key to
-    the app's pid as a bare "Keyboard event", and to no other pid;
+    next step began on XCTest's clock, backboardd sent the key to no pid but the app's, and
+    EITHER every chord logged a cache miss and then the key sent to the app's pid as a bare
+    "Keyboard event", OR every chord took the second route: no key sent at all, and "KCMD: match
+    in pid:<P> keyboardFocus" right after "KCMD: no match in pid:<P> systemKeyCommandOverlay" at
+    the same instant, for one pid P that registered a systemKeyCommandOverlay table (in run 45573322329 only
+    SpringBoard, pid 1378, did; in the iPad shard 1 log of head b1f4a10 a second process, pid
+    3252, registered one too, which is why the next bullet requires exactly one), never
+    connected as Thorbis, and whose last keyboardFocus
+    registration before the match lists the key under exactly the modifiers pressed. Each
+    chord's match comes after the previous chord's. A test whose chords took both routes, a
+    cache miss alone, or a match in any other process or table counts as neither;
+  - for the second route also: P is the only process whose systemKeyCommandOverlay
+    registration appears anywhere in the log, whether or not the rest of that line can be read
+    (a second one, or SpringBoard back under a new pid, stands); from a second before the
+    first chord to the end of the test, backboardd sent no key on to anyone; while the test
+    ran, it never logged "KCMD: no match in pid:<P> keyboardFocus"; and the app's first
+    registration came at most REGISTERED_WITHIN (1.0 s) after the last match (0.33 and 0.47 s
+    in run 45573322329);
   - backboardd matched or refused no key command for the app's pid during the test ("KCMD: ...
     in pid:<app>" never appears), so no chord reached the app as a command;
   - the app registered no key commands before its last chord was sent, and its first
     registration after it, during the test, lists the key under exactly the modifiers pressed:
     the app does declare the chord, and the chord came before it had said so.
+
+What the log cannot show, and what the rule assumes. First, that a late first registration is the
+simulator's doing (it follows XCTest's keyboard), not the app being slow to set up its commands;
+the log cannot tell the two apart. Second, for the second route only, that the app was the one
+that should have had the keyboard when SpringBoard took the chord. Nothing in the log proves it,
+and a SpringBoard alert over the app would most likely log the same lines. The rule accepts that,
+on these grounds: the app registering the pressed chord within a second of the last press shows
+it became the keyboard's target then, which it would not under an alert that stayed; a test that
+is run again must pass on its own, and a second failure fails the step. What the log cannot show
+is why the simulator had not yet made the app the keyboard's target.
 
 Three commands, all used by scripts/ci-run-ui-tests.sh:
 
@@ -66,7 +120,7 @@ Three commands, all used by scripts/ci-run-ui-tests.sh:
       Print the failed tests that may be run once more, one "Target/Class/test" per line, and
       exit 0. That is only when the run is fully accounted for and EVERY failed test failed on
       the wait right after a tap the simulator cancelled, or right after a key chord it did not
-      deliver, as above. Otherwise print nothing, say why on standard error, and exit 1. A
+      deliver in either of the two ways above. Otherwise print nothing, say why on standard error, and exit 1. A
       failure without that evidence is a failure. The simulator log holds both kinds of line.
 
   ci_cancelled_taps.py confirm <times.tsv> <Target/Class/test>
@@ -97,9 +151,16 @@ DEFAULT_LIMIT = 3
 BEFORE_TAP = 1.0
 # How far after the next step began it may still fall.
 AFTER_NEXT = 0.5
+# How soon after a chord the system's own table took the app's first registration must follow. Observed:
+# 0.33 s and 0.47 s in run 45573322329; after a bare key 0.2 to 0.7 s.
+REGISTERED_WITHIN = 1.0
 # A first failure that says any of these is the app's or the runner's, never a lost tap.
 NOT_A_LOST_TAP = ("crash", "launch", "terminate", "lost connection", "not running", "exception",
                   "unexpected", "signal")
+# Lines XCTest writes among a test's steps that are its own notices, not steps the test took. The
+# second is what it says after waiting 60 s for the app's animations to finish, which can happen
+# inside a tap: the tap is still the step, and the wait after it is still the next one.
+NOT_A_STEP = ("Collecting debug information", "App animations complete notification not received")
 # Any line of that log that names backboardd, with the message after the subsystem. A message
 # can span lines; in compact style only its first line carries a time.
 STAMPED = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d")
@@ -108,6 +169,8 @@ KEY_LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)(\.\d+)?\S*\s+\S+\s+bac
 # What backboardd says about a key, as logged in runs 45133610900 and 45148171838.
 CONNECTED = re.compile(r"^Connection added: IOHIDEventSystemConnection\b.*?\bpid:(\d+) process:Thorbis\s")
 MATCHING = re.compile(r"^KCMD: .*?\bin pid:(\d+)\b")
+# A chord matched in a process's own keyboardFocus table, as logged in run 45573322329 for SpringBoard.
+TAKEN = re.compile(r"^KCMD: match in pid:(\d+) keyboardFocus$")
 MISSED = re.compile(r"^cache miss for Keyboard event\b")
 ROUTED = re.compile(r"^sequence starting with Keyboard event: ")
 ROUTED_TO = re.compile(r"\bpid: (\d+);")
@@ -118,6 +181,10 @@ REGISTERED_KEY = re.compile(r'\(\w+:\w+\)|"[^"]*"|[^\s,()"]+')
 # XCTest's own step for typeKey(_:modifierFlags:), and its modifier bits as backboardd names them.
 CHORD = re.compile(r"^Type '(.)' key with modifiers '[^']*' \(0x([0-9a-fA-F]+)\)$")
 MODIFIERS = {0x02: "shft", 0x04: "ctrl", 0x08: "opt", 0x10: "cmd"}
+# Any registration of the system's own overlay table, whether or not REGISTERED can read the rest of it.
+OVERLAY_ANY = re.compile(r"^new key command registrations for pid:(\d+) environment: systemKeyCommandOverlay\b")
+# How long XCTest's own "Waiting 4.0s for ..." step may wait.
+WAIT_TIME = re.compile(r"^Waiting (\d+(?:\.\d+)?)s ")
 
 
 def stamp(times_path: str) -> int:
@@ -260,7 +327,7 @@ def read_run(rows):
             if running is not None:
                 raise Refused(f"{running['name']} started and never finished.")
             running = {"name": value, "outcome": None, "began": [], "took": None, "steps": [],
-                       "first_error": None, "steps_before_error": None}
+                       "first_error": None, "steps_before_error": None, "errors": 0}
         elif kind in ("passed", "failed", "skipped"):
             name, _, took = value.partition(" ")
             if running is None or running["name"] != name:
@@ -278,6 +345,8 @@ def read_run(rows):
             running["steps"].append((float(offset), text))
         elif kind == "error":
             name, _, message = value.partition(" ")
+            if name == running["name"]:
+                running["errors"] += 1
             if name == running["name"] and running["first_error"] is None:
                 running["first_error"] = message
                 running["steps_before_error"] = list(running["steps"])
@@ -291,10 +360,12 @@ def read_run(rows):
     if len(parts) != 3:
         raise Refused(f"xcodebuild's summary could not be read ({summaries[-1]!r}).")
     executed, failures, unexpected = (int(part) for part in parts)
-    failed = [test for test in tests if test["outcome"] == "failed"]
-    if executed != len(tests) or failures != len(failed):
+    # xcodebuild counts failure records, not failed tests: a test that fails a wait and then a
+    # later step counts twice. Compare it with the error lines recorded under the tests.
+    recorded = sum(test["errors"] for test in tests)
+    if executed != len(tests) or failures != recorded:
         raise Refused(f"xcodebuild counted {executed} tests and {failures} failures; the log shows "
-                      f"{len(tests)} and {len(failed)}.")
+                      f"{len(tests)} and {recorded}.")
     if unexpected:
         raise Refused(f"xcodebuild counted {unexpected} unexpected failures (a crash or a thrown "
                       "error, not a failed wait).")
@@ -314,7 +385,7 @@ def lost_tap(test, events):
     if any(word in message.lower() for word in NOT_A_LOST_TAP):
         return None, f"{name}: its first failure is not a wait ({message[:160]}). This failure stands."
     steps = [step for step in test["steps_before_error"]
-             if not step[1].startswith("Collecting debug information")]
+             if not step[1].startswith(NOT_A_STEP)]
     if len(steps) < 2:
         return None, f"{name}: fewer than two steps came before its first failure. This failure stands."
     (tapped_at, tap), (waited_at, wait) = steps[-2], steps[-1]
@@ -335,13 +406,14 @@ def lost_tap(test, events):
 def chord_steps(test):
     """The test's steps before its first failure, and whether it failed on the wait after a chord."""
     steps = [step for step in test["steps_before_error"] or ()
-             if not step[1].startswith("Collecting debug information")]
+             if not step[1].startswith(NOT_A_STEP)]
     shaped = len(steps) >= 2 and CHORD.match(steps[-2][1]) is not None and steps[-1][1].startswith("Waiting ")
     return steps, shaped
 
 
 def lost_chord(test, keys):
-    """When the simulator sent the chord this test failed on as a bare key, or a reason it did not."""
+    """When the simulator sent the chord this test failed on to the app as a bare key, or let the system's
+    own key commands take it, or a reason it did neither."""
     name = test["name"]
     if len(test["began"]) != 1 or test["took"] is None:
         return None, f"{name}: XCTest's own start time or duration is missing. This failure stands."
@@ -371,7 +443,30 @@ def lost_chord(test, keys):
     chords = [(index, at, text) for index, (at, text) in enumerate(steps[:-1]) if CHORD.match(text)]
     if connected >= began + chords[0][1]:
         return None, f"{name}: the app connected to backboardd only after its first chord. This failure stands."
-    sent = None
+    launches = {int(CONNECTED.match(text).group(1)) for _, text in keys if CONNECTED.match(text)}
+
+    def tables(pid, environment, when):
+        """`pid`'s registrations for `environment` logged at or before `when`, parsed."""
+        return [key_commands(text) for at, text in keys if at <= when and REGISTERED.match(text)
+                and REGISTERED.match(text).groups()[:2] == (str(pid), environment)]
+
+    def holds(pid, when):
+        """Whether `pid`'s last keyboardFocus registration before `when` lists the pressed chord."""
+        found = tables(pid, "keyboardFocus", when)
+        listed = found[-1][2].get(pressed, set()) if found and found[-1] is not None else set()
+        return key in listed or f'"{key}"' in listed
+
+    def system(pid, position, inside):
+        """Whether the match at `inside[position]` is in the system's own table: `pid` registered the
+        system key command overlay, and backboardd refused the chord in that overlay, in that very pid,
+        in the record just before the match and at the same instant."""
+        if not position or not tables(pid, "systemKeyCommandOverlay", inside[position][0]):
+            return False
+        when, line = inside[position - 1]
+        return when == inside[position][0] and line == f"KCMD: no match in pid:{pid} systemKeyCommandOverlay"
+
+    sent = taker = None
+    forms = set()
     for index, at, text in chords:
         if CHORD.match(text).groups() != (key, mask):
             return None, (f"{name}: it pressed more than one chord ({text[:60]!r} and {last_chord[:60]!r}). "
@@ -385,11 +480,26 @@ def lost_chord(test, keys):
             return None, (f"{name}: at t = {at:.2f}s backboardd sent a key to another process than the app "
                           f"(pid {app}). This failure stands.")
         bare = [when for when, _ in routed if missed and missed[0] <= when]
-        if not bare:
+        # The second form: matched in the system's own keyboardFocus table, one that holds this chord, with
+        # nothing sent to the app. Each chord needs its own match, later than the last chord's, in the same pid.
+        taken = [(when, int(TAKEN.match(line).group(1))) for position, (when, line) in enumerate(inside)
+                 if TAKEN.match(line) and int(TAKEN.match(line).group(1)) not in launches | {app}
+                 and (sent is None or when > sent) and (taker is None or int(TAKEN.match(line).group(1)) == taker)
+                 and holds(int(TAKEN.match(line).group(1)), when)
+                 and system(int(TAKEN.match(line).group(1)), position, inside)]
+        if bare:
+            sent = bare[-1]
+            forms.add("bare")
+        elif taken and not routed:
+            sent, taker = taken[-1]
+            forms.add("taken")
+        else:
             return None, (f"{name}: no chord the simulator failed to deliver at t = {at:.2f}s ({clock(low)} to "
                           f"{clock(high)}): backboardd did not log a cache miss and a bare key to the app. "
                           "This failure stands.")
-        sent = bare[-1]
+        if len(forms) > 1:
+            return None, (f"{name}: at t = {at:.2f}s its chords had taken both routes, a bare key to the app and "
+                          "a match in the system's own table, which no lost chord shows. This failure stands.")
     matched = [when for when, line in keys if began <= when <= finished + AFTER_NEXT
                and MATCHING.match(line) and int(MATCHING.match(line).group(1)) == app]
     if matched:
@@ -410,6 +520,57 @@ def lost_chord(test, keys):
     if environment != "keyboardFocus" or (key not in listed and f'"{key}"' not in listed):
         return None, (f"{name}: the key commands the app (pid {app}) registered at {clock(registered_at)} do not "
                       f"include {last_chord[5:40]!r}. This failure stands.")
+    # XCTest's notices after each step, up to the next step: notices[i] follows steps[i].
+    notices = []
+    for when, text in test["steps_before_error"]:
+        if not text.startswith(NOT_A_STEP):
+            notices.append([])
+        elif notices:
+            notices[-1].append((when, text))
+
+    def ran_out(position, timed):
+        """Whether steps[position] is a "Waiting <N>s" step after which, before the next step, XCTest wrote its
+        "Collecting debug information" notice no sooner than the wait began, and if `timed`, at least N s after it."""
+        waited_at, wait = steps[position]
+        timeout = WAIT_TIME.match(wait)
+        least = float(timeout.group(1)) if timeout and timed else 0.0
+        return timeout is not None and any(text.startswith(NOT_A_STEP[0]) and round(when - waited_at, 2) >= least
+                                           for when, text in notices[position])
+
+    # The wait after the last chord ran out, in the second form no sooner than the wait's own time after it began.
+    if not ran_out(len(steps) - 1, forms == {"taken"}):
+        return None, (f"{name}: XCTest's record does not show that its last wait ({steps[-1][1][:60]!r}) ran out, so "
+                      "the test may have failed on something else. This failure stands.")
+    if forms == {"taken"}:
+        # So did the wait after every earlier chord: a wait that passed shows that its chord did its job.
+        for index, at, _ in chords:
+            if not ran_out(index + 1, True):
+                return None, (f"{name}: XCTest's record does not show that the wait after its chord at t = {at:.2f}s "
+                              "ran out, so that chord may have reached the app. This failure stands.")
+        systems = sorted({int(OVERLAY_ANY.match(line).group(1)) for _, line in keys if OVERLAY_ANY.match(line)})
+        if systems != [taker]:
+            return None, (f"{name}: more than one process registered the system's own key commands (pids "
+                          f"{', '.join(map(str, systems))}), so pid {taker} is not known to be SpringBoard. "
+                          "This failure stands.")
+        first = began + chords[0][1] - BEFORE_TAP
+        refused = [when for when, line in keys if began <= when <= finished
+                   and line == f"KCMD: no match in pid:{taker} keyboardFocus"]
+        if refused:
+            return None, (f"{name}: backboardd also found no command for a key in the table of pid {taker} at "
+                          f"{clock(refused[0])}, while the test ran. This failure stands.")
+        handed = [when for when, line in keys if first <= when <= finished and ROUTED.match(line)]
+        if handed:
+            return None, (f"{name}: backboardd sent a key on at {clock(handed[0])}, after the test's first chord, "
+                          "so not every key of the test was taken. This failure stands.")
+        if registered_at - sent > REGISTERED_WITHIN:
+            return None, (f"{name}: the app (pid {app}) registered its key commands at {clock(registered_at)}, "
+                          f"more than {REGISTERED_WITHIN:.1f} s after its last chord was taken at {clock(sent)}. "
+                          "This failure stands.")
+        return sent, (f"{name}: the simulator did not deliver the key chord it failed on: at t = {last_at:.2f}s "
+                      f"({last_chord[:60]}) backboardd matched it in the system's own key commands (pid {taker}), "
+                      f"not the app's (pid {app}), at {clock(sent)}, and sent the app nothing, as it did for every "
+                      "chord of the test, before the app had registered any key commands; the app registered "
+                      f"that chord at {clock(registered_at)}, and the test failed on the wait that came next.")
     return sent, (f"{name}: the simulator did not deliver the key chord it failed on: at t = {last_at:.2f}s "
                   f"({last_chord[:60]}) backboardd sent the app (pid {app}) the bare key at {clock(sent)}, as it "
                   f"did for every chord of the test, before the app had registered any key commands; the app "

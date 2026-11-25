@@ -159,11 +159,12 @@ struct NotificationsFeedView: View {
 
     /// The server marks the feed read in batches; a second press continues a long feed.
     private func markRead() async {
-        guard available, !loading else { return }
+        guard available, !loading, let actorID = session.user?.id,
+              let organizationID = session.activeOrganization?.id else { return }
         loading = true
         defer { loading = false }
         do {
-            let result = try await api.markStaffNoticesRead(cursor: readCursor)
+            let result = try await api.markStaffNoticesRead(actorID: actorID, organizationID: organizationID, cursor: readCursor)
             guard result.nextCursor != readCursor || result.nextCursor == nil else {
                 throw Problem(title: "Notice acknowledgement stopped", status: nil, detail: "The server repeated its cursor.")
             }
@@ -174,6 +175,10 @@ struct NotificationsFeedView: View {
             unreadState = page.unreadState
             error = nil
         } catch is CancellationError {
+        } catch let problem as Problem where problem.status == 409 && problem.code == "identity_changed" {
+            // The session moved to another person or workspace before the server ran this, and it
+            // marked nothing. The sweep's continuation belonged to the old identity: end it, no retry.
+            readCursor = nil
         } catch { self.error = error.localizedDescription }
     }
 }

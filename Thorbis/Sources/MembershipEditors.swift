@@ -31,13 +31,44 @@ enum MembershipAccess {
         session.can("customer.edit", feature: "core_crm")
     }
 
-    static let planRefused = "You can\u{2019}t change plans. Ask an owner to do it."
-    static let membershipRefused = "You can\u{2019}t change this membership. Ask the office to do it."
+    /// The server's rule for giving a membership a percent off other than its plan's (0 without a
+    /// plan) when it is added, or other than its stored percent when it is edited.
+    @MainActor static func canOverrideMembershipDiscount(_ session: SessionController) -> Bool {
+        session.can("organization.settings.edit", feature: "core_crm")
+    }
+
+    static let planRefused = "You can\u{2019}t change plans. Ask an owner or admin to do it."
+    static let membershipRefused = "You can\u{2019}t change this membership. Ask an owner or admin to do it."
+    static let discountRefused = "You can\u{2019}t change the percent off. Ask an owner or admin to do it."
+    /// Under the percent off when it is shown and not typed in.
+    static let discountLocked = "Only an owner or admin can change the percent off."
+    /// In place of Remove when putting the membership back would need the company settings permission.
+    static let removeLocked = "Only an owner or admin can remove this membership: adding it back with this percent off could need one of them."
+
+    /// Whether adding this membership back after a removal would need organization.settings.edit,
+    /// the same answer as the web's `undoNeedsDiscountAuthority`. The server checks a re-add like a
+    /// new sale: against the plan's current percent when the plan is still offered, against 0 when
+    /// there is no plan or it was archived. `plans` is nil while they are not loaded; a membership
+    /// with a plan then counts as needing it, so Remove is not offered on a guess.
+    static func restoreNeedsDiscountAuthority(_ membership: MembershipRecord, plans: [MembershipPlan]?) -> Bool {
+        if membership.planId != nil && plans == nil { return true }
+        if let plan = plans?.first(where: { $0.id == membership.planId && !$0.archived }) {
+            return membership.discountPercent != plan.discountPercent
+        }
+        return membership.discountPercent > 0
+    }
 
     /// What to show when a save fails. A 403 gets plain words instead of the server's.
-    static func saveError(_ error: Error, plan: Bool) -> String {
+    /// `discountChanged` says the refused request carried a new percent off. Only then can a 403
+    /// that names the company settings permission be about the percent: the detail alone is not
+    /// enough, because a plan save is refused with the same words.
+    static func saveError(_ error: Error, plan: Bool, discountChanged: Bool = false) -> String {
         if error.isConnectivityFailure { return "Saving needs a connection." }
-        if let problem = error as? Problem, problem.status == 403 { return plan ? planRefused : membershipRefused }
+        if let problem = error as? Problem, problem.status == 403 {
+            if plan { return planRefused }
+            if discountChanged, problem.detail?.contains("organization.settings.edit") == true { return discountRefused }
+            return membershipRefused
+        }
         return error.localizedDescription
     }
 }
@@ -146,12 +177,15 @@ struct MembershipForm: Equatable {
     var notes: String
     /// Not edited here: Cancel membership has its own page.
     let status: String
+    /// The percent off the membership was saved with. A percent equal to it is not sent.
+    let originalDiscount: Int
 
     init(_ record: MembershipRecord) {
         name = record.name
         kind = record.kind
         cadence = record.cadence ?? ""
         discount = record.discountPercent > 0 ? String(record.discountPercent) : ""
+        originalDiscount = record.discountPercent
         starts = record.startsOn.flatMap(EquipmentRecord.day)
         renews = record.renewsOn.flatMap(EquipmentRecord.day)
         locationId = record.locationId
@@ -180,13 +214,14 @@ struct MembershipForm: Equatable {
         }
         return MembershipInput(locationId: locationId, name: name, kind: kind, cadence: cadence,
                                startsOn: starts.map(EquipmentRecord.dayString), renewsOn: renews.map(EquipmentRecord.dayString),
-                               status: status, discountPercent: percent ?? 0, notes: notes)
+                               status: status, discountPercent: percent ?? 0, originalDiscountPercent: originalDiscount,
+                               notes: notes)
     }
 }
 
 extension MembershipInput {
     init(locationId: String?, name: String, kind: String, cadence: String?, startsOn: String?, renewsOn: String?,
-         status: String, discountPercent: Int, notes: String?) {
+         status: String, discountPercent: Int, originalDiscountPercent: Int, notes: String?) {
         self.locationId = locationId
         self.name = name
         self.kind = kind
@@ -195,6 +230,7 @@ extension MembershipInput {
         self.renewsOn = renewsOn
         self.status = status
         self.discountPercent = discountPercent
+        self.originalDiscountPercent = originalDiscountPercent
         self.notes = notes
     }
 }
@@ -238,6 +274,27 @@ struct PaperStackedField: View {
             .font(Theme.font(17, weight: .medium))
             .keyboardType(keyboard)
             .accessibilityLabel(label)
+    }
+}
+
+/// A field this person may see and not change: the label and value set like `PaperStackedField`,
+/// with one muted line under it that says who can change it. No text field, so no keyboard.
+private struct PaperLockedField: View {
+    let label: String
+    let value: String
+    let note: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+            Text(note).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -440,9 +497,14 @@ struct MembershipEditor: View {
     let membership: MembershipRecord
     let onSaved: () async -> Void
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var form: MembershipForm
     @State private var locations: [ServiceLocationRecord] = []
+    /// The plans still offered, nil until loaded or when the load fails.
+    @State private var plans: [MembershipPlan]?
+    /// True once the plans load has finished, loaded or not.
+    @State private var plansSettled = false
     @State private var busy = false
     @State private var error: String?
     @State private var problem: MembershipForm.Problem?
@@ -457,6 +519,11 @@ struct MembershipEditor: View {
     }
 
     private func problem(_ field: MembershipForm.Field) -> String? { problem?.field == field ? problem?.message : nil }
+    private var canChangeDiscount: Bool { MembershipAccess.canOverrideMembershipDiscount(session) }
+    /// Remove is a hard delete: offered only when this person could put the membership back as it was.
+    private var canRemove: Bool {
+        canChangeDiscount || !MembershipAccess.restoreNeedsDiscountAuthority(membership, plans: plans)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -475,8 +542,17 @@ struct MembershipEditor: View {
                     PaperFormCard {
                         PaperStackedField(label: "How often", text: $form.cadence, prompt: "Twice a year", problem: problem(.cadence))
                         WellDivider(leading: 16)
-                        PaperStackedField(label: "Percent off work", text: $form.discount, prompt: "15", keyboard: .numberPad,
-                                          problem: problem(.discount))
+                        if canChangeDiscount {
+                            PaperStackedField(label: "Percent off work", text: $form.discount, prompt: "15", keyboard: .numberPad,
+                                              problem: problem(.discount))
+                        } else {
+                            // The server refuses a new percent off without the company settings
+                            // permission, so it is shown, not typed in.
+                            PaperLockedField(label: "Percent off work",
+                                             value: membership.discountPercent > 0 ? "\(membership.discountPercent)%" : "None",
+                                             note: MembershipAccess.discountLocked)
+                                .accessibilityIdentifier("membership-discount-locked")
+                        }
                     }
                     PaperFormCard {
                         PaperDateRow(title: "Starts", value: $form.starts)
@@ -497,7 +573,16 @@ struct MembershipEditor: View {
                         PaperNotesField(label: "Notes", text: $form.notes, prompt: "Anything the team should know\u{2026}",
                                         problem: problem(.notes))
                     }
-                    PaperFormRemoveButton(title: "Remove membership", identifier: "membership-remove", disabled: busy) { confirmRemove = true }
+                    if canRemove {
+                        PaperFormRemoveButton(title: "Remove membership", identifier: "membership-remove", disabled: busy) { confirmRemove = true }
+                    } else if plansSettled || membership.planId == nil {
+                        // Nothing is said while the answer still waits on the plans.
+                        Text(MembershipAccess.removeLocked).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("membership-remove-locked")
+                    }
                 }
                 .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 32)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -515,6 +600,11 @@ struct MembershipEditor: View {
         .task {
             // The property row is extra: without the places it is left out and the saved place is kept.
             locations = ((try? await api.fieldLocations(customerID)) ?? []).filter { $0.kind == "service" }
+        }
+        .task {
+            // Its own task, so the places are not held up. A failed load leaves the plans nil.
+            plans = try? await api.membershipPlans()
+            plansSettled = true
         }
         .onChange(of: form) { _, _ in problem = nil }
     }
@@ -538,7 +628,7 @@ struct MembershipEditor: View {
             await onSaved()
             dismiss()
         } catch is CancellationError {
-        } catch { self.error = MembershipAccess.saveError(error, plan: false) }
+        } catch { self.error = MembershipAccess.saveError(error, plan: false, discountChanged: input.discountChanged) }
     }
 
     private func remove() async {

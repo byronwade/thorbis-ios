@@ -93,6 +93,12 @@ struct RootView: View {
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
+        // Saved favorites follow the signed-in scope for as long as the app's places are up. A job
+        // or customer screen's favorite row reads them from here, so it knows what is saved while
+        // the iPad sidebar or the phone drawer (which bind the same scope, a no-op) is closed.
+        .onChange(of: ScopedRecordFavorites.currentScope(session: session, api: api), initial: true) { _, scope in
+            ScopedRecordFavorites.shared.bind(scope)
+        }
         // The owner's company-wide pinned places and menu, when one has been saved.
         .task(id: session.activeOrganization?.id) {
             guard session.activeOrganization != nil else { return }
@@ -598,8 +604,7 @@ struct RootView: View {
             }
             return .unread
         case .money:
-            guard let due = dayMoney.totalDue, due > 0 else { return nil }
-            return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
+            return PlaceCount.due(dayMoney.totalDue)
         default: return nil
         }
     }

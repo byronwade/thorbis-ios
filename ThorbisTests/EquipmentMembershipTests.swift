@@ -91,4 +91,22 @@ final class EquipmentMembershipTests: XCTestCase {
         XCTAssertTrue(context.memberships.isEmpty)
         XCTAssertTrue(context.equipmentRecords.isEmpty)
     }
+
+    func testMemberPricingSendsNoDay() async throws {
+        let reply = #"{"isMember":true,"discountPercent":15,"membership":null,"day":"2026-11-24"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        let pricing = try await client.memberPricing(customerID)
+        XCTAssertEqual(pricing.discountPercent, 15)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.url?.path, "/v1/customers/\(customerID)/member-pricing")
+        // The server, not the phone, decides the day member pricing is judged on, so the phone sends no day.
+        XCTAssertNil(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+    }
+
+    func testMemberPricingWithTheServersDayStillDecodes() throws {
+        let json = #"{"isMember":true,"discountPercent":15,"membership":null,"day":"2026-11-24"}"#
+        let pricing = try JSONDecoder().decode(MemberPricing.self, from: Data(json.utf8))
+        XCTAssertEqual(pricing, MemberPricing(isMember: true, discountPercent: 15, membership: nil))
+    }
 }

@@ -46,6 +46,21 @@ func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Customer view")).firstMatch
 }
 
+/// Taps Customer view's row right after the job's More circle ("Job actions") was tapped: waits for
+/// the row to come up in the sheet, asserts it did, then taps it once. The wait is what lets CI tell
+/// a tap the simulator cancelled (BYR-1835) from a real failure: its re-run rule
+/// (scripts/ci_cancelled_taps.py) looks only at a "Waiting" step that fails right after a tap. Run
+/// 45532660760 lost the More tap, and the row tap that followed straight after it failed outside
+/// the rule. 10 s: the deadline the waits already on this row use, above the 8 s that one read has
+/// taken on a slow runner (b1f4a10f). A sheet that never opens, or opens without the row, still fails.
+@MainActor
+func thorbisTapCustomerViewMenuItem(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    let row = thorbisCustomerViewMenuItem(app)
+    XCTAssertTrue(row.waitForExistence(timeout: 10), "More shows Customer view once Job actions is tapped",
+                  file: file, line: line)
+    row.tap()
+}
+
 /// Opens the header's Share circle sheet (Paper 21), unless `row` is already there. In field mode
 /// (Paper F2 to F8) the bar has no Share circle and the field menu keeps these rows: opens More.
 @MainActor
@@ -252,8 +267,25 @@ final class JobEstimateHandoffUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-job-estimate-handoff", "--paper-preview-owner-auth", "approved"] + extra
+        // BYR-1841, an experiment and not a fix: about half of this class's tests, always the same
+        // half, launch the app with SwiftUI's AttributeGraph told to build its type layouts on the
+        // calling thread instead of a low-priority background queue. On a busy CI runner that queue
+        // can starve while the main thread keeps redoing work that a ready layout would let it skip,
+        // which is the suspected cause of the long first opening of Customer view. The variable is
+        // undocumented and nothing in the app sets it. The app's DEBUG probe logs which launches had
+        // it, so one run compares the two halves. No test's steps, waits or assertions differ
+        // between the halves.
+        if Self.buildsLayoutsOnTheCallingThread(name) { app.launchEnvironment["AG_ASYNC_LAYOUTS"] = "0" }
         app.launch()
         return app
+    }
+    /// True for about half of the tests (36 of 68 today): the sum of the method name's UTF-8 bytes
+    /// is even. The method name is what follows the last space of `name`
+    /// ("-[ThorbisUITests.JobEstimateHandoffUITests testX]"), without the bracket. It depends only on
+    /// that, so a test is in the same half on every run and machine.
+    static func buildsLayoutsOnTheCallingThread(_ testName: String) -> Bool {
+        let method = testName.split(separator: " ").last.map { String($0).replacingOccurrences(of: "]", with: "") } ?? ""
+        return method.utf8.reduce(0) { ($0 + Int($1)) % 2 } == 0
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = name
@@ -1254,6 +1286,42 @@ final class JobEstimateHandoffUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [resolved], timeout: 15), .completed)
         }
         XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 1)
+    }
+    /// BYR-1844: the first approval's answer is held until Back is tapped, so it lands during the slide.
+    /// The run ended at the tap: no signature is registered and nothing is approved for estimate 2 after it.
+    func testAnswerLandingDuringTheBackSlideSendsNothingMore() throws {
+        let app = open(["--paper-preview-handoff-hold-first-approval-post", "--paper-preview-handoff-hide-controls"])
+        reachSignTogether(app); try approveTogether(app)
+        let firstRow = app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"]
+        let inFlight = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Approving"), object: firstRow)
+        XCTAssertEqual(XCTWaiter.wait(for: [inFlight], timeout: 5), .completed, "The first approval must be running")
+        var sent = false
+        for _ in 0..<20 where !sent {
+            sent = ((try? receipt(app))?["approvals"] as? [[String: Any]])?.count == 1
+            if !sent { _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Wait for the approval to go out")], timeout: 0.5) }
+        }
+        XCTAssertTrue(sent, "The first approval must be in flight before leaving")
+        XCTAssertTrue(firstRow.label.contains("Approving"), "The held answer must not have landed before leaving")
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let again = app.buttons["customer-view-approve-estimates"]
+        XCTAssertTrue(again.waitForExistence(timeout: 15))
+        let requests = try receipt(app)["requests"] as? [[String: String]] ?? []
+        let released = try XCTUnwrap(requests.firstIndex { $0["method"] == "RELEASE" }, "The Back tap must let the held answer go")
+        XCTAssertEqual(requests[released]["query"], "run-stopped", "Back must stop the run before the held answer lands")
+        let after = requests[(released + 1)...].filter {
+            $0["method"] == "POST" && (($0["path"] ?? "").hasSuffix("/media") || ($0["path"] ?? "").hasSuffix("/approve"))
+        }
+        XCTAssertEqual(after.map { $0["path"] ?? "" }, [], "No signature registration and no approval after Back")
+        again.tap()
+        let summary = app.staticTexts["handoff-results-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 15), "A sent approval must end in a visible state")
+        XCTAssertTrue(summary.label.contains("1 approved") || summary.label.contains("needs confirmation"), summary.label)
+        XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists, "Never offered for a fresh blind resend")
+        let proof = try receipt(app)
+        let posts = (proof["requests"] as? [[String: String]] ?? []).filter { $0["method"] == "POST" && ($0["path"] ?? "").hasSuffix("/approve") }
+        XCTAssertEqual(posts.map { $0["path"] ?? "" }, ["/v1/estimates/00000000-0000-4000-8000-000000008101/approve"])
+        XCTAssertEqual((proof["registrationClientIDs"] as? [String])?.count, 1, "Only the first estimate's signature was registered")
+        XCTAssertEqual((proof["approvals"] as? [[String: Any]])?.count, 1)
     }
     func testOneSignatureAtLargestTextKeepsShortCommit() throws {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])

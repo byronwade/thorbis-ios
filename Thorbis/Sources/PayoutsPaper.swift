@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Paper 90 "Payouts": what Stripe holds for the company and what it has sent to the bank, from
-/// `GET /v1/organization/money-availability`. Read-only: payouts are managed on the web.
+/// `GET /v1/organization/money-availability`. Read-only: nothing here changes a payout, and no
+/// web page does either yet (BYR-1654), so the page does not send anyone to one.
 struct PayoutsPage: View {
     let snapshot: MoneyAvailability
     let company: String
@@ -43,7 +44,7 @@ struct PayoutsPage: View {
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 }
-                Text("Payouts are managed on the web.")
+                Text("Stripe sends these payouts. They can't be changed here.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 16)
@@ -59,7 +60,7 @@ struct PayoutsPage: View {
         let label = snapshot.balances.count > 1 ? "Available balance \u{00B7} \(balance.currency)" : "Available balance"
         return VStack(alignment: .leading, spacing: 0) {
             Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
-            Text(money(balance.available, currency: balance.currency))
+            Text(MoneyAvailability.amountText(balance.available, currency: balance.currency))
                 .font(Theme.font(40, weight: .bold)).tracking(-1.2).monospacedDigit()
                 .foregroundStyle(Theme.foreground)
                 .lineLimit(1).minimumScaleFactor(0.6)
@@ -70,7 +71,7 @@ struct PayoutsPage: View {
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(money(next?.amount ?? balance.pending, currency: balance.currency))
+                Text(MoneyAvailability.amountText(next?.amount ?? balance.pending, currency: balance.currency))
                     .font(Theme.font(15, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
             }
             .padding(.top, 12)
@@ -99,7 +100,7 @@ struct PayoutsPage: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
-                Text(money(payout.amount, currency: payout.currency))
+                Text(MoneyAvailability.amountText(payout.amount, currency: payout.currency))
                     .font(Theme.font(16, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
                 Text(state.word).font(Theme.font(14)).foregroundStyle(state.tint)
             }

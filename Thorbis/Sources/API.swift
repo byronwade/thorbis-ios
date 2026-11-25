@@ -68,6 +68,14 @@ struct Items<T: Codable>: Codable {
     let nextCursor: String?
 }
 
+/// A list the app stopped reading while the server still had another page. Screens show `note`
+/// under such a list so it never looks complete when it is not.
+enum PartialList {
+    static func note(shown count: Int, of noun: String) -> String {
+        "Showing the first \(count.formatted()) \(noun). There are more."
+    }
+}
+
 /// The handful of optional reads a job screen makes that a role may not be allowed (403) or a
 /// server may not have (404). Once one is refused it is remembered for the sign-in (`scope` is
 /// the client's request generation, which changes with the session and workspace), so the screen
@@ -390,7 +398,7 @@ final class APIClient: ObservableObject {
 
     private static func pageKey<R: Identifiable>(_ record: R) -> AnyHashable { AnyHashable(record.id) }
 
-    private func allPages<T: Codable>(_ path: String) async throws -> [T] {
+    func allPages<T: Codable>(_ path: String) async throws -> [T] {
         let generation = requestGeneration
         var all: [T] = []
         var cursor: String?

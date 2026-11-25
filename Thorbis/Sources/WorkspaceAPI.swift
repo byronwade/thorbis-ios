@@ -179,12 +179,18 @@ extension APIClient {
                               queryItems: [URLQueryItem(name: "limit", value: String(limit))], cursor: cursor)
     }
 
-    func markStaffNoticesRead(limit: Int = 50, cursor: String? = nil) async throws -> StaffNoticesReadResult {
+    /// The identity is a refusal precondition: the server answers 409 `identity_changed` and marks
+    /// nothing when the session names another person or workspace by the time it runs.
+    func markStaffNoticesRead(actorID: String, organizationID: String,
+                              limit: Int = 50, cursor: String? = nil) async throws -> StaffNoticesReadResult {
         guard (1...200).contains(limit), cursor == nil || !(cursor?.isEmpty ?? true) else {
             throw Problem(title: "Invalid notice sweep", status: nil, detail: "Use 1–200 items and a nonempty continuation.")
         }
-        struct Body: Encodable { let limit: Int; let cursor: String? }
-        return try await send("POST", "/v1/staff/notices/read", body: Body(limit: limit, cursor: cursor))
+        struct Identity: Encodable { let actorId: String; let organizationId: String }
+        struct Body: Encodable { let limit: Int; let cursor: String?; let expectedIdentity: Identity }
+        return try await send("POST", "/v1/staff/notices/read",
+                              body: Body(limit: limit, cursor: cursor,
+                                         expectedIdentity: Identity(actorId: actorID, organizationId: organizationID)))
     }
 
     func revenueReport() async throws -> RevenueReport {
@@ -237,7 +243,6 @@ struct PriceBookContent: Encodable, Equatable {
     var kind: String
 
     static let kinds = ["service", "labor", "material", "assembly"]
-    static let taxClassifications = ["taxable", "non_taxable"]
 }
 
 extension APIClient {

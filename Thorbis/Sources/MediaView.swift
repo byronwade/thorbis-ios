@@ -82,7 +82,7 @@ struct JobMediaView: View {
     /// A server change in flight (tag, archive, a file being prepared). Never blocks the camera.
     @State private var busy = false
     /// Uploads running in the background. Capture, tagging and launch never wait on this.
-    @State private var draining = false
+    @State private var sends = MediaSendTurn()
     @State private var error: String?
     @StateObject private var preview = DocumentPreviewController()
     @State private var importDocument = false
@@ -569,7 +569,7 @@ struct JobMediaView: View {
                             .padding(.horizontal, 16).frame(minHeight: 44)
                             .background(Theme.quietFill, in: Capsule())
                             .buttonStyle(PressStyle())
-                            .disabled(draining || !canAdd)
+                            .disabled(sends.isSending || !canAdd)
                             .accessibilityIdentifier("job-media-send-now")
                     }
                 }
@@ -789,7 +789,7 @@ struct JobMediaView: View {
                 ThorbisMenu(items: [
                     ThorbisMenuItem("Try sending again", icon: "arrow.clockwise", subtitle: reason) { Task { await retryWaiting() } },
                 ], title: "Couldn’t send this photo", accessibilityLabel: "\(media.title), failed to send") { tile }
-                    .disabled(draining || !canAdd)
+                    .disabled(sends.isSending || !canAdd)
             } else {
                 tile
             }
@@ -1362,10 +1362,11 @@ struct JobMediaView: View {
 
     /// Sends everything saved for this job, in the background. Runs again while new photos arrive
     /// mid-send, stops at a failure or lost connection, and reloads the grid once at the end.
+    /// Send now stays off until this loop has returned, even when a session check changes the
+    /// scope mid-send, so a new loop never starts beside an upload still in flight.
     private func retryWaiting() async {
-        guard !Task.isCancelled, !draining, let scope = readScope, currentPendingContext != nil else { return }
-        draining = true
-        defer { if readScope == scope { draining = false } }
+        guard !Task.isCancelled, let scope = readScope, currentPendingContext != nil, let run = sends.begin() else { return }
+        defer { sends.end(run) }
         var sent = false
         var attempted = Set<String>()
         while !Task.isCancelled, readScope == scope, currentPendingContext != nil {

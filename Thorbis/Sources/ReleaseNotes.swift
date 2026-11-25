@@ -21,6 +21,64 @@ enum ReleaseNotes {
 
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-25-follow-up-queue-problems",
+            date: "2026-11-25",
+            highlights: [
+                .init(symbol: "exclamationmark.triangle", title: "Waiting follow-ups say what went wrong",
+                      detail: "If the follow-ups waiting for a slot can\u{2019}t load, Unscheduled says why instead of showing nothing."),
+                .init(symbol: "calendar.badge.clock", title: "Check a booking at the time you picked",
+                      detail: "After no answer, Schedule opens on the time and length you first sent, so Book visit checks that one."),
+            ],
+            fixes: 2),
+        ReleaseNote(
+            id: "2026-11-25-favorites-stay-saved",
+            date: "2026-11-25",
+            highlights: [
+                .init(symbol: "star", title: "Saved favorites stay saved",
+                      detail: "A job or customer you saved shows Remove from favorites when you come back, and Add never removes one."),
+            ]),
+        ReleaseNote(
+            id: "2026-11-24-follow-up-booking-answer",
+            date: "2026-11-24",
+            highlights: [
+                .init(symbol: "calendar.badge.clock", title: "Book a follow-up again to check",
+                      detail: "When Thorbis doesn\u{2019}t answer a booking, Book visit again checks it and never books it twice."),
+            ],
+            fixes: 3),
+        ReleaseNote(
+            id: "2026-11-24-refused-refunds",
+            date: "2026-11-24",
+            highlights: [
+                .init(symbol: "arrow.uturn.backward.circle", title: "Refused refunds say why",
+                      detail: "A refused refund says why, and goes back to a draft when Thorbis can tell no money moved."),
+                .init(symbol: "questionmark.circle", title: "Send an unconfirmed refund again",
+                      detail: "Send an unconfirmed refund again, or discard a cash or check one once Payments shows it wasn\u{2019}t refunded."),
+            ],
+            fixes: 2),
+        ReleaseNote(
+            id: "2026-11-24-photo-send-now",
+            date: "2026-11-24",
+            highlights: [
+                .init(symbol: "arrow.up.circle", title: "Send now works after you reconnect",
+                      detail: "Getting signal back or coming back to the app while photos send no longer leaves Send now greyed out."),
+            ]),
+        ReleaseNote(
+            id: "2026-11-24-money-to-the-cent",
+            date: "2026-11-24",
+            highlights: [
+                .init(symbol: "dollarsign.circle", title: "Balances show every cent",
+                      detail: "Money and Home show what\u{2019}s owed and collected to the cent, as the web does, never rounded up."),
+            ],
+            fixes: 3),
+        ReleaseNote(
+            id: "2026-11-23-member-discount",
+            date: "2026-11-23",
+            highlights: [
+                .init(symbol: "percent", title: "Percent off follows the plan",
+                      detail: "A membership\u{2019}s percent off comes from its plan; only an owner or admin can set a different one."),
+            ],
+            fixes: 10),
+        ReleaseNote(
             id: "2026-11-23-at-address-kept-answers",
             date: "2026-11-23",
             highlights: [

@@ -19,17 +19,21 @@ import UIKit
 struct ThorbisBackButton: View {
     @Environment(\.dismiss) private var dismiss
     var action: (() -> Void)? = nil
+    /// Told at the tap, just before the pop (BYR-1844), so the page being left can stop work now and
+    /// not when the slide has ended. Ignored when `action` is given.
+    var willGoBack: (() -> Void)? = nil
 
     var body: some View {
         // Paper 21: a 44pt circle on the card fill with the 20pt chevron; no rim.
         PaperCircleButton(symbol: "chevron.left", label: "Back", size: 44, fill: Theme.card) {
-            if let action { action() } else { dismiss() }
+            if let action { action() } else { willGoBack?(); dismiss() }
         }
     }
 }
 
 private struct ThorbisBackButtonModifier: ViewModifier {
     let isEnabled: Bool
+    var willGoBack: (() -> Void)? = nil
 
     /// Pushed screens keep Back alone (C-Job.dc.html): the drawer lives on the place's root, one
     /// Back or edge swipe away, so the bar never stacks two circles at its leading edge.
@@ -38,7 +42,7 @@ private struct ThorbisBackButtonModifier: ViewModifier {
             content
                 .navigationBarBackButtonHidden(true)
                 .toolbar {
-                    ThorbisToolbarItem(placement: .topBarLeading) { ThorbisBackButton() }
+                    ThorbisToolbarItem(placement: .topBarLeading) { ThorbisBackButton(willGoBack: willGoBack) }
                 }
         } else {
             content
@@ -62,6 +66,15 @@ extension View {
 
     func thorbisDestination<C: View>(isPresented: Binding<Bool>, @ViewBuilder destination: () -> C) -> some View {
         navigationDestination(isPresented: isPresented) { destination().thorbisBackButton() }
+    }
+
+    /// `thorbisDestination(isPresented:)` whose Back tells the pushed page it is being left at the tap
+    /// (BYR-1844). A swipe back is not covered here; the page's onDisappear still ends it.
+    func thorbisDestination<C: View>(isPresented: Binding<Bool>, willGoBack: @escaping () -> Void,
+                                     @ViewBuilder destination: () -> C) -> some View {
+        navigationDestination(isPresented: isPresented) {
+            destination().modifier(ThorbisBackButtonModifier(isEnabled: true, willGoBack: willGoBack))
+        }
     }
 
     func thorbisDestination<D: Hashable, C: View>(item: Binding<D?>, @ViewBuilder destination: @escaping (D) -> C) -> some View {

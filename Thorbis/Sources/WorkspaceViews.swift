@@ -86,7 +86,7 @@ struct WorkspaceRevenueView: View {
         let tiles = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
         tiles {
             NavigationLink(value: PaperRoute.invoices) {
-                receivableTile(label: "Outstanding AR", value: money(report.receivable.balance, currency: "USD"),
+                receivableTile(label: "Outstanding", value: money(report.receivable.balance, currency: "USD"),
                                detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")",
                                alert: false)
             }

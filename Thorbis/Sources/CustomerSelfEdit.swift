@@ -114,13 +114,6 @@ struct ConditionalLocationUpdate: Encodable {
 
 @MainActor
 extension APIClient {
-    /// `POST /v1/customers/{id}` (customer.edit). The server records the change set in the audit log.
-    func updateFieldCustomer(_ customerID: String, request: FieldCustomerUpdate) async throws -> CustomerRecord {
-        guard UUID(uuidString: customerID) != nil else {
-            throw Problem(title: "Invalid record ID", status: nil, detail: customerID)
-        }
-        return try await send("POST", "/v1/customers/\(customerID)", body: request)
-    }
     func updateFieldCustomerConditionally(_ customerID: String, request: ConditionalCustomerUpdate) async throws -> CustomerRecord {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await send("POST", "/v1/customers/\(customerID)", body: request)
@@ -436,6 +429,9 @@ struct CustomerModeOwnerUnlockButton: View {
     @Environment(\.customerModeUnlock) private var unlock
     @State private var busy = false
     var body: some View {
+        #if DEBUG
+        let _ = FirstOpenProbe.count(.unlock)
+        #endif
         Button {
             guard !busy, let unlock else { return }
             busy = true
@@ -488,6 +484,9 @@ struct CustomerModeContainer<Content: View>: View {
     @State private var unlocking = false
 
     var body: some View {
+        #if DEBUG
+        let _ = FirstOpenProbe.count(.container)
+        #endif
         NavigationStack {
             Group {
                 if handingBack { handBackScreen } else { content({ handingBack = true }) }

@@ -14,8 +14,9 @@ struct OfficeSlotWindow: Codable, Equatable, Sendable {
     let endsAt: String
 }
 
-/// One open office review (the server's openOfficeReviewSchema). Only what the phone shows or
-/// must send back is read; the booking evidence fields are left alone.
+/// One office review (the server's officeReviewSchema): an open one from the queue, or one read on
+/// its own, which may be closed. Only what the phone shows, must send back or checks is read; the
+/// booking evidence fields are left alone.
 struct OfficeSlotReview: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let sourceJobId: String
@@ -33,12 +34,16 @@ struct OfficeSlotReview: Decodable, Identifiable, Equatable, Sendable {
     let decisionVersion: Int
     let status: String
     let createdAt: String?
+    /// How a closed review was closed (resolution.kind): "appointment" once it was booked,
+    /// "no_action" once it was closed without a visit. Nil while it is open.
+    let resolutionKind: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, sourceJobId, customerId, locationId, requestedWindow, timeZone, serviceNeed
-        case resourceRequirement, reasonCode, decisionVersion, status, createdAt
+        case resourceRequirement, reasonCode, decisionVersion, status, createdAt, resolution
     }
     private struct Requirement: Decodable { let technicianId: String? }
+    private struct Resolution: Decodable { let kind: String? }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -54,20 +59,34 @@ struct OfficeSlotReview: Decodable, Identifiable, Equatable, Sendable {
         reasonCode = (try? values.decodeIfPresent(String.self, forKey: .reasonCode)) ?? ""
         status = (try? values.decodeIfPresent(String.self, forKey: .status)) ?? "open"
         createdAt = try? values.decodeIfPresent(String.self, forKey: .createdAt)
+        resolutionKind = (try? values.decodeIfPresent(Resolution.self, forKey: .resolution))?.kind
     }
 
     init(id: String, sourceJobId: String, customerId: String? = nil, locationId: String? = nil,
          requestedWindow: OfficeSlotWindow? = nil, timeZone: String? = nil, serviceNeed: String,
          technicianId: String? = nil, reasonCode: String = "capacity_unavailable", decisionVersion: Int = 1,
-         status: String = "open", createdAt: String? = nil) {
+         status: String = "open", createdAt: String? = nil, resolutionKind: String? = nil) {
         self.id = id; self.sourceJobId = sourceJobId; self.customerId = customerId; self.locationId = locationId
         self.requestedWindow = requestedWindow; self.timeZone = timeZone; self.serviceNeed = serviceNeed
         self.technicianId = technicianId; self.reasonCode = reasonCode; self.decisionVersion = decisionVersion
-        self.status = status; self.createdAt = createdAt
+        self.status = status; self.createdAt = createdAt; self.resolutionKind = resolutionKind
     }
 
     /// The source job's number as the app writes it everywhere ("JOB-2214").
     var jobRef: String { "JOB-" + String(sourceJobId.suffix(4)).uppercased() }
+}
+
+/// One review read on its own (GET …/{id}). Stricter than a queue row: the server always sends a
+/// status, so a body without a string status is not counted as open; it is a read that failed.
+struct OfficeSlotReviewRead: Decodable {
+    let review: OfficeSlotReview
+
+    private enum CodingKeys: String, CodingKey { case status }
+
+    init(from decoder: Decoder) throws {
+        _ = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .status)
+        review = try OfficeSlotReview(from: decoder)
+    }
 }
 
 /// A page of the queue. A row the phone cannot read is skipped, not the whole queue.
@@ -91,7 +110,8 @@ struct OfficeSlotPage: Decodable {
 /// POST …/book (bookOfficeReviewAppointmentInputSchema; the path supplies officeReviewId).
 struct OfficeSlotBookRequest: Encodable, Equatable {
     let expectedDecisionVersion: Int
-    /// A new booking intent for this attempt; the server refuses the review's own intent id.
+    /// The booking intent: one per follow-up, kept by the queue for every try (OfficeSlotBookingAttempts).
+    /// The server refuses the review's own intent id.
     let intentId: String
     let plannedWindow: OfficeSlotWindow
 }
@@ -188,6 +208,66 @@ enum OfficeSlotRules {
     static func countLabel(_ count: Int) -> String {
         count == 0 ? "Nothing is waiting" : "\(count) follow-up\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") a time"
     }
+
+    /// The sentence under the rows, the web panel's (office-reviews.tsx "How this works"): the
+    /// server checks the technician's appointments that are still scheduled, not the whole board.
+    static let footer = "Follow-ups the field asked for that could not be booked on their own. Book visit checks the technician\u{2019}s other booked visits before it books."
+}
+
+/// Why the last read of the queue failed. It keeps the detail, not a whole sentence: the words
+/// depend on whether rows from an earlier read are still listed (OfficeSlotQueue.notice).
+struct OfficeSlotListProblem: Equatable {
+    enum Kind: Equatable {
+        /// 403: the server will not list follow-ups for this person (a team scope, or rights
+        /// taken away since the session was read). The web shows its no-access state.
+        case noAccess
+        /// Anything else: a 5xx, no answer, a 409 paging bound, a repeated cursor.
+        case failed
+    }
+
+    /// The web's PermissionState title and description, joined (office-reviews.tsx).
+    static let noAccessMessage = "Your role can\u{2019}t book follow-ups. Booking a follow-up needs the right to book follow-ups and to assign jobs. An owner or admin can change that."
+    /// The web's ErrorState title, shown while nothing has been listed.
+    static let loadFailed = "Could not load the follow-ups waiting for a slot."
+    /// The web's warning for a failed read with rows from an earlier read still shown: its title,
+    /// then the detail, then this.
+    static let readAgainFailed = "Could not read the list again."
+    static let rowsFromLastRead = "The rows below are from the last read."
+
+    let kind: Kind
+    /// What went wrong, in the server's or the system's words.
+    let detail: String
+
+    init(_ error: Error) {
+        kind = ProblemKind(error) == .forbidden ? .noAccess : .failed
+        detail = error.localizedDescription
+    }
+
+    /// The words for this problem. With rows still listed, a failed read says the list could not
+    /// be read again and that the rows are from the last read, as the web does; with none, that
+    /// the follow-ups could not load. A refusal empties the list, so it has one set of words.
+    func message(rowsListed: Bool) -> String {
+        switch kind {
+        case .noAccess: return Self.noAccessMessage
+        case .failed where rowsListed:
+            // The web shows the detail as its own paragraph; here it is one line, so it ends as a sentence.
+            let sentence = detail.isEmpty || ".!?".contains(detail.last ?? ".") ? detail : "\(detail)."
+            return [Self.readAgainFailed, sentence, Self.rowsFromLastRead].filter { !$0.isEmpty }.joined(separator: " ")
+        case .failed: return "\(Self.loadFailed) \(detail)"
+        }
+    }
+
+    /// Try again, unless trying again can only get the same answer: a refusal of access, or no
+    /// connection, where nothing can be sent.
+    func offersRetry(offline: Bool) -> Bool { kind == .failed && !offline }
+}
+
+/// What Schedule › Unscheduled says above the queue's rows about the last read: the problem's
+/// words, which kind it is (for the symbol), and whether Try again is offered.
+struct OfficeSlotListNotice: Equatable {
+    let kind: OfficeSlotListProblem.Kind
+    let message: String
+    let offersRetry: Bool
 }
 
 private extension String {
@@ -220,6 +300,14 @@ extension APIClient {
         return all
     }
 
+    /// One follow-up as it stands now, open or closed (GET …/{id}), always from the server. The
+    /// Schedule sheet reads it once after a refused try that followed one with no answer.
+    /// A body without a status throws (OfficeSlotReviewRead), so it counts as unread, not open.
+    func officeSlotReview(_ id: String) async throws -> OfficeSlotReview {
+        let read: OfficeSlotReviewRead = try await send("GET", try officeReviewPath(id, ""), requireFresh: true)
+        return read.review
+    }
+
     func bookOfficeSlot(_ id: String, request: OfficeSlotBookRequest) async throws -> OfficeSlotBooked {
         try await send("POST", try officeReviewPath(id, "/book"), body: request)
     }
@@ -237,8 +325,11 @@ extension APIClient {
 final class OfficeSlotQueue: ObservableObject {
     @Published private(set) var reviews: [OfficeSlotReview] = []
     @Published private(set) var loaded = false
-    @Published private(set) var loading = false
-    @Published var problem: String?
+    @Published private(set) var problem: OfficeSlotListProblem?
+    /// The booking id of each follow-up, kept across Schedule sheets while this queue's screen is
+    /// shown, and dropped when the workspace or the sign-in changes. A Schedule sheet reads it once,
+    /// when it opens, and then keeps its own copy, so it is not published.
+    var bookingAttempts = OfficeSlotBookingAttempts()
     private var identity = ""
 
     static func identity(_ session: SessionController) -> String {
@@ -250,31 +341,56 @@ final class OfficeSlotQueue: ObservableObject {
         session.can("job.book.followup", feature: "jobs") && session.can("job.assign", feature: "jobs")
     }
 
+    /// What Unscheduled says about the last read. Nil once a read worked. With nothing listed, any
+    /// problem is said, since silence would read as nothing waiting. With rows still listed, a
+    /// failed read is said online only: offline the Schedule screen's offline banner already says
+    /// why the list is not read again, and the web hides its warning there too. The view draws
+    /// exactly this.
+    func notice(offline: Bool) -> OfficeSlotListNotice? {
+        guard let problem else { return nil }
+        let rowsListed = !reviews.isEmpty
+        if problem.kind == .failed, rowsListed, offline { return nil }
+        return OfficeSlotListNotice(kind: problem.kind, message: problem.message(rowsListed: rowsListed),
+                                    offersRetry: problem.offersRetry(offline: offline))
+    }
+
     func load(api: APIClient, identity: String) async {
+        _ = await reread(api: api, identity: identity)
+    }
+
+    /// Reads the list, as `load` does. True only when this read brought the list back for this
+    /// identity, so words after an answer say "The list has been read again." only when it was.
+    @discardableResult
+    func reread(api: APIClient, identity: String) async -> Bool {
         if identity != self.identity {
             self.identity = identity
             reviews = []; loaded = false; problem = nil
+            bookingAttempts.removeAll()
         }
         #if DEBUG
         if PaperPreview.enabled {
             if !loaded { reviews = OfficeSlotPreview.reviews }
             loaded = true
-            return
+            return true
         }
         #endif
-        loading = true
-        defer { loading = false }
         do {
             let listed = try await api.officeSlotReviews()
-            guard identity == self.identity else { return }
+            guard identity == self.identity else { return false }
             // Oldest first: the follow-up that has waited longest leads.
             reviews = listed.filter { $0.status == "open" }.sorted { ($0.createdAt ?? "") < ($1.createdAt ?? "") }
             loaded = true
             problem = nil
+            return true
         } catch is CancellationError {
+            return false
         } catch {
-            guard identity == self.identity else { return }
-            problem = "Could not load the follow-ups waiting for a slot. \(error.localizedDescription)"
+            guard identity == self.identity else { return false }
+            let failed = OfficeSlotListProblem(error)
+            // As on the web: no list once the server refuses access, so no Schedule it would refuse.
+            if failed.kind == .noAccess { reviews = [] }
+            problem = failed
+            return false
         }
     }
 

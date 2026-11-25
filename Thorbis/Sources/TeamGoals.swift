@@ -334,8 +334,9 @@ struct TeamGoalsView: View {
         }
     }
 
-    private func whole(_ cents: Int, currency: String) -> String {
-        (Decimal(cents) / 100).formatted(.currency(code: currency).precision(.fractionLength(0)))
+    /// A goal is a target, so a round one reads whole ("$10,000"); one set with cents keeps them.
+    private func goalText(_ cents: Int, currency: String) -> String {
+        summaryMoney(cents, currency: currency)
     }
 
     var body: some View {
@@ -477,7 +478,7 @@ struct TeamGoalsView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("\(sold * 100 / goal)% of goal").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(sold >= goal ? "Goal met" : "\(whole(goal - sold, currency: card.currency)) to go")
+                        Text(sold >= goal ? "Goal met" : "\(money(goal - sold, currency: card.currency)) to go")
                             .font(Theme.font(14)).foregroundStyle(Theme.muted)
                     }
                 }
@@ -490,10 +491,10 @@ struct TeamGoalsView: View {
     }
 
     @ViewBuilder private func heroFigure(_ sold: Int, goal: Int, currency: String) -> some View {
-        Text(whole(sold, currency: currency)).font(Theme.font(44, weight: .bold)).tracking(-1.32)
+        Text(money(sold, currency: currency)).font(Theme.font(44, weight: .bold)).tracking(-1.32)
             .foregroundStyle(Theme.foreground).lineLimit(1).minimumScaleFactor(0.6)
         if goal > 0 {
-            Text("of \(whole(goal, currency: currency))").font(Theme.font(15)).foregroundStyle(Theme.muted)
+            Text("of \(goalText(goal, currency: currency))").font(Theme.font(15)).foregroundStyle(Theme.muted)
         }
     }
 
@@ -503,8 +504,8 @@ struct TeamGoalsView: View {
         let me = row.person.userId == (card?.me.userId ?? session.user?.id)
         let jobs = row.numbers.map { "\($0.jobsDone) job\($0.jobsDone == 1 ? "" : "s")" }
         let key = TeamGoalEdit.person(userId: row.person.userId, weeklySold: nil).key
-        let goal = row.person.override.map { "Own goal \(whole($0, currency: currency))" }
-            ?? row.person.weeklySold.map { "Role goal \(whole($0, currency: currency))" } ?? "No goal"
+        let goal = row.person.override.map { "Own goal \(goalText($0, currency: currency))" }
+            ?? row.person.weeklySold.map { "Role goal \(goalText($0, currency: currency))" } ?? "No goal"
         let detail = [jobs, goal].compactMap { $0 }.joined(separator: " \u{00B7} ")
         return HStack(alignment: .center, spacing: 12) {
             Text(rank.map(String.init) ?? "").font(Theme.font(15, weight: .semibold))
@@ -525,7 +526,7 @@ struct TeamGoalsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if let sold = row.numbers?.sold {
-                    Text(whole(sold, currency: currency)).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                    Text(money(sold, currency: currency)).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                 }
             }
             .padding(.vertical, 11).padding(.trailing, 16)

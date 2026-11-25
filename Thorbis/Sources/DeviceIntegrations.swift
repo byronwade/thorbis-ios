@@ -171,10 +171,6 @@ struct MailDraft: Equatable {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
-}
-
 /// One system hand-off to present.
 enum DeviceHandoff: Identifiable {
     case calendar(JobCalendarDraft)

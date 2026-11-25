@@ -47,7 +47,7 @@ struct MyNotificationsView: View {
                         HStack(spacing: 8) {
                             VStack(alignment: .leading, spacing: 0) {
                                 Text("Notifications").font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
-                                Text("New jobs and schedule changes").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                Text(AlertWords.summary(payments: PushNotifications.receivesPaymentAlerts(session))).font(Theme.font(14)).foregroundStyle(Theme.muted)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -127,7 +127,8 @@ struct MyNotificationsView: View {
         let center = UNUserNotificationCenter.current()
         if await center.notificationSettings().authorizationStatus == .notDetermined {
             // Paper 71: say what alerts are for first; "Not now" leaves the system unasked.
-            guard await PermissionPrimerPresenter.ask(.notifications, automatic: false) else { return }
+            guard await PermissionPrimerPresenter.ask(PushNotifications.receivesPaymentAlerts(session) ? .notificationsWithPayments : .notifications,
+                                                     automatic: false) else { return }
             _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
             let granted = await center.notificationSettings().authorizationStatus
             if [.authorized, .provisional, .ephemeral].contains(granted) { UIApplication.shared.registerForRemoteNotifications() }

@@ -274,6 +274,11 @@ struct PlaceCount: Equatable {
         value > 0 ? PlaceCount(text: PaperCount.badge(value), accent: true, spoken: spoken, tone: .badge) : nil
     }
     static let unread = PlaceCount(text: nil, accent: true, spoken: "Unread")
+    /// What is owed beside Money: whole dollars cut toward zero, the exact amount spoken.
+    static func due(_ cents: Int?) -> PlaceCount? {
+        guard let cents, cents > 0 else { return nil }
+        return PlaceCount(text: compactMoney(cents), spoken: "\(money(cents, currency: "USD")) due")
+    }
 }
 
 /// The trailing count of a place row (Paper v2 drawer).
@@ -374,12 +379,6 @@ final class DayMoney: ObservableObject {
         totalDue = InvoiceBalance.due(mine)
     }
 
-    /// Owed on these jobs' invoices; nil until the invoices have been read.
-    func toCollect(_ jobs: [Job]) -> Int? {
-        guard totalDue != nil else { return nil }
-        return jobs.reduce(0) { $0 + (dueByJob[$1.id] ?? 0) }
-    }
-
     /// Reads once per identity; `load` reads again (a pull to refresh).
     func loadIfNeeded(api: APIClient, organizationID: String?, identity: String) async {
         guard identity != self.identity || totalDue == nil else { return }
@@ -389,9 +388,11 @@ final class DayMoney: ObservableObject {
     func reset() { identity = ""; dueByJob = [:]; totalDue = nil }
 }
 
-/// Whole dollars for a count beside a place ("$1,240"); two decimals stay on records.
+/// Whole dollars for a count beside a place ("$1,240" for $1,240.99), cut toward zero so it never
+/// shows more than is owed. Under a dollar it shows the cents. Its spoken label says the exact amount.
 func compactMoney(_ cents: Int, currency: String = "USD") -> String {
-    (Double(cents) / 100).formatted(.currency(code: currency).precision(.fractionLength(0)))
+    guard cents <= -100 || cents >= 100 else { return money(cents, currency: currency) }
+    return Decimal(cents / 100).formatted(.currency(code: currency).precision(.fractionLength(0)))
 }
 
 // MARK: - The sidebar's list (phone drawer and iPad column)
@@ -537,7 +538,7 @@ struct PlacesList: View {
                         .contextMenu {
                             Button("Remove from favorites", role: .destructive) {
                                 guard recordFavorites.isBound(to: favoriteScope) else { return }
-                                recordFavorites.toggle(item.entry.kind, id: item.entry.id)
+                                recordFavorites.set(item.entry.kind, id: item.entry.id, favorite: false)
                             }
                         }
                         .accessibilityIdentifier("\(idPrefix)-favorite-record-\(item.entry.id)")

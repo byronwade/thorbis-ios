@@ -486,15 +486,6 @@ struct EstimateDetailView: View {
         }
     }
 
-    private func estimateDateVerb(_ status: String) -> String {
-        switch status {
-        case "sent": "Sent"
-        case "approved": "Approved"
-        case "declined": "Declined"
-        default: "Created"
-        }
-    }
-
     /// The date that goes with the status word: when it was sent, approved or declined.
     private func estimateStatusDate(_ record: EstimateRecord) -> String? {
         switch record.status {
@@ -1605,11 +1596,6 @@ struct MoneyFigure: View {
 
 // MARK: - Document pieces (estimate and invoice detail)
 
-/// "Sent Jul 18" for a document's date chip; nil when the date doesn't parse.
-func documentDateChipText(_ verb: String, _ raw: String?) -> String? {
-    JobFiltering.date(raw).map { "\(verb) \(documentDate($0))" }
-}
-
 /// "Jul 18", with the year only when it isn't this year.
 func documentDate(_ date: Date) -> String {
     Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year)
@@ -2054,6 +2040,17 @@ extension View {
     }
 }
 
+/// The discount reason's length limit. The server trims, then refuses more than 200 UTF-16 units
+/// (JavaScript string length), so this counts the same way.
+enum InvoiceDiscountReason {
+    static let limit = 200
+    static let tooLongMessage = "A reason can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before adding."
+
+    static func isTooLong(_ reason: String) -> Bool {
+        reason.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count > limit
+    }
+}
+
 /// Web parity: discount a draft invoice. The amount and a reason the customer sees ("Discount —
 /// Loyalty"), checked here against the total so the server's refusal is the rare case.
 struct InvoiceDiscountSheet: View {
@@ -2113,7 +2110,10 @@ struct InvoiceDiscountSheet: View {
                             .textInputAutocapitalization(.sentences)
                             .submitLabel(.done)
                             .onSubmit { Task { await press() } }
-                            .onChange(of: reason) { _, _ in reasonProblem = nil }
+                            // A reason over the limit says so as soon as it is; anything else clears.
+                            .onChange(of: reason) { _, new in
+                                reasonProblem = InvoiceDiscountReason.isTooLong(new) ? InvoiceDiscountReason.tooLongMessage : nil
+                            }
                             .accessibilityLabel("Reason")
                     }
                     .padding(.horizontal, 16).padding(.vertical, 12)
@@ -2165,6 +2165,7 @@ struct InvoiceDiscountSheet: View {
         guard let cents else { amountProblem = "Enter an amount, like 50.00."; return }
         guard cents <= total else { amountProblem = "A discount can\u{2019}t be more than the invoice total."; return }
         guard !trimmed.isEmpty else { reasonProblem = "Add a reason the customer will see, like Loyalty."; return }
+        guard !InvoiceDiscountReason.isTooLong(trimmed) else { reasonProblem = InvoiceDiscountReason.tooLongMessage; return }
         busy = true
         defer { busy = false }
         do {

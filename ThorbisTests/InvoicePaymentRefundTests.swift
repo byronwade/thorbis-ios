@@ -214,6 +214,274 @@ final class InvoicePaymentRefundTests: XCTestCase {
         XCTAssertNil(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID))
     }
 
+    // A refusal or an attempt that never left the phone keeps the exact reason sent: for a card
+    // payment the server ties its first reason to the refund, so the next send is the same refund.
+    // Only a failure that proves no refund was made gives back a draft, which can be discarded.
+
+    func testRefundOverTheRoleLimitReturnsToADraftWithTheReasonKept() async throws {
+        let limit = #"{"type":"https://thorbis.com/problems/authorization","title":"authorization","status":403,"category":"authorization","detail":"not permitted: invoice.refund (condition_exceeded)"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(403, limit, contentType: "application/problem+json")]),
+                               baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+
+        let completed = await model.submitRefund()
+
+        XCTAssertFalse(completed)
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .draft))
+        XCTAssertEqual(model.errorMessage, "This refund is more than your role can approve. Ask your office.")
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .draft))
+        XCTAssertTrue(model.canSubmitRefund)
+        XCTAssertFalse(model.canCheckRefundStatus)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.method == "POST" }.count, 1)
+    }
+
+    func testValidationRefusalReturnsToADraftWithTheServerReason() async throws {
+        let invalid = #"{"title":"validation","status":400,"category":"validation","detail":"validation failed: reason: Invalid length"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(400, invalid)]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+
+        _ = await model.submitRefund()
+
+        XCTAssertEqual(model.intent?.state, .draft)
+        XCTAssertEqual(model.errorMessage, "Thorbis refused this refund: validation failed: reason: Invalid length")
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID)?.state, .draft)
+        XCTAssertEqual(model.reasonDraft, reason)
+    }
+
+    func testCashRefundThatNeverLeftThePhoneReturnsToADraft() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, payment: payment(method: "cash"), store: store)
+        model.updateReasonDraft(reason)
+
+        _ = await model.submitRefund()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .draft))
+        XCTAssertEqual(model.errorMessage, RefundSendFailure.notSentMessage)
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .draft))
+        model.discardSavedIntent()
+        XCTAssertNil(model.intent)
+        XCTAssertNil(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID))
+    }
+
+    func testCardRefundWithoutSignalStaysUnconfirmed() async throws {
+        // iOS can report no internet for a request already in flight, so a card refund may have started.
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+
+        _ = await model.submitRefund()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        XCTAssertEqual(model.errorMessage, RefundSendFailure.lostConnectionMessage)
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        XCTAssertTrue(model.canCheckRefundStatus)
+        model.discardSavedIntent()
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID)?.state, .uncertain)
+    }
+
+    func testCardRefundRefusedAfterTheCardCompanyMayHaveRefundedStaysUnconfirmed() async throws {
+        let refusal = #"{"title":"conflict","status":409,"category":"conflict","detail":"durable card refund attempt is missing"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(409, refusal)]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+
+        _ = await model.submitRefund()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        XCTAssertEqual(model.errorMessage,
+                       "Thorbis refused this refund: durable card refund attempt is missing \(RefundSendFailure.stillUnconfirmedNote)")
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        model.discardSavedIntent()
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID)?.state, .uncertain)
+    }
+
+    func testCashRefundTheServerRefusesReturnsToADraft() async throws {
+        let refusal = #"{"title":"conflict","status":409,"category":"conflict","detail":"cannot refund payment in status refunded"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(409, refusal)]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, payment: payment(method: "cash"), store: store)
+        model.updateReasonDraft(reason)
+
+        _ = await model.submitRefund()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .draft))
+        XCTAssertEqual(model.errorMessage, "Thorbis refused this refund: cannot refund payment in status refunded")
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .draft))
+    }
+
+    func testTimedOutRefundStaysUnconfirmedAndOffersSendAgain() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.timedOut]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+
+        _ = await model.submitRefund()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        XCTAssertTrue(model.canCheckRefundStatus)
+        XCTAssertFalse(model.canSubmitRefund)
+        // Not withdrawn before a fresh read of the payments.
+        model.discardSavedIntent()
+        XCTAssertEqual(model.intent?.state, .uncertain)
+        XCTAssertNotNil(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID))
+    }
+
+    func testServerFailureStaysUnconfirmed() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(502, #"{"title":"dependency","status":502,"detail":"processor unavailable"}"#)]),
+                               baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+
+        _ = await model.submitRefund()
+
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+    }
+
+    func testSendingAnUnconfirmedRefundAgainWithoutSignalKeepsItUnconfirmed() async throws {
+        let store = MemoryRefundIntentStore()
+        try store.save(FieldPaymentRefundIntent(reason: reason, state: .uncertain),
+                       actorID: actorID, organizationID: organizationID, paymentID: paymentID)
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        let model = makeModel(api: client, store: store)
+
+        _ = await model.checkRefundStatus()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        XCTAssertEqual(model.errorMessage, RefundSendFailure.unchangedOfflineMessage)
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+    }
+
+    func testUnconfirmedRefundTheServerRefusesStaysUnconfirmed() async throws {
+        // The role is checked before the server looks for the earlier refund, so this says nothing about it.
+        let store = MemoryRefundIntentStore()
+        try store.save(FieldPaymentRefundIntent(reason: reason, state: .uncertain),
+                       actorID: actorID, organizationID: organizationID, paymentID: paymentID)
+        let refusal = #"{"title":"authorization","status":403,"category":"authorization","detail":"not permitted: invoice.refund (no_grant)"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(403, refusal)]), baseURL: "https://app.thorbis.com")
+        let model = makeModel(api: client, payment: payment(method: "cash"), store: store)
+
+        _ = await model.checkRefundStatus()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        XCTAssertEqual(model.errorMessage,
+                       "\(RefundSendFailure.roleRefusedMessage) \(RefundSendFailure.stillUnconfirmedNote)")
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+        model.discardSavedIntent()
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID)?.state, .uncertain)
+    }
+
+    func testPendingRefundThatTimesOutWhenCheckedStaysPending() async throws {
+        let store = MemoryRefundIntentStore()
+        try store.save(FieldPaymentRefundIntent(reason: reason, state: .pending),
+                       actorID: actorID, organizationID: organizationID, paymentID: paymentID)
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.timedOut]), baseURL: "https://app.thorbis.com")
+        let model = makeModel(api: client, store: store)
+
+        _ = await model.checkRefundStatus()
+
+        XCTAssertEqual(model.intent, FieldPaymentRefundIntent(reason: reason, state: .pending))
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .pending))
+    }
+
+    func testUnconfirmedCashRefundCanBeDiscardedOnlyAfterAFreshReadShowsItNotRefunded() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([
+            URLProtocolFixture.timedOut,
+            .init(200, paymentsPage(recordedPayment(method: "cash")))
+        ]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, payment: payment(method: "cash"), store: store)
+        model.updateReasonDraft(reason)
+        _ = await model.submitRefund()
+        XCTAssertFalse(model.canDiscardUnconfirmed)
+
+        let refunded = await model.readPaymentAfterUnconfirmedRefund()
+
+        XCTAssertFalse(refunded)
+        XCTAssertTrue(model.canDiscardUnconfirmed)
+        let read = try XCTUnwrap(URLProtocolFixture.recorded.last)
+        XCTAssertEqual(read.method, "GET")
+        XCTAssertEqual(read.url?.path, "/v1/invoices/\(invoiceID)/payments")
+        XCTAssertEqual(read.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(read.header("Cache-Control"), "no-cache")
+        model.discardSavedIntent()
+        XCTAssertNil(model.intent)
+        XCTAssertNil(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID))
+    }
+
+    func testUnconfirmedCardRefundIsNotOfferedDiscardWhenThePaymentReadsNotRefunded() async throws {
+        // A card refund can be under way at the card company while the payment still reads as recorded.
+        let client = APIClient(session: URLProtocolFixture.session([
+            URLProtocolFixture.timedOut,
+            .init(200, paymentsPage(recordedPayment()))
+        ]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+        _ = await model.submitRefund()
+
+        let refunded = await model.readPaymentAfterUnconfirmedRefund()
+
+        XCTAssertFalse(refunded)
+        XCTAssertFalse(model.canDiscardUnconfirmed)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.method, "GET")
+        model.discardSavedIntent()
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID),
+                       FieldPaymentRefundIntent(reason: reason, state: .uncertain))
+    }
+
+    func testAFreshReadShowingTheRefundEndsTheUnconfirmedRefund() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([
+            URLProtocolFixture.timedOut,
+            .init(200, paymentsPage(refundedPayment()))
+        ]), baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+        _ = await model.submitRefund()
+
+        let refunded = await model.readPaymentAfterUnconfirmedRefund()
+
+        XCTAssertTrue(refunded)
+        XCTAssertNil(model.intent)
+        XCTAssertTrue(model.didComplete)
+        XCTAssertEqual(model.payment.status, .refunded)
+        XCTAssertNil(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID))
+    }
+
+    func testAFailedReadOffersNoDiscard() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.timedOut, URLProtocolFixture.offline]),
+                               baseURL: "https://app.thorbis.com")
+        let store = MemoryRefundIntentStore()
+        let model = makeModel(api: client, store: store)
+        model.updateReasonDraft(reason)
+        _ = await model.submitRefund()
+
+        _ = await model.readPaymentAfterUnconfirmedRefund()
+
+        XCTAssertFalse(model.canDiscardUnconfirmed)
+        model.discardSavedIntent()
+        XCTAssertEqual(try store.load(actorID: actorID, organizationID: organizationID, paymentID: paymentID)?.state, .uncertain)
+    }
+
     private func makeModel(
         api: APIClient? = nil,
         actorID: String? = nil,
@@ -230,6 +498,7 @@ final class InvoicePaymentRefundTests: XCTestCase {
 
     private func payment(
         id: String? = nil,
+        method: String = "card",
         status: FieldPaymentStatus = .recorded,
         refundedAmount: Int? = nil
     ) -> FieldPaymentRecord {
@@ -238,7 +507,7 @@ final class InvoicePaymentRefundTests: XCTestCase {
             organizationId: organizationID,
             invoiceId: invoiceID,
             amount: FieldMoney(amount: 2_500, currency: "USD"),
-            method: "card",
+            method: method,
             status: status,
             collectionEvidence: .physicalService(.init(kind: .job, id: "00000000-0000-4000-8000-000000000001")),
             idempotencyKey: "payment-key",
@@ -251,6 +520,14 @@ final class InvoicePaymentRefundTests: XCTestCase {
 
     private func refundedPayment() -> String {
         #"{"id":"00000000-0000-4000-8000-00000000000b","organizationId":"00000000-0000-4000-8000-000000000002","invoiceId":"00000000-0000-4000-8000-00000000000a","amount":{"amount":2500,"currency":"USD"},"method":"card","status":"refunded","collectionEvidence":{"purpose":"physical_service","source":{"kind":"job","id":"00000000-0000-4000-8000-000000000001"}},"idempotencyKey":"payment-key","recordedAt":"2026-10-26T12:30:00Z","refundedAmount":2500,"netAmount":{"amount":0,"currency":"USD"},"refundedAt":"2026-10-26T13:00:00Z"}"#
+    }
+
+    private func recordedPayment(method: String = "card") -> String {
+        #"{"id":"00000000-0000-4000-8000-00000000000b","organizationId":"00000000-0000-4000-8000-000000000002","invoiceId":"00000000-0000-4000-8000-00000000000a","amount":{"amount":2500,"currency":"USD"},"method":"\#(method)","status":"recorded","collectionEvidence":{"purpose":"physical_service","source":{"kind":"job","id":"00000000-0000-4000-8000-000000000001"}},"idempotencyKey":"\#(UUID().uuidString)","recordedAt":"2026-10-26T12:30:00Z","refundedAmount":0,"netAmount":{"amount":2500,"currency":"USD"}}"#
+    }
+
+    private func paymentsPage(_ payment: String) -> String {
+        #"{"items":["# + payment + #"],"nextCursor":null}"#
     }
 
     private func waitForRequests(_ count: Int) async {

@@ -22,6 +22,8 @@ struct JobAtAddressView<Extras: View>: View {
     @State private var equipment: [EquipmentRecord]?
     @State private var cached: JobDetailCache.SavedHistory?
     @State private var notices: [JobNoticeStatus] = []
+    /// The server has older notices than the page the screen read.
+    @State private var noticesMore = false
     @State private var editing: EquipmentEditorItem?
 
     private var canViewCustomer: Bool { session.can("customer.view", feature: "core_crm") }
@@ -90,13 +92,22 @@ struct JobAtAddressView<Extras: View>: View {
                     }
                 }
                 if !notices.isEmpty {
-                    section("Who was notified") {
-                        ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
-                            row(title: notice.who,
-                                subtitle: [JobFiltering.date(notice.scheduledFor)?.tradeTime, notice.statusWord.lowercased()]
-                                    .compactMap { $0 }.joined(separator: " \u{00B7} "),
-                                first: index == 0)
-                                .accessibilityElement(children: .combine)
+                    VStack(alignment: .leading, spacing: 8) {
+                        section("Who was notified") {
+                            ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
+                                row(title: notice.who,
+                                    subtitle: [JobFiltering.date(notice.scheduledFor)?.tradeTime, notice.statusWord.lowercased()]
+                                        .compactMap { $0 }.joined(separator: " \u{00B7} "),
+                                    first: index == 0)
+                                    .accessibilityElement(children: .combine)
+                            }
+                        }
+                        if noticesMore {
+                            Text(PartialList.note(shown: notices.count, of: "notices"))
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 4)
+                                .accessibilityIdentifier("job-at-address-notices-partial")
                         }
                     }
                 }
@@ -164,7 +175,10 @@ struct JobAtAddressView<Extras: View>: View {
 
     private func load() async {
         let generation = session.generation
-        if let page = try? await api.jobNotices(job.id), session.generation == generation { notices = page.items }
+        if let page = try? await api.jobNotices(job.id), session.generation == generation {
+            notices = page.items
+            noticesMore = page.more
+        }
         if let context = try? await JobServiceContextLoader.load(job.id, api: api) {
             guard session.generation == generation else { return }
             equipment = context.equipmentRecords.filter { $0.customerId == job.customerId }

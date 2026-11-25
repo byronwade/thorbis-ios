@@ -5,11 +5,6 @@ import SwiftUI
 // Cash position, bank accounts, bills, payroll, costs and profit are not kept anywhere the app can
 // read, so those cards are not drawn (see the notes on each screen).
 
-/// Whole dollars, as Paper prints money on dashboards ("$62,140").
-func wholeDollars(_ cents: Int, currency: String = "USD") -> String {
-    (Double(cents) / 100).formatted(.currency(code: currency).precision(.fractionLength(0)))
-}
-
 /// "2026-07" → "Jul" / "Jul 2026". Report months follow UTC.
 enum ReportMonth {
     static func date(_ key: String) -> Date? {
@@ -62,7 +57,7 @@ struct MoneyHomeView: View {
     // MARK: Owner (Paper 59)
 
     /// Paper 59 with what the server keeps: the lead card is this month's collected money over the
-    /// trailing months (Paper's "Total cash position" needs bank balances), then Outstanding AR
+    /// trailing months (Paper's "Total cash position" needs bank balances), then Outstanding
     /// with what is overdue, and the way into the reports. Upcoming bills, Payroll run and Paid
     /// out are not drawn.
     @ViewBuilder private var owner: some View {
@@ -132,7 +127,7 @@ struct MoneyHomeView: View {
                     }
                     HStack(alignment: .bottom, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(wholeDollars(totals.now))
+                            Text(money(totals.now, currency: "USD"))
                                 .font(Theme.display()).tracking(Theme.displayTracking())
                                 .foregroundStyle(Theme.foreground)
                                 .lineLimit(1).minimumScaleFactor(0.5)
@@ -158,7 +153,7 @@ struct MoneyHomeView: View {
         }
     }
 
-    /// "Outstanding AR" over the open balance, "$2,140 overdue" in red under it (Paper 59). Half
+    /// "Outstanding" over the open balance, "$2,140.50 overdue" in red under it (Paper 59). Half
     /// the row: Paper's other tile, Upcoming bills, has no source. Opens the unpaid invoices.
     private func receivableTile(_ receivable: RevenueReport.Receivable) -> some View {
         let stacked = typeSize.isAccessibilitySize
@@ -166,11 +161,11 @@ struct MoneyHomeView: View {
         return pair {
             NavigationLink(value: PaperRoute.homeList(.unpaid)) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Outstanding AR").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    Text(wholeDollars(receivable.balance)).font(Theme.font(26, weight: .bold)).tracking(-0.52)
+                    Text("Outstanding").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    Text(money(receivable.balance, currency: "USD")).font(Theme.font(26, weight: .bold)).tracking(-0.52)
                         .foregroundStyle(Theme.foreground).lineLimit(1).minimumScaleFactor(0.6)
                     if receivable.overdueBalance > 0 {
-                        Text("\(wholeDollars(receivable.overdueBalance)) overdue").font(Theme.font(14)).foregroundStyle(Theme.destructive)
+                        Text("\(money(receivable.overdueBalance, currency: "USD")) overdue").font(Theme.font(14)).foregroundStyle(Theme.destructive)
                     } else {
                         Text(receivable.openInvoices == 0 ? "Nothing owed" : "\(receivable.openInvoices) open invoice\(receivable.openInvoices == 1 ? "" : "s")")
                             .font(Theme.font(14)).foregroundStyle(Theme.muted)
@@ -215,8 +210,8 @@ struct MoneyHomeView: View {
     private var officeSubtitle: String {
         guard let receivable = revenue?.receivable else { return loaded ? "What's owed and what came in" : "Reading\u{2026}" }
         if receivable.balance == 0 { return "Nothing open" }
-        var parts = ["\(wholeDollars(receivable.balance)) open"]
-        if receivable.overdueBalance > 0 { parts.append("\(wholeDollars(receivable.overdueBalance)) overdue") }
+        var parts = ["\(money(receivable.balance, currency: "USD")) open"]
+        if receivable.overdueBalance > 0 { parts.append("\(money(receivable.overdueBalance, currency: "USD")) overdue") }
         return parts.joined(separator: " \u{00B7} ")
     }
 
@@ -244,7 +239,7 @@ struct MoneyHomeView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Collected \(period == "This week" ? "this week" : period == "Month" ? "this month" : "this quarter")")
                         .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    Text(wholeDollars(CompanyPayment.collected(inRange)))
+                    Text(money(CompanyPayment.collected(inRange), currency: "USD"))
                         .font(Theme.display()).tracking(Theme.displayTracking())
                         .foregroundStyle(Theme.foreground)
                         .lineLimit(1).minimumScaleFactor(0.5)
@@ -254,7 +249,7 @@ struct MoneyHomeView: View {
                         Text("payment\(taken.count == 1 ? "" : "s") in").font(Theme.font(14)).foregroundStyle(Theme.muted)
                         if refunded > 0 {
                             PaperIcon(.trendDown, size: 12, color: Theme.foreground).padding(.leading, 9)
-                            Text(wholeDollars(refunded)).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            Text(money(refunded, currency: "USD")).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
                             Text("refunded").font(Theme.font(14)).foregroundStyle(Theme.muted)
                         }
                     }
@@ -426,7 +421,7 @@ struct ReportsSummaryView: View {
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("\(delta.up ? "up" : "down") \(delta.text)")
                         }
-                        Text((line.negative ? "-" : "") + wholeDollars(line.now)).font(Theme.font(16, weight: .medium))
+                        Text((line.negative ? "-" : "") + money(line.now, currency: "USD")).font(Theme.font(16, weight: .medium))
                             .foregroundStyle(line.negative ? Theme.muted : Theme.foreground)
                             .lineLimit(1).minimumScaleFactor(0.7)
                             .frame(minWidth: 84, alignment: .trailing)
@@ -463,7 +458,7 @@ struct ReportsSummaryView: View {
                     }
                     .frame(minWidth: 40)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(ReportMonth.shortWithYear(month.month)), \(wholeDollars(month.revenue))")
+                    .accessibilityLabel("\(ReportMonth.shortWithYear(month.month)), \(money(month.revenue, currency: "USD"))")
                     if !latest { Spacer(minLength: 0) }
                 }
             }

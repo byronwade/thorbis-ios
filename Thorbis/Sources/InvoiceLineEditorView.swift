@@ -613,15 +613,6 @@ struct InvoiceLineEditorView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func editorDetail(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(label).foregroundStyle(Theme.muted)
-            Spacer(minLength: 12)
-            Text(value).foregroundStyle(Theme.foreground).multilineTextAlignment(.trailing)
-        }
-        .font(Theme.font(13)).padding(.vertical, 8)
-    }
-
     private func save() async {
         guard canEdit else {
             error = "You no longer have permission to edit this invoice."

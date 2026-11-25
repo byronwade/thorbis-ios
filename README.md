@@ -77,16 +77,31 @@ Every such run is a warning on the job and is listed in its summary with the rea
 evidence is uploaded as `ios-ui-test-reruns-<shard>`, or `ios-ipad-ui-test-reruns-<shard>` for
 the iPad shards (BYR-1835). A failure without that evidence is never run again.
 
-Every UI shard, iPhone and iPad, also carries a temporary probe for BYR-1841, the first opening of
-Customer view on Estimates that holds the app's main thread for seconds at a time.
-`scripts/ci_hold_sampler.py` follows the app's own log of each request XCTest makes of the main
-thread, and when one has waited 5 s without being served it takes a 3 second stack sample of the
-app, and one more if the same hold is still going at 15 s, at most eight in a shard. Its log
-stream starts at the default level. If 300 s pass with no request line, it moves to info, and
-after 300 s more to debug, and it stays at the first level that delivers one. It does not change
-how a test passes or fails, or which test is run once more. It does add some load while it runs:
-a filtered log stream for the shard's first run, and, during a hold that has already lasted 5 s,
-a 3 s stack sample. It does not watch a test that is run once more by itself. The samples, a
-note beside each and a one-line summary (also printed in the job's log) are uploaded as
-`ios-ui-hold-samples-<shard>`, or `ios-ipad-ui-hold-samples-<shard>` for the iPad shards. It
-comes out again once BYR-1841 has its stack.
+Every UI shard, passing or failing, also uploads `ios-ui-cpu-load-<shard>` (`ios-ipad-ui-cpu-load-<shard>`
+on the iPad) for BYR-1841: `cpu-load.txt` notes once a second the host's load and the CPU time used
+so far by the app (a new pid each launch), the test runner, xcodebuild and the simulator's busiest
+services, read with `ps` by pid and short name only (`scripts/ci_cpu_load.py` documents each line).
+Beside it, `cpu-load-table.txt`, also printed in the job log, lists every test step of 10 s or more and
+every first screen read after the Customer view tap with the share of one CPU the app used during it.
+That is the CPU time of all its threads together, so it can be over 100%, and 70% of one CPU can be
+two threads at 35% each. 70% or more ("working") shows that the app's threads together used at least
+0.7 s of CPU per second of the step, not which threads ran nor that the main thread was one of them;
+30% or less ("waiting") shows that they used at most 0.3 s of CPU per second of the step, so for most
+of the step no thread of the app was running (each was waiting for a CPU or blocked), and only
+together with a high "host busy" (how busy the runner's CPUs were) does it point to a CPU shortage.
+It is evidence, not a test, and comes out once that question is answered. In format 2 the record also
+names the simulator's other busy services and tells, for each diagnosticd and apsd, whether it runs on
+the host or in the simulator; the table then starts with a budget of the runner's busy CPU by service.
+
+For one run, the UI jobs also carry a runner load experiment (BYR-1896, `scripts/ci-load-experiment.sh`
+holds the plan). Phone shards 1 and 2 and iPad shard 1 are controls and change nothing. Phone shards 3
+and 6 turn the host's Spotlight indexing off before the tests (`sudo mdutil -i off` for `/` and for
+`/System/Volumes/Data`). Phone shards 4
+and 5 and iPad shard 2 boot the simulator's push daemon out after boot (`launchctl bootout
+system/com.apple.apsd` in the simulator). A treated shard runs no failed test once more: its failure
+stands, and the job log says what the rule would have run. After the tests and their evidence are
+saved, every shard that has time left checks the treatment is still in place, compares the
+simulator's stored log with the stream the re-run rule read (`scripts/ci_log_compare.py`), and then
+stops the host's diagnosticd and kills the simulator's to see what a new log stream still gets. These
+steps never fail the job, print every command with its output and exit status, and upload their files
+as `ios-ui-load-experiment-<shard>` (`ios-ipad-ui-load-experiment-<shard>` on the iPad).

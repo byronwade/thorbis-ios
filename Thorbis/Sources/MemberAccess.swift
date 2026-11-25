@@ -229,8 +229,94 @@ private struct MemberWeekDay: View {
     }
 }
 
+/// What the phone may change in one person's extra access, and what a save sends. A save replaces
+/// the whole policy, and the phone shows only Role / Allow / Never with a scope, so a permission
+/// set on the web (a block, a limit, or more than one grant) is shown locked and sent back exactly
+/// as it was loaded. The phone never removes or weakens what it cannot show.
+enum MemberOverrideRules {
+    enum Choice: String, CaseIterable { case role = "Role", allow = "Allow", never = "Never" }
+
+    /// In place of Role / Allow / Never for a permission set on the web.
+    static let lockedNote = "Has a limit or a block set on the web. Change it there."
+
+    /// Said when a save is refused because earlier extra access ended moments ago and the server
+    /// has not recorded that end yet (409 "permission_override_expiry_pending").
+    static let expiryPendingNote = "This person\u{2019}s earlier extra access just ended and is still being recorded. Try again shortly."
+
+    /// The one refused save with words of its own; nil leaves the server's reason to be shown.
+    static func refusal(_ error: Error) -> String? {
+        (error as? Problem)?.code == "permission_override_expiry_pending" ? expiryPendingNote : nil
+    }
+
+    /// The loaded policy, split into what the phone edits and what it keeps as it is.
+    struct Loaded {
+        var choices: [String: Choice] = [:]
+        var scopes: [String: String] = [:]
+        /// Permissions set on the web: shown locked, never in `choices`.
+        var locked: Set<String> = []
+        /// Their grants, in the order loaded, and their denies, sent back unchanged.
+        var keptGrants: [RoleGrant] = []
+        var keptDenies: [String] = []
+    }
+
+    /// Permissions with a grant whose effect is deny, a grant with a limit, or more than one grant.
+    static func lockedCapabilities(_ policy: PermissionOverrideSnapshot.Policy) -> Set<String> {
+        var counts: [String: Int] = [:]
+        for grant in policy.grants { counts[grant.capability, default: 0] += 1 }
+        return Set(policy.grants.filter { grant in
+            grant.effect == "deny" || !(grant.conditions ?? [:]).isEmpty || (counts[grant.capability] ?? 0) > 1
+        }.map(\.capability))
+    }
+
+    /// An expired or absent override starts empty and keeps nothing.
+    static func load(_ snapshot: PermissionOverrideSnapshot) -> Loaded {
+        guard snapshot.kind == "active", let policy = snapshot.policy else { return Loaded() }
+        var loaded = Loaded(locked: lockedCapabilities(policy))
+        for grant in policy.grants {
+            if loaded.locked.contains(grant.capability) {
+                loaded.keptGrants.append(grant)
+            } else {
+                loaded.choices[grant.capability] = .allow
+                loaded.scopes[grant.capability] = grant.scope
+            }
+        }
+        for capability in policy.userDenies {
+            if loaded.locked.contains(capability) { loaded.keptDenies.append(capability) } else { loaded.choices[capability] = .never }
+        }
+        return loaded
+    }
+
+    /// Whether the editable choices differ from what was loaded. Kept permissions never count.
+    static func changed(choices: [String: Choice], scopes: [String: String], from loaded: Loaded) -> Bool {
+        let now = choices.filter { $0.value != .role && !loaded.locked.contains($0.key) }
+        return loaded.choices != now
+            || loaded.scopes.filter { loaded.choices[$0.key] == .allow } != scopes.filter { now[$0.key] == .allow }
+    }
+
+    /// The complete policy to send: the kept grants then each Allow, and the kept denies with each
+    /// Never. Both empty means revoke.
+    static func policy(choices: [String: Choice], scopes: [String: String], loaded: Loaded) -> (grants: [RoleGrant], denies: [String]) {
+        let editable = choices.filter { !loaded.locked.contains($0.key) }
+        let allows = editable.filter { $0.value == .allow }.keys.sorted()
+            .map { RoleGrant(capability: $0, scope: scopes[$0] ?? "organization") }
+        let nevers = editable.filter { $0.value == .never }.keys.sorted()
+        return (loaded.keptGrants + allows, (loaded.keptDenies + nevers).sorted())
+    }
+
+    /// The change a retry key belongs to: every grant (capability, scope, effect, limits in key
+    /// order), every deny and the version replaced.
+    static func changeKey(grants: [RoleGrant], denies: [String], expectedVersion: Int) -> String {
+        let grantText = grants.map { grant in
+            let limits = (grant.conditions ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ";")
+            return "\(grant.capability)@\(grant.scope)#\(grant.effect ?? "")[\(limits)]"
+        }
+        return (grantText + ["|"] + denies + ["|\(expectedVersion)"]).joined(separator: ",")
+    }
+}
+
 /// Access for one person on top of their role: Role follows the role, Allow adds, Never blocks.
-/// Reached from the person's ••• ("Access just for Ramon").
+/// Reached from the person's ••• ("Access just for Ramon"). A permission set on the web is shown
+/// locked and kept as it is (`MemberOverrideRules`).
 struct MemberOverridesView: View {
     let member: RoleMember
     let onChanged: () async -> Void
@@ -238,6 +324,7 @@ struct MemberOverridesView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var catalog: RoleBuilderCatalog?
     @State private var snapshot: PermissionOverrideSnapshot?
+    @State private var loaded = MemberOverrideRules.Loaded()
     @State private var choices: [String: Choice] = [:]
     @State private var scopes: [String: String] = [:]
     @State private var busy = false
@@ -245,12 +332,11 @@ struct MemberOverridesView: View {
     @State private var search = ""
     @State private var key = RetryKey<String>()
 
-    enum Choice: String, CaseIterable { case role = "Role", allow = "Allow", never = "Never" }
+    typealias Choice = MemberOverrideRules.Choice
 
     private var changed: Bool {
-        guard let snapshot else { return false }
-        let original = Self.choices(from: snapshot)
-        return original.0 != choices.filter { $0.value != .role } || original.1 != scopes.filter { choices[$0.key] == .allow }
+        guard snapshot != nil else { return false }
+        return MemberOverrideRules.changed(choices: choices, scopes: scopes, from: loaded)
     }
 
     private var firstName: String { member.member.displayName.split(separator: " ").first.map(String.init) ?? "them" }
@@ -291,7 +377,15 @@ struct MemberOverridesView: View {
         (catalog?.capabilities ?? []).filter {
             search.isEmpty || $0.label.localizedCaseInsensitiveContains(search) || $0.description.localizedCaseInsensitiveContains(search)
         }
-        .sorted { (choices[$0.id] ?? .role) != .role && (choices[$1.id] ?? .role) == .role ? true : $0.label < $1.label }
+        // Anything set for this person comes first: a choice made here, or a permission set on the web.
+        .sorted { first, second in
+            let firstSet = isSet(first.id), secondSet = isSet(second.id)
+            return firstSet != secondSet ? firstSet : first.label < second.label
+        }
+    }
+
+    private func isSet(_ capability: String) -> Bool {
+        (choices[capability] ?? .role) != .role || loaded.locked.contains(capability)
     }
 
     /// The quiet sentence under a card (Paper 13 muted, 20 from the edge).
@@ -302,6 +396,23 @@ struct MemberOverridesView: View {
     }
 
     @ViewBuilder private func row(_ capability: RoleBuilderCatalog.Capability) -> some View {
+        if loaded.locked.contains(capability.id) {
+            // Set on the web with a limit or a block the phone can't show, so it is not changed here.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(capability.label).font(Theme.font(16, weight: .medium))
+                Text(MemberOverrideRules.lockedNote).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("member-override-locked-\(capability.id)")
+        } else {
+            editableRow(capability)
+        }
+    }
+
+    @ViewBuilder private func editableRow(_ capability: RoleBuilderCatalog.Capability) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(capability.label).font(Theme.font(16, weight: .medium))
             ThorbisSegmented(options: Choice.allCases.map { ($0, $0.rawValue) },
@@ -318,18 +429,6 @@ struct MemberOverridesView: View {
         .padding(.vertical, 2)
     }
 
-    private static func choices(from snapshot: PermissionOverrideSnapshot) -> ([String: Choice], [String: String]) {
-        var choices: [String: Choice] = [:]
-        var scopes: [String: String] = [:]
-        guard snapshot.kind == "active", let policy = snapshot.policy else { return ([:], [:]) }
-        for grant in policy.grants where grant.effect != "deny" {
-            choices[grant.capability] = .allow
-            scopes[grant.capability] = grant.scope
-        }
-        for capability in policy.userDenies { choices[capability] = .never }
-        return (choices, scopes)
-    }
-
     private func load() async {
         do {
             async let catalogRequest = api.roleBuilderCatalog()
@@ -337,7 +436,9 @@ struct MemberOverridesView: View {
             let (loadedCatalog, loadedSnapshot) = try await (catalogRequest, snapshotRequest)
             catalog = loadedCatalog
             snapshot = loadedSnapshot
-            (choices, scopes) = Self.choices(from: loadedSnapshot)
+            loaded = MemberOverrideRules.load(loadedSnapshot)
+            choices = loaded.choices
+            scopes = loaded.scopes
             error = nil
         } catch is CancellationError {
         } catch { self.error = error.localizedDescription }
@@ -347,10 +448,8 @@ struct MemberOverridesView: View {
         guard let snapshot else { return }
         busy = true
         defer { busy = false }
-        let grants = choices.filter { $0.value == .allow }.keys.sorted()
-            .map { RoleGrant(capability: $0, scope: scopes[$0] ?? "organization") }
-        let denies = choices.filter { $0.value == .never }.keys.sorted()
-        let change = (grants.map { "\($0.capability)@\($0.scope)" } + ["|"] + denies + ["|\(snapshot.expectedVersion)"]).joined(separator: ",")
+        let (grants, denies) = MemberOverrideRules.policy(choices: choices, scopes: scopes, loaded: loaded)
+        let change = MemberOverrideRules.changeKey(grants: grants, denies: denies, expectedVersion: snapshot.expectedVersion)
         do {
             try await api.saveMemberOverride(member.member.memberId, grants: grants, denies: denies,
                                              expectedVersion: snapshot.expectedVersion, idempotencyKey: key.key(for: change))
@@ -360,7 +459,8 @@ struct MemberOverridesView: View {
         } catch is CancellationError {
         } catch {
             key.settle(after: error)
-            self.error = error.isConnectivityFailure ? "Changing access needs a connection." : error.localizedDescription
+            self.error = error.isConnectivityFailure ? "Changing access needs a connection."
+                : MemberOverrideRules.refusal(error) ?? error.localizedDescription
         }
     }
 }

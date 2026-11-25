@@ -27,6 +27,7 @@ final class CustomerEstimateReviewUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-estimate", "--paper-preview-option-long-description", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         let more = app.buttons["Show more, Repair option"]
+        XCTAssertTrue(more.waitForExistence(timeout: 30))
         for _ in 0..<8 where !more.exists { app.swipeUp() }
         XCTAssertTrue(more.waitForExistence(timeout: 20))
         for _ in 0..<8 where !more.isHittable { app.swipeUp() }

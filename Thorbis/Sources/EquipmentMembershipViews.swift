@@ -114,6 +114,9 @@ struct EquipmentEditor: View {
     @State private var confirmRemove = false
     /// Said under "What it is" when the commit is pressed without it; clears as they type.
     @State private var nameProblem: String?
+    /// Set when Save is pressed while a field is too long; the top row then names the first field
+    /// still over, and goes away once none is.
+    @State private var showLengthError = false
     /// "Scan data plate" beside the serial number (Paper 86C): opens the scanner, which hands
     /// back the brand, model and serial it read.
     @State private var scanning = false
@@ -128,6 +131,9 @@ struct EquipmentEditor: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if let error { ListErrorRow(message: error) }
+                    if showLengthError, let long = input.tooLongFields.first {
+                        ListErrorRow(message: "\(long.label) is too long. Shorten it, then save.")
+                    }
                     formCard {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Name").font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
@@ -135,20 +141,20 @@ struct EquipmentEditor: View {
                                 .font(Theme.font(17, weight: .medium))
                                 .focused($nameFocused)
                                 .accessibilityLabel("Name")
-                            if let nameProblem { FieldProblem(message: nameProblem) }
+                            if let problem = nameProblem ?? lengthProblem(.name) { FieldProblem(message: problem) }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .onChange(of: input.name) { _, _ in nameProblem = nil }
                         WellDivider(leading: 16)
-                        stackedField("Type", text: binding(\.kind), prompt: "Air conditioner \u{00B7} condenser")
+                        stackedField("Type", text: binding(\.kind), prompt: "Air conditioner \u{00B7} condenser", problem: lengthProblem(.kind))
                         WellDivider(leading: 16)
-                        stackedField("Brand", text: binding(\.brand), prompt: "Trane")
+                        stackedField("Brand", text: binding(\.brand), prompt: "Trane", problem: lengthProblem(.brand))
                         WellDivider(leading: 16)
-                        stackedField("Model", text: binding(\.model), prompt: "XR14 \u{00B7} 4TTR4036L1000A")
+                        stackedField("Model", text: binding(\.model), prompt: "XR14 \u{00B7} 4TTR4036L1000A", problem: lengthProblem(.model))
                         WellDivider(leading: 16)
                         HStack(spacing: 4) {
-                            stackedField("Serial number", text: binding(\.serialNumber), prompt: "19283KUF4F")
+                            stackedField("Serial number", text: binding(\.serialNumber), prompt: "19283KUF4F", problem: lengthProblem(.serialNumber))
                                 .textInputAutocapitalization(.characters)
                             Button { scanning = true } label: {
                                 HStack(spacing: 6) {
@@ -194,6 +200,7 @@ struct EquipmentEditor: View {
                             TextField("", text: binding(\.notes), prompt: .placeholder("Filters, access, history…"), axis: .vertical)
                                 .lineLimit(2...6).font(Theme.font(15))
                                 .accessibilityLabel("Notes")
+                            if let problem = lengthProblem(.notes) { FieldProblem(message: problem) }
                         }
                         .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -249,7 +256,14 @@ struct EquipmentEditor: View {
                          if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                              nameProblem = Self.nameMissing
                              nameFocused = true
+                         } else if let long = input.tooLongFields.first {
+                             // Each long field already says so under it; this names the first one
+                             // here too, since it may be out of sight.
+                             showLengthError = true
+                             if long == .name { nameFocused = true }
                          } else {
+                             error = nil
+                             showLengthError = false
                              Task { await save() }
                          }
                      }) { dismiss() }
@@ -261,8 +275,13 @@ struct EquipmentEditor: View {
     }
 
     /// A label above its answer (13 muted over 17 Medium), typed in place.
-    private func stackedField(_ label: String, text: Binding<String>, prompt: String) -> some View {
-        PaperStackedField(label: label, text: text, prompt: prompt)
+    private func stackedField(_ label: String, text: Binding<String>, prompt: String, problem: String?) -> some View {
+        PaperStackedField(label: label, text: text, prompt: prompt, problem: problem)
+    }
+
+    /// Shown under a field while it is longer than the server takes; the text is never cut.
+    private func lengthProblem(_ field: EquipmentTextField) -> String? {
+        input.isTooLong(field) ? field.tooLongMessage : nil
     }
 
     /// An inline date row: the label on the left, the date (or Add) on the right, with a way to clear it.
@@ -511,7 +530,8 @@ struct JobAddPlanSheet: View {
             dismiss()
         } catch is CancellationError {
         } catch {
-            self.error = (error as? Problem)?.status == 403 ? MembershipAccess.membershipRefused : error.localizedDescription
+            // Enrolling sends only the plan and the start day, never a percent off.
+            self.error = MembershipAccess.saveError(error, plan: false)
         }
     }
 }
@@ -541,7 +561,12 @@ extension CustomerMembershipSection {
             choosing = false
             error = nil
             await load()
-        } catch { self.error = error.localizedDescription; choosing = false }
+        } catch {
+            // Enrolling sends only the plan and the start day, so a refusal is about the membership
+            // itself, never the percent off. Plain words, not the server's detail.
+            self.error = MembershipAccess.saveError(error, plan: false)
+            choosing = false
+        }
     }
 
     private func cancel(_ membership: MembershipRecord) async {

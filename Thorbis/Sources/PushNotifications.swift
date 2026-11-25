@@ -96,6 +96,14 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         session.can("organization.performance.view")
     }
 
+    /// Could this person be sent Payment received (owners and dispatchers who may view the
+    /// invoice)? Only names payments in the words; the server decides. `can` adds what the
+    /// capability set cannot say: a session that is not ready or has expired gives false, so the
+    /// words say less, never more. The rule itself is `AlertWords.includesPayments`.
+    static func receivesPaymentAlerts(_ session: SessionController) -> Bool {
+        session.can("invoice.view") && AlertWords.includesPayments(capabilities: session.capabilities)
+    }
+
     // MARK: Notification center
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async

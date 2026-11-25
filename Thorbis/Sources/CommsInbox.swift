@@ -116,12 +116,13 @@ final class CommsInboxModel: ObservableObject {
     }
 
     /// The notices API marks the whole feed read in batches (POST /v1/staff/notices/read).
-    func markNoticesRead(api: APIClient) async {
-        guard !noticesLoading else { return }
+    /// With no person or workspace known, nothing is sent.
+    func markNoticesRead(api: APIClient, actorID: String?, organizationID: String?) async {
+        guard !noticesLoading, let actorID, let organizationID else { return }
         noticesLoading = true
         defer { noticesLoading = false }
         do {
-            let result = try await api.markStaffNoticesRead(cursor: readCursor)
+            let result = try await api.markStaffNoticesRead(actorID: actorID, organizationID: organizationID, cursor: readCursor)
             guard result.nextCursor != readCursor || result.nextCursor == nil else {
                 throw Problem(title: "Notice acknowledgement stopped", status: nil, detail: "The server repeated its cursor.")
             }
@@ -132,6 +133,10 @@ final class CommsInboxModel: ObservableObject {
             unreadState = page.unreadState
             noticesError = nil
         } catch is CancellationError {
+        } catch let problem as Problem where problem.status == 409 && problem.code == "identity_changed" {
+            // The session moved to another person or workspace before the server ran this, and it
+            // marked nothing. The sweep's continuation belonged to the old identity: end it, no retry.
+            readCursor = nil
         } catch { noticesError = error.localizedDescription }
     }
 
@@ -158,6 +163,9 @@ final class CommsInboxModel: ObservableObject {
 /// opens on its own screen.
 struct CommsInboxView: View {
     let access: CommsInboxAccess
+    /// Who the notices read is sent as (the server's refusal precondition).
+    private let actorID: String?
+    private let organizationID: String?
     @EnvironmentObject private var api: APIClient
     @StateObject private var model: CommsInboxModel
     @ObservedObject private var local: CommsLocalStore
@@ -178,6 +186,8 @@ struct CommsInboxView: View {
 
     init(access: CommsInboxAccess, actorID: String?, organizationID: String?) {
         self.access = access
+        self.actorID = actorID
+        self.organizationID = organizationID
         _model = StateObject(wrappedValue: CommsInboxModel(seen: CommsCallSeen(defaults: Self.persistsSeen ? .standard : nil,
                                                                                 actorID: actorID, organizationID: organizationID)))
         _local = ObservedObject(wrappedValue: CommsLocalStore.shared(actorID: actorID, organizationID: organizationID))
@@ -303,7 +313,7 @@ struct CommsInboxView: View {
             // read state on this phone, so the row says what it marks.
             items.append(ThorbisMenuItem(model.readCursor == nil ? "Mark all notices read" : "Continue marking read",
                                          icon: "checkmark", isDisabled: model.noticesLoading) {
-                Task { await model.markNoticesRead(api: api) }
+                Task { await model.markNoticesRead(api: api, actorID: actorID, organizationID: organizationID) }
             })
         }
         let lenses = CommsInboxMoreFilter.available(access)

@@ -82,6 +82,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["saved-work-done"].isHittable)
         capture(app, "Mixed saved work with native Done")
         app.buttons["saved-work-done"].tap()
+        XCTAssertTrue(app.waitForReviewToClose(), "Done closes the review")
         XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
         XCTAssertFalse(app.savedWorkReview.exists)
     }
@@ -108,6 +109,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["saved-work-done"].isHittable)
         capture(app, "Nested job banner returns to same review")
         app.buttons["saved-work-done"].tap()
+        XCTAssertTrue(app.waitForReviewToClose(), "Done closes the review")
         XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
     }
     func testOfflineReviewKeepsSyncDisabledAndDiscardNeedsConfirmation() {
@@ -244,6 +246,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         capture(app, "Large text dark recovery actions")
         XCTAssertTrue(app.buttons["saved-work-done"].isHittable)
         app.buttons["saved-work-done"].tap()
+        XCTAssertTrue(app.waitForReviewToClose(), "Done closes the review")
         XCTAssertTrue(app.waitForSchedule(), "Leaving the review returns to Schedule")
     }
     func testMixedSavedWorkOpensAndSurvivesRelaunch() {
@@ -279,6 +282,15 @@ private extension XCUIApplication {
     func waitForSchedule(timeout: TimeInterval = 5) -> Bool {
         let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: scheduleTitle)
         return XCTWaiter.wait(for: [shown], timeout: timeout) == .completed
+    }
+    /// The review's list has left the tree, waited for directly after a tap on Done. The simulator can
+    /// cancel that tap (run 45558161330, shard 3: "unknown digitizer" 30 ms in, the sheet stayed), and
+    /// CI runs a test again only when a "Waiting" step directly after the tap is what failed; the
+    /// Schedule wait above writes only predicate checks. So this is a plain element wait, on the list
+    /// itself: `savedWorkReview` reads the bar first, which is a step of its own, and the bar alone
+    /// can be missing while the review is up.
+    func waitForReviewToClose(timeout: TimeInterval = 5) -> Bool {
+        scrollViews["saved-work-review"].waitForNonExistence(timeout: timeout)
     }
     /// The discard confirmation is a Thorbis confirm sheet (not a system alert): its question is
     /// the sheet's title, and its choices are the "Cancel" and "Discard" buttons.

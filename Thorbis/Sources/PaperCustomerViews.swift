@@ -1230,46 +1230,6 @@ struct CustomerDetailView: View {
         PaperDetailRow(label: title) { value().labelStyle(.titleOnly).tint(Theme.foreground) }
             .padding(.horizontal, PaperCardMetrics.inset)
     }
-    /// The customer's open job: what a dispatcher or tech opens a customer to find.
-    @ViewBuilder private var nextVisit: some View {
-        if let summary = JobFiltering.customerJobSummary(jobs, customerID: customer.id) {
-            let job = summary.job
-            // One heading and one word: "Open job", and "Late" when a booked visit's time has passed
-            // (never "Past scheduled time" above a row that says "Scheduled").
-            let late = ["scheduled", "dispatched"].contains(job.status) && (JobFiltering.date(job.scheduledFor).map { $0 < .now } ?? false)
-            VStack(alignment: .leading, spacing: 0) {
-                PaperSection(title: summary.openCount > 1 ? "Open jobs" : "Open job", count: summary.openCount > 1 ? summary.openCount : nil) {
-                    NavigationLink(value: job) {
-                        // The jobs row grammar: the street, the problem, when and who; the status word trails.
-                        JobRoomRow(job: job, street: street(for: job.locationId),
-                                   when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
-                                   who: tech(job.assignedToUserId), late: late, titleLines: 2, inset: PaperCardMetrics.inset)
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityIdentifier("customer-next-visit")
-                } accessory: {
-                    if summary.openCount > 1 && !typeSize.isAccessibilitySize { seeAllJobs.padding(.vertical, -9) }
-                }
-                if summary.openCount > 1 && typeSize.isAccessibilitySize { seeAllJobs }
-            }
-        }
-    }
-
-    private var seeAllJobs: some View {
-        // The section label's own ink and size; 44 to tap.
-        Button { openPart = .jobs } label: {
-            Text("See all jobs").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                .frame(minHeight: 44).contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityIdentifier("customer-see-all-jobs")
-    }
-
-    private func street(for locationID: String?) -> String? {
-        guard let locationID, let place = locations.first(where: { $0.id == locationID }) else { return nil }
-        return NextStopPlace(jobID: "", organizationID: "", customerID: "", address: place.address).firstLine
-    }
-
     /// Only the signed-in person can be named; other techs need the assignee roster (backend gap).
     private func tech(_ userID: String?) -> String? {
         guard let userID, userID == session.user?.id else { return nil }
@@ -1315,9 +1275,10 @@ struct CustomerDetailView: View {
         if let record, record.id == customer.id, let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
            scope.organizationID.caseInsensitiveCompare(record.organizationId) == .orderedSame {
             let starred = favorites.isBound(to: scope) && favorites.entries.contains { $0.kind == .customer && $0.id == record.id.lowercased() }
+            // The row does what its words say: "Add" only adds and "Remove" only removes.
             items.append(ThorbisMenuItem(starred ? "Remove from favorites" : "Add to favorites", icon: starred ? "star.slash" : "star") {
                 favorites.bind(scope)
-                favorites.toggle(.customer, id: record.id)
+                favorites.set(.customer, id: record.id, favorite: !starred)
             })
         }
         if canEdit && !onPage {

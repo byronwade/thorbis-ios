@@ -4,6 +4,8 @@ import XCTest
 @MainActor
 final class WorkspaceAPITests: XCTestCase {
     private let itemID = "11111111-1111-4111-8111-111111111111"
+    private let actor = "44444444-4444-4444-8444-444444444444"
+    private let org = "55555555-5555-4555-8555-555555555555"
 
     func testStaffNoticeFeedRetainsUnreadUnknownAndHistoryCursor() async throws {
         let first = #"{"items":[{"id":"22222222-2222-4222-8222-222222222222","jobId":"33333333-3333-4333-8333-333333333333","title":"Job booked","meta":"Tomorrow","at":"2026-10-26T12:00:00Z","read":false}],"unreadState":"unknown","nextCursor":"22222222-2222-4222-8222-222222222222"}"#
@@ -25,7 +27,7 @@ final class WorkspaceAPITests: XCTestCase {
     func testStaffNoticeReadSweepPreservesOpaqueContinuation() async throws {
         let api = APIClient(session: URLProtocolFixture.session([.init(200, #"{"marked":4,"nextCursor":"opaque-sweep-token"}"#)]), baseURL: "https://app.thorbis.com")
 
-        let result = try await api.markStaffNoticesRead(limit: 50, cursor: "prior-token")
+        let result = try await api.markStaffNoticesRead(actorID: actor, organizationID: org, limit: 50, cursor: "prior-token")
 
         XCTAssertEqual(result.marked, 4)
         XCTAssertEqual(result.nextCursor, "opaque-sweep-token")
@@ -35,6 +37,35 @@ final class WorkspaceAPITests: XCTestCase {
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
         XCTAssertEqual(body["limit"] as? Int, 50)
         XCTAssertEqual(body["cursor"] as? String, "prior-token")
+        XCTAssertEqual(body["expectedIdentity"] as? [String: String], ["actorId": actor, "organizationId": org])
+    }
+
+    func testStaffNoticeReadFirstPageOmitsCursorAndSendsIdentity() async throws {
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, #"{"read":true,"marked":0,"nextCursor":null}"#)]), baseURL: "https://app.thorbis.com")
+
+        let result = try await api.markStaffNoticesRead(actorID: actor, organizationID: org)
+
+        XCTAssertNil(result.nextCursor)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        // The server refuses an expectedIdentity with any key but these two (400 on expectedIdentity).
+        XCTAssertEqual(Set(body.keys), ["limit", "expectedIdentity"])
+        XCTAssertEqual(body["limit"] as? Int, 50)
+        XCTAssertEqual(body["expectedIdentity"] as? [String: String], ["actorId": actor, "organizationId": org])
+    }
+
+    func testStaffNoticeReadIdentityRefusalSurfacesConflictCode() async throws {
+        let refusal = #"{"type":"https://thorbis.com/problems/conflict","title":"conflict","status":409,"category":"conflict","detail":"the active identity changed; refresh before acknowledging notices","code":"identity_changed"}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(409, refusal)]), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await api.markStaffNoticesRead(actorID: actor, organizationID: org)
+            XCTFail("A changed identity must not read as marked")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 409)
+            XCTAssertEqual(problem.code, "identity_changed")
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
     }
 
     func testRevenueReportUsesServerIntegerCentsAndTruncationFlag() async throws {

@@ -177,11 +177,4 @@ final class TruckStockStore {
               let book = try? JSONDecoder().decode(TruckStockBook.self, from: data) else { return 0 }
         return TruckStockRules.lowCount(book.items)
     }
-
-    /// The same count read off the main thread.
-    nonisolated static func loadLowCount(organizationID: String, userID: String) async -> Int {
-        await Task.detached(priority: .utility) {
-            lowCount(organizationID: organizationID, userID: userID, directory: nil)
-        }.value
-    }
 }

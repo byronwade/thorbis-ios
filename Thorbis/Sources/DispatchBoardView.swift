@@ -620,7 +620,7 @@ struct DispatchBoardView: View {
             if await store.refresh(api) == .failed { error = "Moved. The board could not refresh; pull to refresh." }
         } catch is CancellationError {
         } catch let problem as Problem where problem.status == 409 {
-            error = "Someone changed this job's tech meanwhile. Pull to refresh and try again."
+            error = JobAssignmentRefusal.boardMessage(for: problem)
             _ = await store.refresh(api)
         } catch {
             self.error = error.localizedDescription

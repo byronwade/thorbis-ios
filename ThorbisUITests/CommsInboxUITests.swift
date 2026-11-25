@@ -358,7 +358,9 @@ final class CommsInboxUITests: XCTestCase {
     func testSendWithMailPreservesFieldsAndReturnsToDraft() {
         continueAfterFailure = false
         let app = launch(["--paper-preview-inbox-section", "email", "--paper-preview-mail-handoff-test"])
-        app.buttons["New email"].firstMatch.tap()
+        let compose = app.buttons["New email"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20), app.debugDescription)
+        compose.tap()
         let to = app.textFields["inbox-mail-to"]
         XCTAssertTrue(to.waitForExistence(timeout: 10)); to.tap(); to.typeText("customer@example.com")
         app.buttons["Add Cc or Bcc"].tap()
@@ -399,6 +401,7 @@ final class CommsInboxUITests: XCTestCase {
 
     func testATextIsSavedAsADraftNotSent() {
         let app = launch(["--paper-preview-inbox-thread", "text"])
+        XCTAssertTrue(app.descendants(matching: .any)["inbox-text-field"].waitForExistence(timeout: 20), app.debugDescription)
         let field = app.textViews["inbox-text-field"].exists ? app.textViews["inbox-text-field"] : app.textFields["inbox-text-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 20), app.debugDescription)
         field.tap()

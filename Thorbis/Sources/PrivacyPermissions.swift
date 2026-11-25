@@ -118,14 +118,15 @@ struct DevicePermissionRow: Identifiable, Equatable, Sendable {
     /// The rows in Paper's order, purposes trimmed from the Info.plist purpose strings.
     static func rows(location: DevicePermissionState, camera: DevicePermissionState,
                      notifications: DevicePermissionState, microphone: DevicePermissionState,
-                     speech: DevicePermissionState, calendar: DevicePermissionState) -> [DevicePermissionRow] {
+                     speech: DevicePermissionState, calendar: DevicePermissionState,
+                     payments: Bool = false) -> [DevicePermissionRow] {
         [
             DevicePermissionRow(id: "location", symbol: "location", title: "Location",
                                 purpose: "Schedule map, drive time and card payments", state: location),
             DevicePermissionRow(id: "camera", symbol: "camera", title: "Camera",
                                 purpose: "Job photos and data plate scans", state: camera),
             DevicePermissionRow(id: "notifications", symbol: "bell", title: "Notifications",
-                                purpose: "New jobs and schedule changes", state: notifications),
+                                purpose: AlertWords.summary(payments: payments), state: notifications),
             DevicePermissionRow(id: "microphone", symbol: "mic", title: "Microphone",
                                 purpose: "Dictating notes and recording job videos", state: microphone),
             DevicePermissionRow(id: "speech", symbol: "waveform", title: "Speech recognition",
@@ -144,6 +145,12 @@ struct PrivacyPermissionsView: View {
     @State private var rows: [DevicePermissionRow] = []
     /// The explainer shown before the system asks (Paper 71).
     @State private var primer: PermissionPrimer?
+    /// Whether the person could be sent Payment received; Account and data knows, from the session.
+    let payments: Bool
+
+    init(payments: Bool = false) {
+        self.payments = payments
+    }
 
     var body: some View {
         ScrollView {
@@ -195,16 +202,17 @@ struct PrivacyPermissionsView: View {
             notifications: .notifications(notifications),
             microphone: .microphone(AVAudioApplication.shared.recordPermission),
             speech: .speech(SFSpeechRecognizer.authorizationStatus()),
-            calendar: .calendar(EKEventStore.authorizationStatus(for: .event))
+            calendar: .calendar(EKEventStore.authorizationStatus(for: .event)),
+            payments: payments
         )
     }
 
     private func asksHere(_ row: DevicePermissionRow) -> Bool {
-        row.state == .notAsked && PermissionPrimer.primer(for: row.id) != nil
+        row.state == .notAsked && PermissionPrimer.primer(for: row.id, payments: payments) != nil
     }
 
     private func tapped(_ row: DevicePermissionRow) {
-        if row.state == .notAsked, let explain = PermissionPrimer.primer(for: row.id) {
+        if row.state == .notAsked, let explain = PermissionPrimer.primer(for: row.id, payments: payments) {
             primer = explain
         } else {
             openSettings()
@@ -247,8 +255,15 @@ struct PermissionPrimer: Identifiable, Equatable, Sendable {
     static let notifications = PermissionPrimer(
         kind: .notifications, symbol: "bell", title: "Know when plans change",
         detail: "Dispatch moves jobs during the day. Without alerts you'll only see it next time you open the app.",
-        points: ["New jobs", "Schedule changes", "The morning digest, if you turn it on"],
+        points: AlertWords.primerPoints(payments: false),
         allow: "Continue")
+
+    /// The same explainer for someone who could be sent Payment received. Only where the session
+    /// is in reach; the automatic one at sign-in keeps `notifications`.
+    static let notificationsWithPayments = PermissionPrimer(
+        kind: notifications.kind, symbol: notifications.symbol, title: notifications.title,
+        detail: notifications.detail, points: AlertWords.primerPoints(payments: true),
+        allow: notifications.allow)
 
     static let camera = PermissionPrimer(
         kind: .camera, symbol: "camera", title: "Camera for the job",
@@ -269,10 +284,10 @@ struct PermissionPrimer: Identifiable, Equatable, Sendable {
         allow: "Continue")
 
     /// The explainer for a Device access row, by the row's id.
-    static func primer(for rowID: String) -> PermissionPrimer? {
+    static func primer(for rowID: String, payments: Bool = false) -> PermissionPrimer? {
         switch rowID {
         case "location": return .location
-        case "notifications": return .notifications
+        case "notifications": return payments ? .notificationsWithPayments : .notifications
         case "camera": return .camera
         case "microphone", "speech": return .dictation
         case "calendar": return .calendar

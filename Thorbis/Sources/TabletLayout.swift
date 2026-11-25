@@ -665,8 +665,7 @@ struct TabletRoot: View {
             let open = TodayNumbers.open(store.jobs)
             return PlaceCount.number(open, spoken: "\(open) open")
         case .money:
-            guard let due = DayMoney.shared.totalDue, due > 0 else { return nil }
-            return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
+            return PlaceCount.due(DayMoney.shared.totalDue)
         default: return nil
         }
     }

@@ -137,10 +137,11 @@ extension XCUIApplication {
     /// virtual keyboard for each press and removes it about 0.2 s later. backboardd (BackBoard
     /// EventDelivery log) hands a ⌘ chord to the app as a command only once the app has registered
     /// its key commands ("new key command registrations for pid:N"); before that the letter lands
-    /// without ⌘, or SpringBoard takes the chord. The app registers at launch or after the first
-    /// keyboard comes (on the iPad 0.2-0.7 s later), and now and then only after a later one: then
-    /// both presses miss (CI runs 45133610900 and 45148171838, BYR-1843; scripts/ci_cancelled_taps.py
-    /// tells that case apart in CI). The checks behind this (#139):
+    /// without ⌘ (⌘K, ⇧⌘N), or SpringBoard takes the chord when its own table holds it (⌘F, ⌃⌘S).
+    /// The app registers at launch or after the first keyboard comes (on the iPad 0.2-0.7 s later),
+    /// and now and then only after a later one: then both presses miss (CI runs 45133610900,
+    /// 45148171838 and 45573322329, BYR-1843; scripts/ci_cancelled_taps.py tells both forms apart
+    /// in CI). The checks behind this (#139):
     /// - Stock Safari's first ⌘T routes the same way.
     /// - UIKit's own ⌘A (select all) in the search field fails on the first chord in 3 of 3 runs
     ///   ("Kitchen" + ⌘A + x gives "Kitchenx") and works on the second.

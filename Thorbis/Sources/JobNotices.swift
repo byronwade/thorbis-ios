@@ -43,61 +43,12 @@ struct JobNoticeStatus: Decodable, Identifiable, Hashable {
 }
 
 extension APIClient {
-    func jobNotices(_ jobID: String) async throws -> (admission: String?, items: [JobNoticeStatus]) {
-        struct Page: Decodable { let admission: String?; let items: [JobNoticeStatus] }
+    /// The newest 100 notices. `more` is true when the server has older ones past this page.
+    func jobNotices(_ jobID: String) async throws -> (admission: String?, items: [JobNoticeStatus], more: Bool) {
+        struct Page: Decodable { let admission: String?; let items: [JobNoticeStatus]; let nextCursor: String? }
         let key = try Self.pathSegment(jobID)
         let page: Page = try await send("GET", "/v1/jobs/\(key)/notices",
                                         queryItems: [URLQueryItem(name: "limit", value: "100")])
-        return (page.admission, page.items)
-    }
-}
-
-/// Web parity: who was told about this booking and whether it reached them (role, channel and
-/// status only, never an address or the message). Hidden when the workspace has booking notices
-/// off, the read is refused, or the server is older.
-struct JobNoticesSection: View {
-    let jobID: String
-    @EnvironmentObject private var api: APIClient
-    @EnvironmentObject private var session: SessionController
-    @State private var items: [JobNoticeStatus] = []
-    @State private var admission: String?
-    @State private var loaded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(width: 0, height: 0)
-            if loaded {
-                let failed = items.filter { ["failed", "missing_contact"].contains($0.status) }.count
-                JobPanelSection(title: "Notices", count: failed > 0 ? "\(failed) not sent" : items.isEmpty ? nil : "\(items.count)") {
-                    if items.isEmpty {
-                        JobPanelRow(title: admission == "not_scheduled" ? "No time booked yet" : "Nothing sent yet",
-                                    subtitle: admission == "not_scheduled" ? "Booking notices go out once the job has a time."
-                                                                           : "Booking and on-the-way notices show here once they go out.",
-                                    titleSize: 15)
-                    }
-                    ForEach(items.prefix(8)) { notice in
-                        JobPanelRow(title: notice.who, subtitle: notice.line, titleSize: 15) {
-                            StatusWord(text: notice.statusWord, tint: notice.tint)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                }
-            }
-        }
-        .task(id: "\(jobID)|\(session.generation)|\(session.isOffline)") { await load() }
-    }
-
-    private func load() async {
-        guard !session.isOffline else { return }
-        do {
-            let page = try await api.jobNotices(jobID)
-            items = page.items.sorted { $0.createdAt > $1.createdAt }
-            admission = page.admission
-            loaded = true
-        } catch is CancellationError {
-        } catch {
-            // Notices off for this workspace, no access, or an older server: leave the section out.
-            loaded = false
-        }
+        return (page.admission, page.items, page.nextCursor != nil)
     }
 }

@@ -253,17 +253,6 @@ struct EstimateRevisionEditorState: Equatable {
         options.removeAll { $0.id == id }
     }
 
-    mutating func addOptionLine(optionID: String) {
-        guard let index = options.firstIndex(where: { $0.id == optionID }),
-              options[index].lines.count < 500 else { return }
-        options[index].lines.append(Self.blankLine())
-    }
-
-    mutating func removeOptionLine(optionID: String, lineID: UUID) {
-        guard let index = options.firstIndex(where: { $0.id == optionID }) else { return }
-        options[index].lines.removeAll { $0.id == lineID }
-    }
-
     mutating func addPriceBookItem(_ item: PriceBookListItem, optionID: String? = nil) throws {
         guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
         guard item.archivedAt == nil else { throw EstimateRevisionEditorError.archivedPriceBookItem }

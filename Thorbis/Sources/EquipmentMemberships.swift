@@ -85,6 +85,59 @@ struct EquipmentInput: Encodable, Equatable {
     private enum CodingKeys: String, CodingKey { case name, locationId, kind, brand, model, serialNumber, installedOn, warrantyExpiresOn, notes }
 }
 
+/// A typed field of `EquipmentInput` the server caps in length. The server trims, then counts
+/// UTF-16 units (JavaScript string length), so this does the same.
+enum EquipmentTextField: CaseIterable {
+    case name, kind, brand, model, serialNumber, notes
+
+    var limit: Int {
+        switch self {
+        case .name: 200
+        case .notes: 2000
+        case .kind, .brand, .model, .serialNumber: 120
+        }
+    }
+
+    /// The field's label in the form.
+    var label: String {
+        switch self {
+        case .name: "Name"
+        case .kind: "Type"
+        case .brand: "Brand"
+        case .model: "Model"
+        case .serialNumber: "Serial number"
+        case .notes: "Notes"
+        }
+    }
+
+    /// Said under the field while it is over the limit. What was typed is kept.
+    var tooLongMessage: String {
+        let limit = self == .notes ? "2,000" : String(self.limit)
+        return "Up to \(limit) characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+    }
+}
+
+extension EquipmentInput {
+    func text(_ field: EquipmentTextField) -> String? {
+        switch field {
+        case .name: name
+        case .kind: kind
+        case .brand: brand
+        case .model: model
+        case .serialNumber: serialNumber
+        case .notes: notes
+        }
+    }
+
+    func isTooLong(_ field: EquipmentTextField) -> Bool {
+        guard let value = text(field) else { return false }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count > field.limit
+    }
+
+    /// The fields the server would refuse as too long, in form order.
+    var tooLongFields: [EquipmentTextField] { EquipmentTextField.allCases.filter { isTooLong($0) } }
+}
+
 /// A new unit on the wire. The server refuses null when adding equipment, so empty fields are
 /// left out; only an edit may send null.
 private struct NewEquipmentBody: Encodable {
@@ -162,7 +215,9 @@ struct MembershipPlanRequest: Encodable {
 }
 
 /// A customer's membership as edited. Days are "yyyy-MM-dd"; an emptied field is sent as null so
-/// the server clears it. Name, kind, status and the discount are always sent.
+/// the server clears it. Name, kind and status are always sent. The percent off is sent only when
+/// it differs from the one the membership was saved with: left out, the server keeps the stored
+/// percent, and a new one needs the company settings permission (organization.settings.edit).
 struct MembershipInput: Encodable, Equatable {
     var locationId: String?
     var name: String
@@ -172,6 +227,8 @@ struct MembershipInput: Encodable, Equatable {
     var renewsOn: String?
     var status: String
     var discountPercent: Int
+    /// The percent off the membership was saved with. Never sent.
+    var originalDiscountPercent: Int
     var notes: String?
 
     init(_ record: MembershipRecord) {
@@ -183,8 +240,12 @@ struct MembershipInput: Encodable, Equatable {
         renewsOn = record.renewsOn
         status = record.status
         discountPercent = record.discountPercent
+        originalDiscountPercent = record.discountPercent
         notes = record.notes
     }
+
+    /// True when this edit carries a new percent off.
+    var discountChanged: Bool { discountPercent != originalDiscountPercent }
 
     /// Trimmed, or nil when nothing is left.
     static func text(_ value: String?) -> String? {
@@ -201,7 +262,7 @@ struct MembershipInput: Encodable, Equatable {
         try c.encode(Self.text(startsOn), forKey: .startsOn)
         try c.encode(Self.text(renewsOn), forKey: .renewsOn)
         try c.encode(status, forKey: .status)
-        try c.encode(discountPercent, forKey: .discountPercent)
+        if discountChanged { try c.encode(discountPercent, forKey: .discountPercent) }
         try c.encode(Self.text(notes), forKey: .notes)
     }
     private enum CodingKeys: String, CodingKey { case locationId, name, kind, cadence, startsOn, renewsOn, status, discountPercent, notes }
